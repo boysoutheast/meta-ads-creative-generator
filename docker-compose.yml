@@ -1,0 +1,34 @@
+version: '3.8'
+
+services:
+  backend:
+    build: ./backend
+    ports:
+      - "4000:4000"
+    environment:
+      - NODE_ENV=development
+      - PORT=4000
+      - FRONTEND_URL=http://localhost:3000
+      - APIMART_API_KEY=${APIMART_API_KEY}
+      - APIMART_BASE_URL=${APIMART_BASE_URL:-https://apimart.ai/api/v1}
+      - IMAGE_MODEL=${IMAGE_MODEL:-dall-e-3}
+      - VIDEO_MODEL=${VIDEO_MODEL:-runway-gen3}
+      - VISION_MODEL=${VISION_MODEL:-gpt-4o}
+    volumes:
+      - ./backend/uploads:/app/uploads
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:4000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:4000
+    depends_on:
+      - backend
