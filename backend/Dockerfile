@@ -1,27 +1,20 @@
 FROM node:20-alpine
 
-# Install ffmpeg for video frame extraction
-RUN apk add --no-cache ffmpeg
+RUN apk add --no-cache ffmpeg openssl
 
 WORKDIR /app
 
-# Copy package files
+# Copy package files + Prisma schema first so postinstall can generate client
 COPY package*.json ./
+COPY prisma ./prisma
 
-# Install dependencies
-RUN npm ci --only=production
+# Install with all deps (skip postinstall, we'll run it after schema is in place — actually schema already copied above so postinstall works)
+RUN npm ci --omit=dev || npm install --omit=dev
 
-# Copy source
+# Copy app source
 COPY . .
 
-# Create uploads directory
 RUN mkdir -p uploads
 
-# Expose port
-EXPOSE 4000
-
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-  CMD wget --no-verbose --tries=1 --spider http://localhost:4000/health || exit 1
-
-CMD ["node", "src/index.js"]
+# Use start script which runs prisma db push then node
+CMD ["npm", "start"]
