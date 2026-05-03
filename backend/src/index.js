@@ -4,65 +4,67 @@ require('express-async-errors');
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
-const morgan = require('morgan');
 const path = require('path');
 const config = require('./config');
+const logger = require('./lib/logger');
+const requestLogger = require('./middleware/requestLogger');
 
+// Existing creative routes (kept for back-compat with v1 frontend)
 const generateRoutes = require('./routes/generate');
 const analyzeRoutes = require('./routes/analyze');
 const scaleRoutes = require('./routes/scale');
 const createRoutes = require('./routes/create');
 
+// Phase 1 new routes
+const healthRoutes = require('./routes/health');
+const authRoutes = require('./routes/auth');
+const libraryRoutes = require('./routes/library');
+const singleImageRoutes = require('./routes/single-image');
+
 const app = express();
 
-// Security & middleware
+app.set('trust proxy', 1);
 app.use(helmet());
 app.use(
   cors({
-    origin: [config.frontendUrl, 'http://localhost:3000', 'https://*.vercel.app'],
+    origin: (origin, cb) => {
+      if (!origin) return cb(null, true); // curl, server-to-server
+      const allowed = [config.frontendUrl, 'http://localhost:3000'];
+      const isVercelPreview = /\.vercel\.app$/.test(new URL(origin).hostname);
+      if (allowed.includes(origin) || isVercelPreview) return cb(null, true);
+      return cb(new Error(`CORS: origin ${origin} not allowed`));
+    },
     credentials: true,
   })
 );
-app.use(morgan(config.nodeEnv === 'production' ? 'combined' : 'dev'));
+app.use(requestLogger);
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
-
-// Serve uploaded files temporarily
 app.use('/uploads', express.static(path.resolve(config.upload.uploadDir)));
 
-// Health check
-app.get('/health', (req, res) => {
-  res.json({
-    status: 'ok',
-    timestamp: new Date().toISOString(),
-    version: process.env.npm_package_version || '1.0.0',
-    env: config.nodeEnv,
-  });
-});
+// Health (split — pure liveness must NEVER touch DB)
+app.use('/health', healthRoutes);
 
-// API Routes
+// API
+app.use('/api/auth', authRoutes);
+app.use('/api/library', libraryRoutes);
+app.use('/api/scale/single-image', singleImageRoutes);
+
+// Existing v1 routes
 app.use('/api/generate', generateRoutes);
 app.use('/api/analyze', analyzeRoutes);
-app.use('/api/scale', scaleRoutes);   // Menu 1: Scaling Konten Winning
-app.use('/api/create', createRoutes); // Menu 2: Create with Reference
+app.use('/api/scale', scaleRoutes);
+app.use('/api/create', createRoutes);
 
-// 404 handler
 app.use((req, res) => {
   res.status(404).json({ error: `Route not found: ${req.method} ${req.path}` });
 });
 
-// Global error handler
 app.use((err, req, res, next) => {
-  console.error('Error:', err.message);
-  if (config.nodeEnv !== 'production') {
-    console.error(err.stack);
-  }
-
-  // Multer errors
+  req.log?.error({ err: err.message, stack: err.stack }, 'request_error');
   if (err.code === 'LIMIT_FILE_SIZE') {
     return res.status(400).json({ error: `File too large. Max size: ${config.upload.maxFileSizeMB}MB` });
   }
-
   const status = err.status || err.statusCode || 500;
   res.status(status).json({
     error: err.message || 'Internal server error',
@@ -72,9 +74,7 @@ app.use((err, req, res, next) => {
 
 const PORT = config.port;
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`🚀 Server running on port ${PORT} [${config.nodeEnv}]`);
-  console.log(`📡 API: http://localhost:${PORT}/api`);
-  console.log(`❤️  Health: http://localhost:${PORT}/health`);
+  logger.info({ port: PORT, env: config.nodeEnv }, 'server_started');
 });
 
 module.exports = app;

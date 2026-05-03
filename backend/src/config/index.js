@@ -1,9 +1,26 @@
 require('dotenv').config();
 
+const required = (name) => {
+  const v = process.env[name];
+  if (!v && process.env.NODE_ENV === 'production') {
+    throw new Error(`Missing required env: ${name}`);
+  }
+  return v;
+};
+
 module.exports = {
   port: process.env.PORT || 4000,
   nodeEnv: process.env.NODE_ENV || 'development',
   frontendUrl: process.env.FRONTEND_URL || 'http://localhost:3000',
+
+  jwt: {
+    secret: process.env.JWT_SECRET || 'dev-only-insecure-secret-change-in-prod',
+    expiresIn: process.env.JWT_EXPIRES_IN || '24h',
+  },
+
+  database: {
+    url: required('DATABASE_URL') || 'postgresql://localhost:5432/dev',
+  },
 
   apimart: {
     apiKey: process.env.APIMART_API_KEY || '',

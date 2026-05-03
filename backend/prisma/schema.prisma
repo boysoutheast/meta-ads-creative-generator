@@ -1,0 +1,88 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  name         String
+  passwordHash String   @map("password_hash")
+  role         String   @default("user")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  libraryItems    LibraryItem[]
+  generationJobs  GenerationJob[]
+  auditLogs       AuditLog[]
+
+  @@map("users")
+}
+
+model GenerationJob {
+  id            String   @id @default(cuid())
+  userId        String   @map("user_id")
+  type          String   // "single_image" | "carousel" | "video"
+  angle         String   // "fomo" | "social_proof" | ...
+  status        String   @default("pending") // pending | processing | completed | failed
+  inputPayload  Json     @map("input_payload")
+  resultUrl     String?  @map("result_url")
+  resultPrompt  String?  @map("result_prompt") @db.Text
+  errorMessage  String?  @map("error_message") @db.Text
+  costUsd       Float?   @map("cost_usd")
+  apiUsed       String?  @map("api_used")
+  durationMs    Int?     @map("duration_ms")
+  startedAt     DateTime? @map("started_at")
+  completedAt   DateTime? @map("completed_at")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([status])
+  @@map("generation_jobs")
+}
+
+model LibraryItem {
+  id            String   @id @default(cuid())
+  userId        String   @map("user_id")
+  jobId         String?  @map("job_id")
+  type          String   // single_image | carousel | video
+  angle         String?
+  title         String
+  imageUrl      String?  @map("image_url")
+  videoUrl      String?  @map("video_url")
+  prompt        String?  @db.Text
+  copyHeadline  String?  @map("copy_headline")
+  copySubtext   String?  @map("copy_subtext") @db.Text
+  copyCta       String?  @map("copy_cta")
+  metadata      Json?
+  deletedAt     DateTime? @map("deleted_at")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, deletedAt, createdAt(sort: Desc)])
+  @@index([userId, type])
+  @@map("library_items")
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  userId    String?  @map("user_id")
+  action    String   // login_success | login_fail | register | generation_started | generation_completed | library_save | library_delete
+  metadata  Json?
+  ipAddress String?  @map("ip_address")
+  userAgent String?  @map("user_agent") @db.Text
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([action, createdAt(sort: Desc)])
+  @@map("audit_logs")
+}
