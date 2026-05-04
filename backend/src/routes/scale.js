@@ -22,6 +22,11 @@ router.post('/analyze-winning', upload.single('file'), async (req, res) => {
   const isVideo = req.file.mimetype.startsWith('video/');
   try {
     let analysis;
+    // Read file as base64 BEFORE deleting
+    const fileBuffer = fs.readFileSync(req.file.path);
+    const winningAdBase64 = fileBuffer.toString('base64');
+    const winningAdMime = req.file.mimetype;
+
     if (isVideo) {
       const { analysis: videoAnalysis, frames } = await analyzeVideoReference(req.file.path);
       analysis = { ...videoAnalysis, framesAnalyzed: frames, type: 'video' };
@@ -33,6 +38,9 @@ router.post('/analyze-winning', upload.single('file'), async (req, res) => {
     res.json({
       analysis,
       filename: req.file.originalname,
+      // Return base64 so frontend can pass it back for image generation reference
+      winningAdBase64,
+      winningAdMime,
       availableAngles: Object.entries(SCALING_ANGLES).map(([key, val]) => ({
         key,
         label: val.label,
@@ -55,34 +63,44 @@ router.post('/generate-variations', async (req, res) => {
     generateImages = false,
     productPhotoBase64 = null,
     productPhotoMime = 'image/jpeg',
+    winningAdBase64 = null,
+    winningAdMime = 'image/jpeg',
   } = req.body;
 
   if (!analysis || !productName) {
     return res.status(400).json({ error: 'analysis and productName are required' });
   }
 
-  // Describe product visually from photo — used to make image prompts more specific
+  // Describe product visually from photo
   let productVisualDescription = null;
   if (productPhotoBase64) {
     try {
       productVisualDescription = await analyzeImage({
         imageBase64: productPhotoBase64,
         mimeType: productPhotoMime || 'image/jpeg',
-        prompt: 'Describe this product visually in detail: shape, color, packaging, texture, size, label/branding. Be specific so an AI image generator can recreate it. Under 80 words.',
+        prompt: 'Describe this product visually in detail: shape, color, packaging, label text, texture, size. Be specific for AI image generation. Under 80 words.',
       });
     } catch (e) {
       console.warn('Product photo analysis failed (non-fatal):', e.message);
     }
   }
 
-  // Upload product photo → get public URL → flux-kontext-pro uses it for accurate product reference
-  let productImageUrl = null;
-  if (productPhotoBase64 && generateImages) {
-    try {
-      productImageUrl = await uploadImageToApimart(productPhotoBase64, productPhotoMime || 'image/jpeg');
-      console.log('Product photo uploaded:', productImageUrl ? 'OK' : 'failed');
-    } catch (e) {
-      console.warn('Product photo upload failed (non-fatal):', e.message);
+  // Upload both images to apimart to get public URLs for gpt-image-2 reference
+  const referenceImageUrls = [];
+  if (generateImages) {
+    // Upload winning ad as style/layout reference
+    if (winningAdBase64) {
+      try {
+        const url = await uploadImageToApimart(winningAdBase64, winningAdMime || 'image/jpeg');
+        if (url) { referenceImageUrls.push(url); console.log('Winning ad uploaded:', url.slice(0, 60)); }
+      } catch (e) { console.warn('Winning ad upload failed (non-fatal):', e.message); }
+    }
+    // Upload product photo as product reference
+    if (productPhotoBase64) {
+      try {
+        const url = await uploadImageToApimart(productPhotoBase64, productPhotoMime || 'image/jpeg');
+        if (url) { referenceImageUrls.push(url); console.log('Product photo uploaded:', url.slice(0, 60)); }
+      } catch (e) { console.warn('Product photo upload failed (non-fatal):', e.message); }
     }
   }
 
@@ -95,7 +113,7 @@ router.post('/generate-variations', async (req, res) => {
 
   let finalVariations = variationsWithPrompts;
   if (generateImages) {
-    finalVariations = await batchGenerateImages(variationsWithPrompts, aspectRatio, productImageUrl);
+    finalVariations = await batchGenerateImages(variationsWithPrompts, aspectRatio, referenceImageUrls);
   }
 
   res.json({
@@ -104,7 +122,7 @@ router.post('/generate-variations', async (req, res) => {
     totalVariations: finalVariations.length,
     variations: finalVariations,
     productVisualDescription,
-    usedFluxKontext: !!productImageUrl,
+    usedReferenceImages: referenceImageUrls.length,
   });
 });
 

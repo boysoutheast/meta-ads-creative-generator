@@ -69,6 +69,8 @@ export interface AnalyzeWinningResponse {
   analysis: WinningAdAnalysis
   filename: string
   availableAngles: ScalingAngle[]
+  winningAdBase64?: string
+  winningAdMime?: string
 }
 
 export interface GenerateVariationsResponse {
@@ -78,6 +80,7 @@ export interface GenerateVariationsResponse {
   variations: AngleVariation[]
   productVisualDescription?: string | null
   usedFluxKontext?: boolean
+  usedReferenceImages?: number
 }
 
 // ─── Reference / create ──────────────────────────────────────────────────────

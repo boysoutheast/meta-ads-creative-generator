@@ -56,6 +56,8 @@ export default function ScalePage() {
   const [selectedAngles, setSelectedAngles] = useState<string[]>([])
   const [result, setResult] = useState<GenerateVariationsResponse | null>(null)
   const [productVisualDescription, setProductVisualDescription] = useState<string | null>(null)
+  const [winningAdBase64, setWinningAdBase64] = useState<string | null>(null)
+  const [winningAdMime, setWinningAdMime] = useState<string>('image/jpeg')
 
   // Carousel state
   const [showCarouselOffer, setShowCarouselOffer] = useState(false)
@@ -94,6 +96,11 @@ export default function ScalePage() {
       setAnalysisResp(resp)
       setSelectedAngles(resp.availableAngles.map((a) => a.key))
       if (isVideo) setOutputType('video')
+      // Store winning ad for use as reference in image generation
+      if (resp.winningAdBase64) {
+        setWinningAdBase64(resp.winningAdBase64)
+        setWinningAdMime(resp.winningAdMime || 'image/jpeg')
+      }
     } catch (e: any) {
       setError(e?.response?.data?.error || e.message || 'Gagal menganalisis file')
     } finally {
@@ -125,6 +132,8 @@ export default function ScalePage() {
         generateImages: outputType === 'image' && generateImages,
         productPhotoBase64,
         productPhotoMime,
+        winningAdBase64: winningAdBase64 ?? undefined,
+        winningAdMime: winningAdMime,
       })
 
       if (outputType === 'video') {

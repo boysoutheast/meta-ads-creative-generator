@@ -210,7 +210,7 @@ Untuk tiap angle, return objek JSON dengan field BERIKUT (isi sedetail mungkin, 
 
   "imageScenario": "Deskripsikan scene gambar dalam Bahasa Indonesia (3-4 kalimat): siapa orangnya (perempuan Indonesia, usia berapa, sedang apa), di mana, ekspresi wajah dan bahasa tubuh (HARUS cerminkan intensitas emosional winning ad), objek/props apa yang ada di sekitarnya yang menceritakan masalah/solusi, dan bagaimana produk ini terlihat dalam scene tersebut.",
 
-  "imagePromptEN": "MUST start with: Indonesian woman, Southeast Asian features, relatable everyday person, [then continue]. This is a cinematic Meta Ads image prompt (150-200 words). CRITICAL: No text, words, letters, or numbers in image. Include ALL of: (1) Subject: Indonesian woman [age], [specific expression matching winning ad: distressed/frustrated/relieved], [exact action], [clothing that fits the scene]. (2) Setting: [specific location], [time of day], [atmosphere]. (3) Props: [list every object in the scene that tells the story — parallel to winning ad props but in product context]. (4) Product: [exact visual description of ${productName} as described — ${productVisualDescription || `the product ${productName} clearly visible and identifiable`}], product is prominently featured. (5) Visual DNA from winning ad: ${winningAnalysis.lighting || 'natural warm'} lighting, color tones of [${palette}], ${winningAnalysis.mood || 'engaging'} mood, ${winningAnalysis.composition || 'centered'} composition, ${winningAnalysis.visualStyle || 'photorealistic, professional'}. (6) Camera: [angle and framing]. Photorealistic, high detail, no CGI look."
+  "imagePromptEN": "A professional Meta Ads image prompt (150-200 words). MUST specify: (1) LAYOUT: exact layout type — choose the best match for this angle: split-screen left/right, editorial left-text/right-scene, full-scene with text overlay, or before/after panel. Match the layout style and composition of the winning ad reference image. (2) TYPOGRAPHY (render exactly, large and bold): the exact headline text from this variation's headline field, subheadline, and CTA button text as rendered text IN the image. Specify: font weight (bold/black), color (white or dark), and placement (top/center/bottom, left/right). (3) SCENE: Indonesian woman, Southeast Asian features, relatable everyday person, [specific age and expression matching the angle's emotional truth — distressed/frustrated for problem angles, relieved/happy for solution angles], [exact action and setting]. (4) PRODUCT: ${productVisualDescription || `the product ${productName} clearly visible and identifiable`} — prominently featured, reference the uploaded product photo. (5) COLOR: use winning ad's color palette [${palette}], [${winningAnalysis.lighting || 'warm natural'}] lighting, [${winningAnalysis.mood || 'engaging'}] mood. (6) PROPS: specific objects that tell the story, parallel to winning ad props but in product context. (7) STYLE: photorealistic, high-end beauty/skincare editorial, clean background, no CGI look. Rendered text must be perfectly legible, no blur."
 }
 
 Return array JSON valid dengan TEPAT ${anglesToGenerate.length} item. Tanpa markdown, tanpa komentar, langsung array.`;
@@ -297,7 +297,7 @@ async function generateVariationPrompts(winningAnalysis, angles, productName, pr
 // productImageUrl: if provided → flux-kontext-pro (img2img, product accuracy)
 // no productImageUrl → gpt-image-2 (text rendering, scene quality)
 
-async function batchGenerateImages(variations, aspectRatio = '1:1', productImageUrl = null) {
+async function batchGenerateImages(variations, aspectRatio = '1:1', referenceImageUrls = []) {
   const sizeMap = {
     '1:1': '1024x1024',
     '9:16': '1024x1536',
@@ -312,7 +312,7 @@ async function batchGenerateImages(variations, aspectRatio = '1:1', productImage
       generateImage({
         prompt: v.imagePrompt,
         size,
-        imageUrl: productImageUrl || undefined,
+        referenceImages: referenceImageUrls.length > 0 ? referenceImageUrls : undefined,
       })
     )
   );

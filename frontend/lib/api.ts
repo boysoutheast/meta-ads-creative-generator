@@ -69,6 +69,8 @@ export async function generateScalingVariations(payload: {
   generateImages: boolean
   productPhotoBase64?: string
   productPhotoMime?: string
+  winningAdBase64?: string
+  winningAdMime?: string
 }): Promise<GenerateVariationsResponse> {
   const res = await api.post('/scale/generate-variations', payload)
   return res.data
