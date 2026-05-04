@@ -126,7 +126,13 @@ async function generateScalingAngles(
 
 PRINSIP UTAMA: Jangan buat iklan generik. Translate SPESIFIK konsep dari winning ad ke konteks produk ini. Pertahankan: hook mechanism, emotional truth, narrative structure. Ganti: skenario, objek, konteks — sesuaikan ke produk.
 
-PENTING: Semua copy (headline, subheadline, bodyText, cta) HARUS Bahasa Indonesia. Jangan gunakan Bahasa Inggris untuk teks iklan.`;
+PENTING: Semua copy (headline, subheadline, bodyText, cta) HARUS Bahasa Indonesia. Jangan gunakan Bahasa Inggris untuk teks iklan.
+
+CRITICAL untuk imageScenario dan imagePromptEN:
+1. Subjek SELALU perempuan Indonesia/Asia Tenggara (Indonesian woman, Southeast Asian features).
+2. Scene HARUS cerminkan komposisi dan intensitas emosional winning ad. Jika winning ad menampilkan orang frustrasi dikelilingi props masalah (kertas, kalkulator, dll) → scene harus menampilkan perempuan Indonesia dengan ekspresi sama frustrasi/khawatir dikelilingi props masalah yang relevan ke produk (botol skincare lama, kulit kering, cermin, dll). SAME emotional intensity, SAME composition type, DIFFERENT product context.
+3. JANGAN buat scene netral/bahagia kecuali itu angle "after" atau "resolution". Hook/problem angle HARUS distressed/frustrated expression.
+4. imagePromptEN HARUS dimulai dengan: "Indonesian woman, Southeast Asian features, relatable everyday person, "`;
 
   const userPrompt = `WINNING AD ANALYSIS:
 ${JSON.stringify(winningAnalysis, null, 2)}
@@ -157,8 +163,8 @@ Untuk tiap angle, return:
   "subheadline": "subheadline max 15 kata — BAHASA INDONESIA",
   "bodyText": "body copy max 30 kata — BAHASA INDONESIA",
   "cta": "CTA max 4 kata — BAHASA INDONESIA",
-  "imageScenario": "Skenario visual spesifik untuk gambar: siapa, sedang apa, di mana, ekspresi, objek di sekitarnya — harus PARALEL dengan skenario winning ad tapi untuk konteks produk (50 kata, Indonesian)",
-  "imagePromptEN": "Detail image prompt dalam English untuk AI image generator (80-150 kata). CRITICAL: No text/words/typography in image. Highly specific and cinematic. Include: subject description with emotion, action, setting, lighting matching winning ad style (${winningAnalysis.lighting || 'natural'}), color palette (${(winningAnalysis.colorPalette || []).join(', ')}), mood (${winningAnalysis.mood || 'engaging'}), camera angle, composition. Product ${productName} must be clearly visible."
+  "imageScenario": "Skenario visual spesifik untuk gambar: siapa, sedang apa, di mana, ekspresi, objek di sekitarnya — harus PARALEL dengan skenario winning ad tapi untuk konteks produk (50 kata, Indonesian). WAJIB: perempuan Indonesia/Asia Tenggara.",
+  "imagePromptEN": "MUST start with: Indonesian woman, Southeast Asian features, relatable everyday person, [then continue with scene]. Detail image prompt (80-150 kata). CRITICAL: No text/words/typography in image. Highly specific and cinematic. Include: subject with distressed/concerned/emotional expression matching winning ad emotional intensity, action, setting, lighting matching winning ad style (${winningAnalysis.lighting || 'natural'}), color palette (${(winningAnalysis.colorPalette || []).join(', ')}), mood (${winningAnalysis.mood || 'engaging'}), camera angle, composition. Product ${productName} must be clearly visible. Surrounded by props relevant to the problem."
 }
 
 Return array JSON valid dengan tepat ${anglesToGenerate.length} item. Tanpa markdown, tanpa komentar.`;
@@ -183,6 +189,18 @@ Return array JSON valid dengan tepat ${anglesToGenerate.length} item. Tanpa mark
   return [];
 }
 
+// ─── Indonesian person prefix ─────────────────────────────────────────────────
+// Prepended to EVERY image prompt — non-negotiable.
+const INDONESIAN_PERSON_PREFIX = 'Indonesian woman, Southeast Asian features, relatable everyday person, ';
+
+function ensureIndonesianPrefix(prompt) {
+  if (!prompt) return INDONESIAN_PERSON_PREFIX;
+  const lower = prompt.toLowerCase();
+  // If AI already followed the instruction, don't double-prepend
+  if (lower.startsWith('indonesian woman') || lower.startsWith('indonesian ')) return prompt;
+  return INDONESIAN_PERSON_PREFIX + prompt;
+}
+
 // ─── buildFallbackPrompt ─────────────────────────────────────────────────────
 // Only used when imagePromptEN is missing (shouldn't happen with new pipeline).
 
@@ -191,8 +209,8 @@ function buildFallbackPrompt(angle, winningAnalysis, productName, productVisualD
     ? `Translated concept: ${angle.translatedConcept}\nScene to depict: ${angle.imageScenario || ''}`
     : `Image direction: ${angle.imageDirection || ''}`;
 
-  return [
-    `Meta Ads creative image, ${winningAnalysis.visualStyle || 'professional, clean'}.`,
+  const base = [
+    `distressed expression, surrounded by product-related props, Meta Ads creative, ${winningAnalysis.visualStyle || 'professional, clean'}.`,
     conceptContext,
     `Product: ${productName} — must be clearly visible and recognizable.`,
     productVisualDescription ? `Product looks like: ${productVisualDescription}` : '',
@@ -202,17 +220,21 @@ function buildFallbackPrompt(angle, winningAnalysis, productName, productVisualD
     'NO text, words, numbers, or typography in image.',
     'Highly detailed, photorealistic, Meta Ads format.',
   ].filter(Boolean).join('\n').trim();
+
+  return INDONESIAN_PERSON_PREFIX + base;
 }
 
 // ─── generateVariationPrompts ─────────────────────────────────────────────────
 // Now SYNCHRONOUS — no extra API calls needed.
 // generateScalingAngles already inlines imagePromptEN in the same call.
 // This collapses what used to be N+1 API calls into just 1.
+// Always enforces Indonesian person prefix regardless of AI compliance.
 
 async function generateVariationPrompts(winningAnalysis, angles, productName, productVisualDescription = null) {
   return angles.map((angle) => {
-    const imagePrompt = angle.imagePromptEN
+    const rawPrompt = angle.imagePromptEN
       || buildFallbackPrompt(angle, winningAnalysis, productName, productVisualDescription);
+    const imagePrompt = ensureIndonesianPrefix(rawPrompt);
     return { ...angle, imagePrompt };
   });
 }
