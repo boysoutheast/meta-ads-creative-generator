@@ -130,8 +130,6 @@ export default function ProductsPage() {
     }
   }
 
-  const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000'
-
   return (
     <div className="space-y-8">
       <div className="flex items-start justify-between">
@@ -205,7 +203,7 @@ export default function ProductsPage() {
                   <div key={i} className="relative h-20 w-20 shrink-0">
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
-                      src={`${API_URL}${url}`}
+                      src={url}
                       alt=""
                       className="h-full w-full rounded-md object-cover"
                     />
@@ -317,7 +315,7 @@ export default function ProductsPage() {
                   {p.photos && p.photos.length > 0 ? (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img
-                      src={`${API_URL}${p.photos[0]}`}
+                      src={p.photos[0]}
                       alt={p.name}
                       className="h-20 w-20 shrink-0 rounded-md object-cover"
                       onError={(e) => {
