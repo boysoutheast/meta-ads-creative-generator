@@ -28,7 +28,42 @@ AI yang kerja: analisis mendalam → translate ke prompt detail → adaptasi ke 
 
 ---
 
-## TASK 1 — Fix Bahasa & Product Visual Injection
+## VERIFIED API CAPABILITIES (tested live)
+
+Dari testing langsung ke `api.apimart.ai`:
+
+### Image models tersedia:
+- `flux-kontext-pro` — **UTAMA untuk product reference**. Menerima `image_url` parameter, maintains visual consistency dengan reference image.
+- `flux-kontext-max` — versi lebih powerful dari kontext-pro
+- `flux-2-pro`, `flux-2-flex` — text-to-image standar (tanpa reference)
+- `gpt-image-1`, `gpt-image-1-mini` — OpenAI compat
+- `imagen-4.0-apimart` — Google Imagen
+
+### Upload endpoint:
+```
+POST https://api.apimart.ai/v1/uploads/images
+Content-Type: multipart/form-data
+field: file (binary image)
+Response: { url: "https://..." }
+```
+
+### Flux Kontext dengan reference image:
+```json
+POST https://api.apimart.ai/v1/images/generations
+{
+  "model": "flux-kontext-pro",
+  "prompt": "...",
+  "image_url": "https://uploaded-product-url.jpg",
+  "n": 1
+}
+→ Returns: { data: [{ status: "submitted", task_id: "..." }] }
+```
+
+**Ini kuncinya**: produk foto di-upload dulu → dapat URL → pass ke flux-kontext-pro → AI generate dengan visual reference produk yang akurat.
+
+---
+
+## TASK 1 — Fix Bahasa & Product Visual Reference (REAL img2img)
 
 ### 1a. Fix bahasa di backend/src/services/scalingService.js
 
@@ -41,16 +76,131 @@ Di fungsi `generateScalingAngles`, tambahkan di awal system prompt:
 
 Di fungsi `generateVariationPrompts`, tambahkan instruksi yang sama.
 
-Di fungsi `analyzeWinningAd`, biarkan analisis internal dalam English (untuk akurasi), tapi tambahkan field `suggestedCopyLanguage: 'id'` di response.
+Di fungsi `analyzeWinningAd`, biarkan analisis internal dalam English (untuk akurasi).
 
-### 1b. Product visual injection
+### 1b. Upload product photo → get URL → pass ke Flux Kontext (REAL reference)
 
-Di backend/src/routes/scale.js, endpoint POST /api/scale/generate-variations:
+Tambahkan fungsi `uploadImageToApimart` di `backend/src/services/apimart.js`:
 
-Tambahkan parameter opsional `productPhotoBase64` di request body. Jika ada:
-1. Kirim ke `analyzeImage()` dengan prompt: "Describe this product visually in detail: shape, color, packaging, texture, size, label/branding. Be specific so an image generation AI can recreate it accurately."
-2. Simpan hasilnya sebagai `productVisualDescription`
-3. Inject ke semua image prompts: "Product must look exactly like this: {productVisualDescription}"
+```js
+const FormData = require('form-data');
+
+/**
+ * Upload a base64 image to apimart and return a public URL.
+ * Used for passing product photos as reference to flux-kontext-pro.
+ */
+async function uploadImageToApimart(base64Data, mimeType = 'image/jpeg') {
+  const buffer = Buffer.from(base64Data, 'base64');
+  const fd = new FormData();
+  fd.append('file', buffer, {
+    filename: `product-${Date.now()}.jpg`,
+    contentType: mimeType,
+  });
+  const response = await imageClient.post('/uploads/images', fd, {
+    headers: { ...fd.getHeaders() },
+    timeout: 30000,
+  });
+  // Response shape: { url: "..." } or { data: { url: "..." } }
+  return response.data?.url || response.data?.data?.url || null;
+}
+```
+
+Tambahkan ke module.exports.
+
+### 1c. Gunakan flux-kontext-pro untuk generate dengan product reference
+
+Di `backend/src/services/apimart.js`, modifikasi `generateImage`:
+
+```js
+async function generateImage({ prompt, size = '1024x1024', model, imageUrl, pollIntervalMs = 5000, timeoutMs = 180000 }) {
+  const payload = {
+    model: model || config.models.image,
+    prompt,
+    n: 1,
+  };
+  
+  // If imageUrl provided, use flux-kontext-pro for reference-based generation
+  if (imageUrl) {
+    payload.model = 'flux-kontext-pro';
+    payload.image_url = imageUrl;
+    // flux-kontext uses aspect_ratio not size
+    const aspectMap = { '1024x1024': '1:1', '1024x1792': '9:16', '1792x1024': '16:9' };
+    payload.aspect_ratio = aspectMap[size] || '1:1';
+  } else {
+    payload.size = size;
+  }
+  
+  // ... rest of existing submit + poll logic unchanged
+}
+```
+
+### 1d. Backend: inject product photo ke generate-variations
+
+Di `backend/src/routes/scale.js`, endpoint POST `/api/scale/generate-variations`:
+
+Tambahkan handling `productPhotoBase64` di request body:
+
+```js
+const { analysis, productName, selectedAngles, aspectRatio, generateImages, productPhotoBase64, productPhotoMime } = req.body;
+
+let productImageUrl = null;
+if (productPhotoBase64 && generateImages) {
+  try {
+    const { uploadImageToApimart } = require('../services/apimart');
+    productImageUrl = await uploadImageToApimart(productPhotoBase64, productPhotoMime || 'image/jpeg');
+  } catch(e) {
+    // Non-fatal: if upload fails, fall back to text-only generation
+    req.log?.warn({ err: e.message }, 'product_photo_upload_failed');
+  }
+}
+```
+
+Lalu saat memanggil `batchGenerateImages`, pass `productImageUrl`:
+```js
+finalVariations = await batchGenerateImages(variationsWithPrompts, aspectRatio, productImageUrl);
+```
+
+Di `backend/src/services/scalingService.js`, update `batchGenerateImages` untuk menerima dan pass `productImageUrl` ke `generateImage`:
+```js
+async function batchGenerateImages(variations, aspectRatio, productImageUrl = null) {
+  // ... existing code
+  const { url } = await generateImage({ 
+    prompt: v.imagePrompt, 
+    size: sizeMap[aspectRatio],
+    imageUrl: productImageUrl  // pass reference
+  });
+  // ...
+}
+```
+
+### 1e. Frontend: kirim product photo ke backend
+
+Di `frontend/app/(app)/scale/page.tsx`, saat selectedProduct berubah:
+```ts
+// Extract base64 from data URL
+function extractBase64(dataUrl: string) {
+  const match = dataUrl.match(/^data:([^;]+);base64,(.+)$/)
+  return match ? { mime: match[1], data: match[2] } : null
+}
+```
+
+Saat memanggil `generateScalingVariations`, tambahkan:
+```ts
+const photo = selectedProduct?.photos?.[0]
+const photoData = photo ? extractBase64(photo) : null
+
+await generateScalingVariations({
+  analysis: analysisResp.analysis,
+  productName: selectedProduct?.name || productName.trim(),
+  selectedAngles,
+  aspectRatio,
+  generateImages: outputType === 'image' && generateImages,
+  productPhotoBase64: photoData?.data,
+  productPhotoMime: photoData?.mime,
+})
+```
+
+Update `generateScalingVariations` di `frontend/lib/api.ts` untuk menerima kedua field baru ini dan include di request body.
 
 Di frontend/app/(app)/scale/page.tsx:
 - Saat user pilih produk dari dropdown, jika `selectedProduct.photos[0]` ada (base64 data URL), ekstrak base64-nya (strip prefix `data:image/...;base64,`) dan kirim sebagai `productPhotoBase64` ke generate-variations.

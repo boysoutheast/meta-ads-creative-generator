@@ -201,7 +201,7 @@ async function generateVariationPrompts(winningAnalysis, angles, productName, pr
   }));
 }
 
-async function batchGenerateImages(variations, aspectRatio = '1:1') {
+async function batchGenerateImages(variations, aspectRatio = '1:1', productImageUrl = null) {
   const sizeMap = {
     '1:1': '1024x1024',
     '9:16': '1024x1792',
@@ -210,17 +210,23 @@ async function batchGenerateImages(variations, aspectRatio = '1:1') {
   };
   const size = sizeMap[aspectRatio] || '1024x1024';
 
+  const filteredVariations = variations.filter((v) => v.imagePrompt);
   const results = await Promise.allSettled(
-    variations
-      .filter((v) => v.imagePrompt)
-      .map((variation) => generateImage({ prompt: variation.imagePrompt, size }))
+    filteredVariations.map((variation) =>
+      generateImage({
+        prompt: variation.imagePrompt,
+        size,
+        imageUrl: productImageUrl || undefined, // flux-kontext-pro when product photo available
+      })
+    )
   );
 
-  return variations.map((variation, i) => {
+  let filteredIdx = 0;
+  return variations.map((variation) => {
     if (!variation.imagePrompt) {
       return { ...variation, imageUrl: null, imageError: 'No prompt generated' };
     }
-    const result = results[i];
+    const result = results[filteredIdx++];
     return {
       ...variation,
       imageUrl: result.status === 'fulfilled' ? result.value[0]?.url : null,

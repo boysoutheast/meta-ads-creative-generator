@@ -65,6 +65,7 @@ export interface GenerateVariationsResponse {
   totalVariations: number
   variations: AngleVariation[]
   productVisualDescription?: string | null
+  usedFluxKontext?: boolean
 }
 
 // ─── Reference / create ──────────────────────────────────────────────────────

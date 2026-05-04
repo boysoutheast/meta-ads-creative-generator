@@ -1,4 +1,5 @@
 const axios = require('axios');
+const FormData = require('form-data');
 const config = require('../config');
 
 const CHAT_BASE = config.apimart.baseUrl; // https://apimart.ai/api/v1
@@ -52,6 +53,10 @@ async function submitImageJob({ prompt, size = '1024x1024', model, n = 1 }) {
     size,
     n,
   };
+  return submitImageJobPayload(payload);
+}
+
+async function submitImageJobPayload(payload) {
   const response = await imageClient.post('/images/generations', payload);
   // Async: { code:200, data:[{ status:"submitted", task_id:"..." }] }
   // Sync:  { code:200, data:[{ url:"..." }] }
@@ -70,8 +75,50 @@ async function getTask(taskId) {
   return response.data?.data ?? response.data;
 }
 
-async function generateImage({ prompt, size = '1024x1024', model, pollIntervalMs = 5000, timeoutMs = 180000 }) {
-  const submitted = await submitImageJob({ prompt, size, model });
+/**
+ * Upload a base64 image to apimart and return a public URL.
+ * Used for passing product photos as reference to flux-kontext-pro.
+ * @param {string} base64Data - raw base64 (no data: prefix)
+ * @param {string} mimeType - e.g. 'image/jpeg'
+ * @returns {Promise<string|null>} public URL or null on failure
+ */
+async function uploadImageToApimart(base64Data, mimeType = 'image/jpeg') {
+  const buffer = Buffer.from(base64Data, 'base64');
+  const fd = new FormData();
+  fd.append('file', buffer, {
+    filename: `product-${Date.now()}.jpg`,
+    contentType: mimeType,
+  });
+  const response = await imageClient.post('/uploads/images', fd, {
+    headers: { ...fd.getHeaders() },
+    timeout: 30000,
+  });
+  // Response shape: { url: "..." } or { data: { url: "..." } }
+  return response.data?.url || response.data?.data?.url || null;
+}
+
+async function generateImage({ prompt, size = '1024x1024', model, imageUrl, pollIntervalMs = 5000, timeoutMs = 180000 }) {
+  // If imageUrl provided, use flux-kontext-pro for reference-based generation
+  let effectiveModel = model || config.models.image;
+  const payload = { prompt, n: 1 };
+
+  if (imageUrl) {
+    effectiveModel = 'flux-kontext-pro';
+    payload.model = effectiveModel;
+    payload.image_url = imageUrl;
+    // flux-kontext uses aspect_ratio not size
+    const aspectMap = {
+      '1024x1024': '1:1',
+      '1024x1792': '9:16',
+      '1792x1024': '16:9',
+    };
+    payload.aspect_ratio = aspectMap[size] || '1:1';
+  } else {
+    payload.model = effectiveModel;
+    payload.size = size;
+  }
+
+  const submitted = await submitImageJobPayload(payload);
 
   // Sync path — url returned immediately
   if (submitted.url) {
@@ -160,6 +207,7 @@ module.exports = {
   chatCompletion,
   analyzeImage,
   submitImageJob,
+  uploadImageToApimart,
   generateImage,
   getTask,
   generateVideo,

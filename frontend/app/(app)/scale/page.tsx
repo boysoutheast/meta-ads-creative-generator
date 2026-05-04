@@ -110,10 +110,11 @@ export default function ScalePage() {
     setShowCarouselOffer(false)
     setShowCarouselForm(false)
     try {
-      // Extract base64 from product photo if available
-      const productPhotoBase64 = selectedProduct.photos?.[0]
-        ? selectedProduct.photos[0].split(',')[1] ?? undefined
-        : undefined
+      // Extract base64 + mime from product photo data URL if available
+      const photoDataUrl = selectedProduct.photos?.[0]
+      const photoMatch = photoDataUrl?.match(/^data:([^;]+);base64,(.+)$/)
+      const productPhotoMime = photoMatch?.[1] ?? undefined
+      const productPhotoBase64 = photoMatch?.[2] ?? undefined
 
       const resp = await generateScalingVariations({
         analysis: analysisResp.analysis,
@@ -122,6 +123,7 @@ export default function ScalePage() {
         aspectRatio,
         generateImages: outputType === 'image' && generateImages,
         productPhotoBase64,
+        productPhotoMime,
       })
 
       if (outputType === 'video') {
@@ -164,6 +166,12 @@ export default function ScalePage() {
     if (!analysisResp || !selectedProduct) return
     setGeneratingCarousel(true)
     try {
+      // Pass product photo for flux-kontext-pro reference in carousel image generation
+      const photoDataUrl = selectedProduct.photos?.[0]
+      const photoMatch = photoDataUrl?.match(/^data:([^;]+);base64,(.+)$/)
+      const productPhotoMime = photoMatch?.[1] ?? undefined
+      const productPhotoBase64 = photoMatch?.[2] ?? undefined
+
       const resp = await generateScaleCarousel({
         analysis: analysisResp.analysis,
         productName: selectedProduct.name,
@@ -172,6 +180,8 @@ export default function ScalePage() {
         slideCount: carouselSlideCount,
         aspectRatio: '1:1',
         generateImages,
+        productPhotoBase64,
+        productPhotoMime,
       })
       setCarousel(resp)
       setShowCarouselForm(false)

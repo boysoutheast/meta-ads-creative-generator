@@ -67,6 +67,7 @@ export async function generateScalingVariations(payload: {
   aspectRatio: AspectRatio
   generateImages: boolean
   productPhotoBase64?: string
+  productPhotoMime?: string
 }): Promise<GenerateVariationsResponse> {
   const res = await api.post('/scale/generate-variations', payload)
   return res.data
@@ -80,6 +81,8 @@ export async function generateScaleCarousel(payload: {
   slideCount: number
   aspectRatio?: string
   generateImages?: boolean
+  productPhotoBase64?: string
+  productPhotoMime?: string
 }): Promise<ScaleCarouselResponse> {
   const res = await api.post('/scale/generate-carousel', payload)
   return res.data

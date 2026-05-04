@@ -10,7 +10,7 @@ const {
   batchGenerateImages,
 } = require('../services/scalingService');
 const { analyzeVideoReference } = require('../services/videoAnalyzer');
-const { analyzeImage, generateImage, generateVideo, chatCompletion } = require('../services/apimart');
+const { analyzeImage, uploadImageToApimart, generateImage, generateVideo, chatCompletion } = require('../services/apimart');
 const config = require('../config');
 
 router.get('/angles', (req, res) => {
@@ -53,23 +53,38 @@ router.post('/generate-variations', async (req, res) => {
     aspectRatio = '1:1',
     generateImages = false,
     productPhotoBase64 = null,
+    productPhotoMime = 'image/jpeg',
   } = req.body;
 
   if (!analysis || !productName) {
     return res.status(400).json({ error: 'analysis and productName are required' });
   }
 
-  // Get product visual description from photo if provided
+  // Step 1: Get product visual description from photo if provided
   let productVisualDescription = null;
   if (productPhotoBase64) {
     try {
       productVisualDescription = await analyzeImage({
         imageBase64: productPhotoBase64,
-        mimeType: 'image/jpeg',
+        mimeType: productPhotoMime || 'image/jpeg',
         prompt: 'Describe this product visually in detail: shape, color, packaging, texture, size, label/branding. Be specific so an image generation AI can recreate it accurately. Keep response under 100 words.',
       });
     } catch (e) {
       console.warn('Product photo analysis failed:', e.message);
+    }
+  }
+
+  // Step 2: Upload photo to apimart to get public URL for flux-kontext-pro reference
+  let productImageUrl = null;
+  if (productPhotoBase64 && generateImages) {
+    try {
+      productImageUrl = await uploadImageToApimart(productPhotoBase64, productPhotoMime || 'image/jpeg');
+      if (productImageUrl) {
+        console.log('Product photo uploaded to apimart:', productImageUrl);
+      }
+    } catch (e) {
+      // Non-fatal: fall back to text-only generation
+      console.warn('Product photo upload to apimart failed (non-fatal):', e.message);
     }
   }
 
@@ -80,7 +95,8 @@ router.post('/generate-variations', async (req, res) => {
 
   let finalVariations = variationsWithPrompts;
   if (generateImages) {
-    finalVariations = await batchGenerateImages(variationsWithPrompts, aspectRatio);
+    // Pass productImageUrl so batchGenerateImages uses flux-kontext-pro when available
+    finalVariations = await batchGenerateImages(variationsWithPrompts, aspectRatio, productImageUrl);
   }
 
   res.json({
@@ -89,6 +105,7 @@ router.post('/generate-variations', async (req, res) => {
     totalVariations: finalVariations.length,
     variations: finalVariations,
     productVisualDescription,
+    usedFluxKontext: !!productImageUrl,
   });
 });
 
@@ -101,6 +118,8 @@ router.post('/generate-carousel', async (req, res) => {
     slideCount = 5,
     aspectRatio = '1:1',
     generateImages = false,
+    productPhotoBase64 = null,
+    productPhotoMime = 'image/jpeg',
   } = req.body;
 
   if (!analysis || !productName) {
@@ -164,8 +183,23 @@ Return JSON array dengan tepat ${clampedSlideCount} item, tanpa markdown:
   if (generateImages) {
     const sizeMap = { '1:1': '1024x1024', '9:16': '1024x1792', '16:9': '1792x1024' };
     const size = sizeMap[aspectRatio] || '1024x1024';
+
+    // Upload product photo for flux-kontext-pro reference if available
+    let carouselImageUrl = null;
+    if (productPhotoBase64) {
+      try {
+        carouselImageUrl = await uploadImageToApimart(productPhotoBase64, productPhotoMime || 'image/jpeg');
+      } catch (e) {
+        console.warn('Carousel product photo upload failed (non-fatal):', e.message);
+      }
+    }
+
     const imageResults = await Promise.allSettled(
-      slides.map((slide) => slide.imagePrompt ? generateImage({ prompt: slide.imagePrompt, size }) : Promise.resolve(null))
+      slides.map((slide) =>
+        slide.imagePrompt
+          ? generateImage({ prompt: slide.imagePrompt, size, imageUrl: carouselImageUrl || undefined })
+          : Promise.resolve(null)
+      )
     );
     slides = slides.map((slide, i) => ({
       ...slide,
