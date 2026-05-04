@@ -4,7 +4,7 @@
   "description": "Backend API for Meta Ads Creative Generator",
   "main": "src/index.js",
   "scripts": {
-    "start": "prisma db push --skip-generate --accept-data-loss && node src/index.js",
+    "start": "prisma generate && prisma db push --accept-data-loss && node src/index.js",
     "dev": "nodemon src/index.js",
     "build": "prisma generate",
     "postinstall": "prisma generate",
