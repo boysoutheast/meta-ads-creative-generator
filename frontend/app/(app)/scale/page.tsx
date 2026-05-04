@@ -3,7 +3,6 @@ import { useEffect, useState } from 'react'
 import { Loader2, Sparkles, AlertCircle, Layers } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import {
@@ -35,9 +34,11 @@ import type {
   AngleVariation,
 } from '@/lib/types'
 
+const fmt = (n?: number) =>
+  n !== undefined ? 'Rp ' + n.toLocaleString('id-ID') : ''
+
 export default function ScalePage() {
   const [file, setFile] = useState<File | null>(null)
-  const [productName, setProductName] = useState('')
   const [aspectRatio, setAspectRatio] = useState<AspectRatio>('1:1')
   const [generateImages, setGenerateImages] = useState(true)
   const [outputType, setOutputType] = useState<'image' | 'video'>('image')
@@ -51,17 +52,13 @@ export default function ScalePage() {
   const [result, setResult] = useState<GenerateVariationsResponse | null>(null)
 
   const [products, setProducts] = useState<Product[]>([])
-  const [selectedProductId, setSelectedProductId] = useState<string>('')
+  const [selectedProduct, setSelectedProduct] = useState<Product | null>(null)
 
   useEffect(() => {
     getProducts()
       .then((list) => {
         setProducts(list)
-        const def = list.find((p) => p.isDefault)
-        if (def) {
-          setSelectedProductId(def.id)
-          setProductName(def.name)
-        }
+        if (list.length > 0) setSelectedProduct(list[0])
       })
       .catch(() => {})
   }, [])
@@ -87,20 +84,19 @@ export default function ScalePage() {
   }
 
   const handleGenerate = async () => {
-    if (!analysisResp || !productName.trim() || selectedAngles.length === 0) return
+    if (!analysisResp || !selectedProduct || selectedAngles.length === 0) return
     setError(null)
     setGenerating(true)
     setResult(null)
     try {
       const resp = await generateScalingVariations({
         analysis: analysisResp.analysis,
-        productName: productName.trim(),
+        productName: selectedProduct.name,
         selectedAngles,
         aspectRatio,
         generateImages: outputType === 'image' && generateImages,
       })
 
-      // Optionally kick off video generation per variation
       if (outputType === 'video') {
         const videoResults = await Promise.allSettled(
           resp.variations.map(async (v) => {
@@ -123,7 +119,7 @@ export default function ScalePage() {
       const firstImg = resp.variations.find((v) => v.imageUrl)?.imageUrl
       saveHistoryEntry({
         kind: 'scale',
-        productName: productName.trim(),
+        productName: selectedProduct.name,
         thumbnailUrl: firstImg || null,
         payload: { ...resp, outputType, aspectRatio },
       })
@@ -155,19 +151,11 @@ export default function ScalePage() {
             </CardHeader>
             <CardContent className="space-y-4">
               <Dropzone file={file} onChange={setFile} accept="both" />
-              <Button
-                className="w-full"
-                onClick={handleAnalyze}
-                disabled={!file || analyzing}
-              >
+              <Button className="w-full" onClick={handleAnalyze} disabled={!file || analyzing}>
                 {analyzing ? (
-                  <>
-                    <Loader2 className="h-4 w-4 animate-spin" /> Menganalisis…
-                  </>
+                  <><Loader2 className="h-4 w-4 animate-spin" /> Menganalisis…</>
                 ) : (
-                  <>
-                    <Sparkles className="h-4 w-4" /> Analyze
-                  </>
+                  <><Sparkles className="h-4 w-4" /> Analyze</>
                 )}
               </Button>
             </CardContent>
@@ -181,34 +169,25 @@ export default function ScalePage() {
               <CardContent className="space-y-4">
                 {products.length > 0 && (
                   <div className="space-y-2">
-                    <Label>Produk tersimpan</Label>
+                    <Label>Produk</Label>
                     <Select
-                      value={selectedProductId}
+                      value={selectedProduct?.id || ''}
                       onValueChange={(id) => {
-                        setSelectedProductId(id)
                         const p = products.find((x) => x.id === id)
-                        if (p) setProductName(p.name)
+                        if (p) setSelectedProduct(p)
                       }}
                     >
                       <SelectTrigger><SelectValue placeholder="Pilih produk…" /></SelectTrigger>
                       <SelectContent>
                         {products.map((p) => (
-                          <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+                          <SelectItem key={p.id} value={p.id}>
+                            {p.name}{p.price !== undefined ? ` — ${fmt(p.price)}` : ''}
+                          </SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
                   </div>
                 )}
-
-                <div className="space-y-2">
-                  <Label htmlFor="productName">Nama produk</Label>
-                  <Input
-                    id="productName"
-                    value={productName}
-                    onChange={(e) => setProductName(e.target.value)}
-                    placeholder="Contoh: Skincare Glow Serum"
-                  />
-                </div>
 
                 <div className="space-y-2">
                   <Label>Output type</Label>
@@ -218,17 +197,13 @@ export default function ScalePage() {
                       variant={outputType === 'image' ? 'default' : 'outline'}
                       onClick={() => setOutputType('image')}
                       className="flex-1"
-                    >
-                      Image
-                    </Button>
+                    >Image</Button>
                     <Button
                       type="button"
                       variant={outputType === 'video' ? 'default' : 'outline'}
                       onClick={() => setOutputType('video')}
                       className="flex-1"
-                    >
-                      Video
-                    </Button>
+                    >Video</Button>
                   </div>
                 </div>
 
@@ -250,9 +225,7 @@ export default function ScalePage() {
                   <div className="flex items-center justify-between rounded-lg border p-3">
                     <div>
                       <Label htmlFor="genImg">Generate gambar AI</Label>
-                      <p className="text-xs text-muted-foreground">
-                        Kalau OFF, hanya menghasilkan copy + prompt.
-                      </p>
+                      <p className="text-xs text-muted-foreground">Kalau OFF, hanya menghasilkan copy + prompt.</p>
                     </div>
                     <Switch id="genImg" checked={generateImages} onCheckedChange={setGenerateImages} />
                   </div>
@@ -270,12 +243,10 @@ export default function ScalePage() {
                 <Button
                   className="w-full"
                   onClick={handleGenerate}
-                  disabled={generating || !productName.trim() || selectedAngles.length === 0}
+                  disabled={generating || !selectedProduct || selectedAngles.length === 0}
                 >
                   {generating ? (
-                    <>
-                      <Loader2 className="h-4 w-4 animate-spin" /> Generating…
-                    </>
+                    <><Loader2 className="h-4 w-4 animate-spin" /> Generating…</>
                   ) : (
                     <>Generate {selectedAngles.length} variasi</>
                   )}

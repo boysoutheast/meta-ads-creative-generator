@@ -83,23 +83,19 @@ export default function CreatePage() {
 
   // Saved products for autofill
   const [savedProducts, setSavedProducts] = useState<Product[]>([])
-  const [selectedProductId, setSelectedProductId] = useState<string>('')
+  const [selectedProduct, setSelectedProduct] = useState<Product | null>(null)
 
   useEffect(() => {
     getProducts()
       .then((list) => {
         setSavedProducts(list)
-        const def = list.find((p) => p.isDefault)
-        if (def) {
-          setSelectedProductId(def.id)
-          setProduct({
-            productName: def.name,
-            description: def.description || '',
-            usp: def.usp || '',
-            targetAudience: def.targetAudience || '',
-            adGoal: def.adGoal || '',
-            brandColors: def.brandColors || '',
-          })
+        if (list.length > 0) {
+          setSelectedProduct(list[0])
+          setProduct((prev) => ({
+            ...prev,
+            productName: list[0].name,
+            description: list[0].description || '',
+          }))
         }
       })
       .catch(() => {})
@@ -237,18 +233,17 @@ export default function CreatePage() {
               <div className="space-y-2">
                 <Label>Muat dari produk tersimpan</Label>
                 <Select
-                  value={selectedProductId}
+                  value={selectedProduct?.id || ''}
                   onValueChange={(id) => {
-                    setSelectedProductId(id)
                     const p = savedProducts.find((x) => x.id === id)
-                    if (p) setProduct({
-                      productName: p.name,
-                      description: p.description || '',
-                      usp: p.usp || '',
-                      targetAudience: p.targetAudience || '',
-                      adGoal: p.adGoal || '',
-                      brandColors: p.brandColors || '',
-                    })
+                    if (p) {
+                      setSelectedProduct(p)
+                      setProduct((prev) => ({
+                        ...prev,
+                        productName: p.name,
+                        description: p.description || '',
+                      }))
+                    }
                   }}
                 >
                   <SelectTrigger><SelectValue placeholder="Pilih produk…" /></SelectTrigger>
@@ -258,7 +253,7 @@ export default function CreatePage() {
                     ))}
                   </SelectContent>
                 </Select>
-                <p className="text-xs text-muted-foreground">Form akan terisi otomatis. Kamu tetap bisa edit manual.</p>
+                <p className="text-xs text-muted-foreground">Nama & deskripsi terisi otomatis. Field lain bisa diisi manual.</p>
               </div>
             )}
           <div className="grid gap-4 md:grid-cols-2">

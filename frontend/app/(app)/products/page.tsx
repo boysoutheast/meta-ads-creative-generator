@@ -1,6 +1,6 @@
 'use client'
-import { useEffect, useState } from 'react'
-import { Plus, Pencil, Trash2, Star, Package, Loader2, Check, AlertCircle } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { Plus, Pencil, Trash2, Package, Loader2, Check, AlertCircle, X } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -8,22 +8,17 @@ import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
 import { toast } from 'sonner'
-import {
-  getProducts,
-  createProduct,
-  updateProduct,
-  deleteProduct,
-  type Product,
-} from '@/lib/api'
+import { getProducts, createProduct, updateProduct, deleteProduct, type Product } from '@/lib/api'
+
+const fmt = (n?: number) =>
+  n !== undefined ? 'Rp ' + n.toLocaleString('id-ID') : ''
 
 const emptyForm = {
   name: '',
   description: '',
-  usp: '',
-  targetAudience: '',
-  adGoal: '',
-  brandColors: '',
-  isDefault: false,
+  texture: '',
+  price: '',
+  promoPrice: '',
 }
 
 export default function ProductsPage() {
@@ -33,7 +28,10 @@ export default function ProductsPage() {
   const [showForm, setShowForm] = useState(false)
   const [editId, setEditId] = useState<string | null>(null)
   const [form, setForm] = useState(emptyForm)
+  const [newPhotos, setNewPhotos] = useState<File[]>([])
+  const [existingPhotos, setExistingPhotos] = useState<string[]>([])
   const [error, setError] = useState<string | null>(null)
+  const fileRef = useRef<HTMLInputElement>(null)
 
   const load = async () => {
     try {
@@ -53,18 +51,20 @@ export default function ProductsPage() {
     setForm({
       name: p.name,
       description: p.description || '',
-      usp: p.usp || '',
-      targetAudience: p.targetAudience || '',
-      adGoal: p.adGoal || '',
-      brandColors: p.brandColors || '',
-      isDefault: p.isDefault,
+      texture: p.texture || '',
+      price: p.price !== undefined ? String(p.price) : '',
+      promoPrice: p.promoPrice !== undefined ? String(p.promoPrice) : '',
     })
+    setExistingPhotos(p.photos || [])
+    setNewPhotos([])
     setShowForm(true)
   }
 
   const handleNew = () => {
     setEditId(null)
     setForm(emptyForm)
+    setExistingPhotos([])
+    setNewPhotos([])
     setShowForm(true)
   }
 
@@ -72,26 +72,43 @@ export default function ProductsPage() {
     setShowForm(false)
     setEditId(null)
     setForm(emptyForm)
+    setNewPhotos([])
+    setExistingPhotos([])
   }
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || [])
+    const total = existingPhotos.length + newPhotos.length + files.length
+    if (total > 5) {
+      toast.error('Maksimal 5 foto')
+      return
+    }
+    setNewPhotos((prev) => [...prev, ...files])
+    if (fileRef.current) fileRef.current.value = ''
+  }
+
+  const removeNewPhoto = (i: number) =>
+    setNewPhotos((prev) => prev.filter((_, idx) => idx !== i))
 
   const handleSave = async () => {
     if (!form.name.trim()) return toast.error('Nama produk wajib diisi')
     setSaving(true)
     try {
+      const payload = {
+        name: form.name.trim(),
+        description: form.description || undefined,
+        texture: form.texture || undefined,
+        price: form.price ? parseFloat(form.price) : undefined,
+        promoPrice: form.promoPrice ? parseFloat(form.promoPrice) : undefined,
+        photos: newPhotos.length > 0 ? newPhotos : undefined,
+      }
       if (editId) {
-        const updated = await updateProduct(editId, form)
-        setProducts((prev) => prev.map((p) => {
-          if (form.isDefault && p.id !== editId) return { ...p, isDefault: false }
-          if (p.id === editId) return updated
-          return p
-        }))
+        const updated = await updateProduct(editId, payload)
+        setProducts((prev) => prev.map((p) => (p.id === editId ? updated : p)))
         toast.success('Produk diperbarui')
       } else {
-        const created = await createProduct(form)
-        setProducts((prev) => {
-          const next = form.isDefault ? prev.map((p) => ({ ...p, isDefault: false })) : prev
-          return [created, ...next]
-        })
+        const created = await createProduct(payload)
+        setProducts((prev) => [created, ...prev])
         toast.success('Produk disimpan')
       }
       handleCancel()
@@ -113,15 +130,7 @@ export default function ProductsPage() {
     }
   }
 
-  const handleSetDefault = async (p: Product) => {
-    try {
-      await updateProduct(p.id, { isDefault: true })
-      setProducts((prev) => prev.map((x) => ({ ...x, isDefault: x.id === p.id })))
-      toast.success(`"${p.name}" dijadikan produk default`)
-    } catch (e: any) {
-      toast.error(e?.response?.data?.error || e.message)
-    }
-  }
+  const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000'
 
   return (
     <div className="space-y-8">
@@ -156,68 +165,127 @@ export default function ProductsPage() {
             <CardDescription>Info ini akan tersedia sebagai pilihan di form generate.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="grid gap-4 md:grid-cols-2">
-              <div className="space-y-2">
-                <Label>Nama produk <span className="text-destructive">*</span></Label>
-                <Input
-                  value={form.name}
-                  onChange={(e) => setForm({ ...form, name: e.target.value })}
-                  placeholder="Contoh: Glow Serum Vitamin C"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>Tujuan iklan</Label>
-                <Input
-                  value={form.adGoal}
-                  onChange={(e) => setForm({ ...form, adGoal: e.target.value })}
-                  placeholder="Contoh: Conversion / brand awareness"
-                />
-              </div>
-              <div className="space-y-2 md:col-span-2">
-                <Label>Deskripsi produk</Label>
-                <Textarea
-                  rows={3}
-                  value={form.description}
-                  onChange={(e) => setForm({ ...form, description: e.target.value })}
-                  placeholder="Apa produknya & manfaat utamanya?"
-                />
-              </div>
-              <div className="space-y-2 md:col-span-2">
-                <Label>USP / keunggulan</Label>
-                <Textarea
-                  rows={2}
-                  value={form.usp}
-                  onChange={(e) => setForm({ ...form, usp: e.target.value })}
-                  placeholder="Keunggulan utama dibanding kompetitor"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>Target audience</Label>
-                <Input
-                  value={form.targetAudience}
-                  onChange={(e) => setForm({ ...form, targetAudience: e.target.value })}
-                  placeholder="Contoh: Wanita 25-35, urban, suka skincare"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>Brand colors</Label>
-                <Input
-                  value={form.brandColors}
-                  onChange={(e) => setForm({ ...form, brandColors: e.target.value })}
-                  placeholder="Contoh: pink pastel, cream, gold"
-                />
-              </div>
-            </div>
-            <div className="flex items-center gap-2 pt-1">
-              <input
-                id="isDefault"
-                type="checkbox"
-                checked={form.isDefault}
-                onChange={(e) => setForm({ ...form, isDefault: e.target.checked })}
-                className="h-4 w-4 accent-primary"
+            {/* 1. Nama */}
+            <div className="space-y-2">
+              <Label>Nama produk <span className="text-destructive">*</span></Label>
+              <Input
+                value={form.name}
+                onChange={(e) => setForm({ ...form, name: e.target.value })}
+                placeholder="Contoh: Glow Serum Vitamin C"
               />
-              <Label htmlFor="isDefault" className="cursor-pointer">Jadikan produk default</Label>
             </div>
+
+            {/* 2. Deskripsi */}
+            <div className="space-y-2">
+              <Label>Deskripsi</Label>
+              <Textarea
+                rows={3}
+                value={form.description}
+                onChange={(e) => setForm({ ...form, description: e.target.value })}
+                placeholder="Apa produknya & manfaat utamanya?"
+              />
+            </div>
+
+            {/* 3. Tekstur */}
+            <div className="space-y-2">
+              <Label>Tekstur</Label>
+              <Input
+                value={form.texture}
+                onChange={(e) => setForm({ ...form, texture: e.target.value })}
+                placeholder="Contoh: ringan, cepat menyerap, tidak lengket"
+              />
+            </div>
+
+            {/* 4. Upload foto */}
+            <div className="space-y-2">
+              <Label>Foto produk (maks 5)</Label>
+              <div className="flex flex-wrap gap-2">
+                {/* Existing photos (edit mode) */}
+                {existingPhotos.map((url, i) => (
+                  <div key={i} className="relative h-20 w-20 shrink-0">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={`${API_URL}${url}`}
+                      alt=""
+                      className="h-full w-full rounded-md object-cover"
+                    />
+                    <span className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full bg-muted-foreground/60 text-[10px] text-white">
+                      ✓
+                    </span>
+                  </div>
+                ))}
+                {/* New photo previews */}
+                {newPhotos.map((file, i) => (
+                  <div key={i} className="relative h-20 w-20 shrink-0">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={URL.createObjectURL(file)}
+                      alt=""
+                      className="h-full w-full rounded-md object-cover"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => removeNewPhoto(i)}
+                      className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full bg-destructive text-white"
+                    >
+                      <X className="h-2.5 w-2.5" />
+                    </button>
+                  </div>
+                ))}
+                {/* Add button */}
+                {existingPhotos.length + newPhotos.length < 5 && (
+                  <button
+                    type="button"
+                    onClick={() => fileRef.current?.click()}
+                    className="flex h-20 w-20 shrink-0 items-center justify-center rounded-md border-2 border-dashed border-muted-foreground/30 text-muted-foreground hover:border-primary hover:text-primary"
+                  >
+                    <Plus className="h-6 w-6" />
+                  </button>
+                )}
+              </div>
+              <input
+                ref={fileRef}
+                type="file"
+                accept="image/*"
+                multiple
+                className="hidden"
+                onChange={handleFileChange}
+              />
+              <p className="text-xs text-muted-foreground">
+                {editId ? 'Upload foto baru akan menggantikan semua foto lama.' : 'Upload hingga 5 foto.'}
+              </p>
+            </div>
+
+            {/* 5 & 6. Harga */}
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-2">
+                <Label>Harga jual</Label>
+                <div className="relative">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">Rp</span>
+                  <Input
+                    type="number"
+                    value={form.price}
+                    onChange={(e) => setForm({ ...form, price: e.target.value })}
+                    placeholder="0"
+                    className="pl-10"
+                  />
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label>Harga promo</Label>
+                <div className="relative">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">Rp</span>
+                  <Input
+                    type="number"
+                    value={form.promoPrice}
+                    onChange={(e) => setForm({ ...form, promoPrice: e.target.value })}
+                    placeholder="0"
+                    className="pl-10"
+                  />
+                </div>
+              </div>
+            </div>
+
             <div className="flex gap-2 pt-2">
               <Button onClick={handleSave} disabled={saving}>
                 {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
@@ -242,35 +310,56 @@ export default function ProductsPage() {
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {products.map((p) => (
-            <Card key={p.id} className={p.isDefault ? 'ring-2 ring-primary/40' : ''}>
+            <Card key={p.id}>
               <CardContent className="p-4">
-                <div className="mb-3 flex items-start justify-between gap-2">
-                  <div className="min-w-0">
+                <div className="mb-3 flex items-start gap-3">
+                  {/* Thumbnail */}
+                  {p.photos && p.photos.length > 0 ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={`${API_URL}${p.photos[0]}`}
+                      alt={p.name}
+                      className="h-20 w-20 shrink-0 rounded-md object-cover"
+                      onError={(e) => {
+                        (e.target as HTMLImageElement).style.display = 'none'
+                      }}
+                    />
+                  ) : (
+                    <div className="flex h-20 w-20 shrink-0 items-center justify-center rounded-md bg-muted">
+                      <Package className="h-8 w-8 text-muted-foreground/40" />
+                    </div>
+                  )}
+                  <div className="min-w-0 flex-1">
                     <p className="truncate font-semibold">{p.name}</p>
-                    {p.adGoal && <p className="mt-0.5 text-xs text-muted-foreground">{p.adGoal}</p>}
+                    {p.description && (
+                      <p className="mt-0.5 line-clamp-2 text-sm text-muted-foreground">{p.description}</p>
+                    )}
                   </div>
-                  {p.isDefault && <Badge variant="secondary" className="shrink-0">Default</Badge>}
                 </div>
-                {p.description && (
-                  <p className="mb-2 line-clamp-2 text-sm text-muted-foreground">{p.description}</p>
+
+                {/* Price row */}
+                {(p.price !== undefined || p.promoPrice !== undefined) && (
+                  <div className="mb-2 flex items-center gap-2 text-sm">
+                    {p.promoPrice !== undefined ? (
+                      <>
+                        <span className="font-medium text-primary">{fmt(p.promoPrice)}</span>
+                        <span className="text-muted-foreground line-through">{fmt(p.price)}</span>
+                      </>
+                    ) : (
+                      <span className="font-medium">{fmt(p.price)}</span>
+                    )}
+                  </div>
                 )}
-                <div className="mt-3 flex flex-wrap gap-1">
-                  {p.targetAudience && (
-                    <Badge variant="outline" className="text-xs">{p.targetAudience}</Badge>
-                  )}
-                  {p.brandColors && (
-                    <Badge variant="outline" className="text-xs">{p.brandColors}</Badge>
-                  )}
-                </div>
-                <div className="mt-4 flex items-center gap-1">
+
+                {/* Texture badge */}
+                {p.texture && (
+                  <Badge variant="outline" className="mb-3 text-xs">{p.texture}</Badge>
+                )}
+
+                <div className="flex items-center gap-1">
                   <Button size="sm" variant="outline" onClick={() => handleEdit(p)}>
                     <Pencil className="h-3.5 w-3.5" />
                   </Button>
-                  {!p.isDefault && (
-                    <Button size="sm" variant="outline" onClick={() => handleSetDefault(p)} title="Jadikan default">
-                      <Star className="h-3.5 w-3.5" />
-                    </Button>
-                  )}
                   <Button
                     size="sm"
                     variant="outline"
