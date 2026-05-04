@@ -41,8 +41,8 @@ app.use(
   })
 );
 app.use(requestLogger);
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 app.use('/uploads', express.static(path.resolve(config.upload.uploadDir)));
 
 // Health (split — pure liveness must NEVER touch DB)
@@ -65,6 +65,58 @@ app.use('/api/generate', generateRoutes);
 app.use('/api/analyze', analyzeRoutes);
 app.use('/api/scale', scaleRoutes);
 app.use('/api/create', createRoutes);
+
+// ─── Audit endpoint ─────────────────────────────────────────────────────────
+app.get('/api/audit', requireAuth, async (req, res) => {
+  const { PrismaClient } = require('@prisma/client');
+  const prisma = new PrismaClient();
+  const checks = [];
+
+  // DB connectivity
+  try {
+    await prisma.$queryRaw`SELECT 1`;
+    checks.push({ name: 'database', status: 'ok' });
+  } catch (e) {
+    checks.push({ name: 'database', status: 'error', message: e.message });
+  } finally {
+    await prisma.$disconnect();
+  }
+
+  // OpenAI key
+  checks.push({
+    name: 'openai_key',
+    status: process.env.OPENAI_API_KEY ? 'ok' : 'missing',
+  });
+
+  // FAL key
+  checks.push({
+    name: 'fal_key',
+    status: process.env.FAL_KEY ? 'ok' : 'missing',
+  });
+
+  // JWT secret
+  checks.push({
+    name: 'jwt_secret',
+    status: process.env.JWT_SECRET ? 'ok' : 'missing',
+  });
+
+  // Uploads dir
+  const fs = require('fs');
+  const uploadDir = config.upload?.uploadDir || 'uploads';
+  try {
+    fs.accessSync(path.resolve(uploadDir), fs.constants.W_OK);
+    checks.push({ name: 'uploads_dir', status: 'ok' });
+  } catch {
+    checks.push({ name: 'uploads_dir', status: 'error', message: 'Not writable or missing' });
+  }
+
+  const allOk = checks.every((c) => c.status === 'ok');
+  res.status(allOk ? 200 : 207).json({
+    ok: allOk,
+    timestamp: new Date().toISOString(),
+    checks,
+  });
+});
 
 app.use((req, res) => {
   res.status(404).json({ error: `Route not found: ${req.method} ${req.path}` });

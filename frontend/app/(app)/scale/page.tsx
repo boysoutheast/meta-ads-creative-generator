@@ -25,6 +25,7 @@ import {
   type Product,
 } from '@/lib/api'
 import { saveHistoryEntry } from '@/lib/history'
+import { compressImage } from '@/lib/utils'
 import { ASPECT_RATIOS } from '@/lib/types'
 import type {
   AnalyzeWinningResponse,
@@ -72,7 +73,8 @@ export default function ScalePage() {
     setResult(null)
     setAnalysisResp(null)
     try {
-      const resp = await analyzeWinningAd(file)
+      const compressed = await compressImage(file)
+      const resp = await analyzeWinningAd(compressed)
       setAnalysisResp(resp)
       setSelectedAngles(resp.availableAngles.map((a) => a.key))
       if (isVideo) setOutputType('video')

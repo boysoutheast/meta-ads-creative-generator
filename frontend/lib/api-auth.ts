@@ -2,27 +2,27 @@ import api from './api'
 import type { AuthUser } from './auth'
 
 export async function register(payload: { name: string; email: string; password: string }) {
-  const res = await api.post('/api/auth/register', payload)
+  const res = await api.post('/auth/register', payload)
   return res.data as { token: string; user: AuthUser }
 }
 
 export async function login(payload: { email: string; password: string }) {
-  const res = await api.post('/api/auth/login', payload)
+  const res = await api.post('/auth/login', payload)
   return res.data as { token: string; user: AuthUser }
 }
 
 export async function getMe() {
-  const res = await api.get('/api/auth/me')
+  const res = await api.get('/auth/me')
   return res.data.user as AuthUser
 }
 
 export async function updateProfile(payload: { name?: string }) {
-  const res = await api.patch('/api/auth/me', payload)
+  const res = await api.patch('/auth/me', payload)
   return res.data.user as AuthUser
 }
 
 export async function changePassword(payload: { currentPassword: string; newPassword: string }) {
-  const res = await api.post('/api/auth/change-password', payload)
+  const res = await api.post('/auth/change-password', payload)
   return res.data
 }
 
@@ -44,7 +44,7 @@ export interface SingleImageJob {
 }
 
 export async function getSingleImageMeta() {
-  const res = await api.get('/api/scale/single-image/angles')
+  const res = await api.get('/scale/single-image/angles')
   return res.data as { angles: string[]; formats: string[] }
 }
 
@@ -55,12 +55,12 @@ export async function createSingleImageJob(payload: {
   cta: string
   format: string
 }) {
-  const res = await api.post('/api/scale/single-image', payload)
+  const res = await api.post('/scale/single-image', payload)
   return res.data as { jobId: string; status: string }
 }
 
 export async function getSingleImageJob(jobId: string) {
-  const res = await api.get(`/api/scale/single-image/jobs/${jobId}`)
+  const res = await api.get(`/scale/single-image/jobs/${jobId}`)
   return res.data as SingleImageJob
 }
 
@@ -82,21 +82,21 @@ export interface LibraryItem {
 }
 
 export async function listLibrary(filters?: { type?: string; angle?: string }) {
-  const res = await api.get('/api/library', { params: filters })
+  const res = await api.get('/library', { params: filters })
   return res.data as { items: LibraryItem[]; total: number }
 }
 
 export async function saveToLibrary(payload: Partial<LibraryItem> & { type: string; title: string; jobId?: string }) {
-  const res = await api.post('/api/library', payload)
+  const res = await api.post('/library', payload)
   return res.data as { item: LibraryItem }
 }
 
 export async function deleteLibraryItem(id: string) {
-  await api.delete(`/api/library/${id}`)
+  await api.delete(`/library/${id}`)
 }
 
 export async function getLibraryStats() {
-  const res = await api.get('/api/library/stats/summary')
+  const res = await api.get('/library/stats/summary')
   return res.data as {
     totalItems: number
     totalJobs: number

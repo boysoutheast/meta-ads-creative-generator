@@ -29,6 +29,7 @@ import {
   type Product,
 } from '@/lib/api'
 import { saveHistoryEntry } from '@/lib/history'
+import { compressImage } from '@/lib/utils'
 import { ASPECT_RATIOS } from '@/lib/types'
 import type {
   AspectRatio,
@@ -112,7 +113,8 @@ export default function CreatePage() {
     setError(null)
     setAnalyzing(true)
     try {
-      const resp = await analyzeReference(file)
+      const compressed = await compressImage(file)
+      const resp = await analyzeReference(compressed)
       setRefAnalysis(resp.analysis)
     } catch (e: any) {
       setError(e?.response?.data?.error || e.message || 'Gagal menganalisis referensi')
