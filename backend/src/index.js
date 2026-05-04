@@ -82,16 +82,10 @@ app.get('/api/audit', requireAuth, async (req, res) => {
     await prisma.$disconnect();
   }
 
-  // OpenAI key
+  // APIMART key (used for image/video/vision generation)
   checks.push({
-    name: 'openai_key',
-    status: process.env.OPENAI_API_KEY ? 'ok' : 'missing',
-  });
-
-  // FAL key
-  checks.push({
-    name: 'fal_key',
-    status: process.env.FAL_KEY ? 'ok' : 'missing',
+    name: 'apimart_key',
+    status: process.env.APIMART_API_KEY ? 'ok' : 'missing',
   });
 
   // JWT secret
