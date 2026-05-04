@@ -3,12 +3,17 @@ const router = express.Router();
 const fs = require('fs');
 const upload = require('../middleware/upload');
 const { analyzeVideoReference } = require('../services/videoAnalyzer');
-const { analyzeImage, chatCompletion, generateVideo, getTask } = require('../services/apimart');
-const config = require('../config');
+const {
+  SCALING_ANGLES,
+  generateScalingAngles,
+  generateVariationPrompts,
+  batchGenerateVideos,
+} = require('../services/scalingService');
+const { analyzeImage, uploadImageToApimart, getTask } = require('../services/apimart');
 
 /**
  * POST /api/scale-video/analyze
- * Upload & analyze a winning video ad
+ * Upload & analyze a winning video ad — returns video analysis + available angles
  */
 router.post('/analyze', upload.single('file'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'Video file is required' });
@@ -19,7 +24,14 @@ router.post('/analyze', upload.single('file'), async (req, res) => {
   try {
     const { analysis, frames } = await analyzeVideoReference(req.file.path);
     fs.unlink(req.file.path, () => {});
-    res.json({ analysis, framesAnalyzed: frames, filename: req.file.originalname });
+
+    const availableAngles = Object.entries(SCALING_ANGLES).map(([key, val]) => ({
+      key,
+      label: val.label,
+      hook: val.hook,
+    }));
+
+    res.json({ analysis, framesAnalyzed: frames, filename: req.file.originalname, availableAngles });
   } catch (err) {
     fs.unlink(req.file.path, () => {});
     throw err;
@@ -28,16 +40,18 @@ router.post('/analyze', upload.single('file'), async (req, res) => {
 
 /**
  * POST /api/scale-video/generate
- * Generate a video based on winning ad analysis + product
+ * Generate angle variations as 10-second kling-v2-6 videos.
+ * Mirror of /scale/generate-variations — same angle pipeline, video output.
  */
 router.post('/generate', async (req, res) => {
   const {
     videoAnalysis,
     productName,
     productDescription = '',
-    productPhotoBase64 = null,
+    selectedAngles = [],
     aspectRatio = '9:16',
-    duration = 30,
+    productPhotoBase64 = null,
+    productPhotoMime = 'image/jpeg',
   } = req.body;
 
   if (!videoAnalysis || !productName) {
@@ -50,120 +64,63 @@ router.post('/generate', async (req, res) => {
     try {
       productVisualDescription = await analyzeImage({
         imageBase64: productPhotoBase64,
-        mimeType: 'image/jpeg',
+        mimeType: productPhotoMime || 'image/jpeg',
         prompt: 'Describe this product visually in detail: shape, color, packaging, texture, size, label/branding. Be specific for AI video generation. Under 80 words.',
       });
     } catch (e) {
-      console.warn('Product photo analysis failed:', e.message);
+      console.warn('Product photo analysis failed (non-fatal):', e.message);
     }
   }
 
-  // Step 2: Generate scene-by-scene video script
-  const scriptPrompt = `You are a video ad director adapting a winning ad concept for a new product.
-
-Winning ad analysis:
-- Hook type: ${videoAnalysis.hookType || 'visual hook'}
-- Overall style: ${videoAnalysis.overallStyle || 'professional'}
-- Pacing: ${videoAnalysis.pacing || 'moderate'}
-- Emotion arc: ${videoAnalysis.emotionArc || 'engagement → desire → action'}
-- Color palette: ${(videoAnalysis.colorPalette || []).join(', ')}
-- Camera movement: ${videoAnalysis.cameraMovement || 'mixed'}
-- Music vibe: ${videoAnalysis.musicVibe || 'uplifting'}
-${videoAnalysis.scenes && videoAnalysis.scenes.length > 0 ? `Original scenes: ${JSON.stringify(videoAnalysis.scenes)}` : ''}
-
-New product: ${productName}
-${productDescription ? `Product description: ${productDescription}` : ''}
-${productVisualDescription ? `Product visual: ${productVisualDescription}` : ''}
-
-Target duration: ${duration} seconds
-Aspect ratio: ${aspectRatio}
-
-Create a ${duration}-second video script adapted for ${productName}. Keep the SAME hook structure, emotion arc, visual style, and pacing from the winning ad. Replace ALL product references with ${productName}.
-
-Return ONLY valid JSON array (3-6 scenes):
-[
-  {
-    "scene": 1,
-    "duration": "0-3s",
-    "description": "detailed scene description",
-    "visualStyle": "visual style notes",
-    "cameraAngle": "camera angle/movement"
-  }
-]`;
-
-  const scriptRaw = await chatCompletion({
-    model: config.models.chat,
-    messages: [
-      { role: 'system', content: 'You are a video director. Return only valid JSON array.' },
-      { role: 'user', content: scriptPrompt },
-    ],
-    maxTokens: 1000,
-    temperature: 0.8,
-  });
-
-  let videoScript = [];
-  try {
-    const jsonMatch = scriptRaw.match(/\[[\s\S]*\]/);
-    if (jsonMatch) videoScript = JSON.parse(jsonMatch[0]);
-  } catch (e) {
-    console.warn('Could not parse video script:', e.message);
+  // Step 2: Upload product photo as image-to-video reference for kling
+  let productImageUrl = null;
+  if (productPhotoBase64) {
+    try {
+      productImageUrl = await uploadImageToApimart(productPhotoBase64, productPhotoMime || 'image/jpeg');
+      if (productImageUrl) console.log('Product photo uploaded for kling:', productImageUrl.slice(0, 60));
+    } catch (e) {
+      console.warn('Product photo upload for video failed (non-fatal):', e.message);
+    }
   }
 
-  // Step 3: Compile scene descriptions into single video prompt
-  const sceneDescriptions = videoScript.length > 0
-    ? videoScript.map((s) => `[${s.duration}] ${s.description}`).join(' | ')
-    : `Product showcase for ${productName}, ${videoAnalysis.overallStyle || 'professional style'}`;
+  // Step 3: Generate scaling angles using video analysis as the "winning ad DNA"
+  const angles = await generateScalingAngles(
+    videoAnalysis,
+    productName,
+    selectedAngles,
+    productVisualDescription,
+    productDescription,
+    null
+  );
+  if (!angles.length) {
+    return res.status(500).json({ error: 'Failed to generate scaling angles' });
+  }
 
-  const videoPromptRaw = await chatCompletion({
-    model: config.models.chat,
-    messages: [
-      {
-        role: 'system',
-        content: 'You are an expert at writing prompts for AI video generators (Kling, Runway, Sora). Write in English. Be cinematic and specific.',
-      },
-      {
-        role: 'user',
-        content: `Write a single cohesive video generation prompt for this ${duration}-second Meta Ad video.
+  // Step 4: Build per-angle prompts (same pipeline as images)
+  const variationsWithPrompts = await generateVariationPrompts(
+    videoAnalysis,
+    angles,
+    productName,
+    productVisualDescription,
+    {},
+    null
+  );
 
-Product: ${productName}
-${productVisualDescription ? `Product visual: ${productVisualDescription}` : ''}
-Scene sequence: ${sceneDescriptions}
-Style: ${videoAnalysis.overallStyle || 'professional, warm'}
-Color palette: ${(videoAnalysis.colorPalette || []).join(', ')}
-Emotion arc: ${videoAnalysis.emotionArc || 'engagement to action'}
-Pacing: ${videoAnalysis.pacing || 'moderate'}
-Music vibe: ${videoAnalysis.musicVibe || 'uplifting'}
-Aspect ratio: ${aspectRatio} (${aspectRatio === '9:16' ? 'portrait/vertical' : 'square'})
-
-Write a detailed video prompt (150-200 words). No text overlays or typography. Start with: "A ${duration}-second professional Meta Ads video, "
-
-Output ONLY the prompt, no explanations.`,
-      },
-    ],
-    maxTokens: 400,
-    temperature: 0.8,
-  });
-
-  const videoPrompt = videoPromptRaw.trim();
-
-  // Step 4: Submit to apimart video generation
-  const videoResult = await generateVideo({ prompt: videoPrompt, aspectRatio, duration });
-  const taskId = videoResult.id || videoResult.taskId || videoResult.task_id || null;
+  // Step 5: Batch generate 10-second kling-v2-6 videos for every variation
+  const finalVariations = await batchGenerateVideos(variationsWithPrompts, aspectRatio, productImageUrl);
 
   res.json({
-    taskId,
-    videoScript,
-    videoPrompt,
+    productName,
+    aspectRatio,
+    totalVariations: finalVariations.length,
+    variations: finalVariations,
     productVisualDescription,
-    message: taskId
-      ? 'Video generation started. Poll /status/:taskId for progress.'
-      : 'Video generation submitted but no taskId returned.',
   });
 });
 
 /**
  * GET /api/scale-video/status/:taskId
- * Poll video generation status
+ * Manual task status check (for debugging)
  */
 router.get('/status/:taskId', async (req, res) => {
   const { taskId } = req.params;
@@ -172,10 +129,12 @@ router.get('/status/:taskId', async (req, res) => {
     const status = (task.status || '').toLowerCase();
 
     let videoUrl = null;
-    if (status === 'completed' || status === 'succeed' || status === 'success') {
+    if (['completed', 'succeed', 'success'].includes(status)) {
       videoUrl =
         task.result?.video_url ||
         task.result?.url ||
+        task.result?.videos?.[0]?.url ||
+        task.videos?.[0]?.url ||
         task.video_url ||
         task.url ||
         task.output?.url ||
@@ -183,14 +142,14 @@ router.get('/status/:taskId', async (req, res) => {
     }
 
     const failed = ['failed', 'error', 'cancelled'].includes(status);
-
     res.json({
       taskId,
-      status: failed ? 'failed' : status === 'completed' || status === 'succeed' || status === 'success' ? 'completed' : 'processing',
+      status: failed ? 'failed'
+        : ['completed', 'succeed', 'success'].includes(status) ? 'completed'
+        : 'processing',
       videoUrl,
       progress: task.progress || null,
       error: failed ? (task.message || task.error || 'Generation failed') : null,
-      raw: task,
     });
   } catch (e) {
     res.status(500).json({ error: e.message });

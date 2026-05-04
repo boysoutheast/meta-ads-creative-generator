@@ -31,6 +31,9 @@ export interface AngleVariation {
   promptError?: string | null
   imageUrl?: string | null
   imageError?: string | null
+  // Video output (kling-v2-6)
+  videoUrl?: string | null
+  videoError?: string | null
   // V2 concept translation fields
   translatedConcept?: string | null
   imageScenario?: string | null

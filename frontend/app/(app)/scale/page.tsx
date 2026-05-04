@@ -23,7 +23,6 @@ import {
   analyzeWinningAd,
   generateScalingVariations,
   generateScaleCarousel,
-  generateScaleVideo,
   getProducts,
   type Product,
 } from '@/lib/api'
@@ -36,7 +35,6 @@ import type {
   ScaleCarouselResponse,
   AspectRatio,
   ScalingAngle,
-  AngleVariation,
 } from '@/lib/types'
 
 const fmt = (n?: number) =>
@@ -46,7 +44,6 @@ export default function ScalePage() {
   const [file, setFile] = useState<File | null>(null)
   const [aspectRatio, setAspectRatio] = useState<AspectRatio>('1:1')
   const [generateImages, setGenerateImages] = useState(true)
-  const [outputType, setOutputType] = useState<'image' | 'video'>('image')
 
   const [analyzing, setAnalyzing] = useState(false)
   const [generating, setGenerating] = useState(false)
@@ -80,8 +77,6 @@ export default function ScalePage() {
       .catch(() => {})
   }, [])
 
-  const isVideo = file?.type.startsWith('video/') ?? false
-
   const handleAnalyze = async () => {
     if (!file) return
     setError(null)
@@ -97,7 +92,6 @@ export default function ScalePage() {
       const resp = await analyzeWinningAd(compressed)
       setAnalysisResp(resp)
       setSelectedAngles(resp.availableAngles.map((a) => a.key))
-      if (isVideo) setOutputType('video')
       // Store winning ad for use as reference in image generation
       if (resp.winningAdBase64) {
         setWinningAdBase64(resp.winningAdBase64)
@@ -135,7 +129,7 @@ export default function ScalePage() {
         productDescription: selectedProduct.description,
         selectedAngles,
         aspectRatio,
-        generateImages: outputType === 'image' && generateImages,
+        generateImages: generateImages,
         productPhotoBase64,
         productPhotoMime,
         winningAdBase64: winningAdBase64 ?? undefined,
@@ -145,34 +139,17 @@ export default function ScalePage() {
         masterImagePrompt: masterImagePrompt ?? undefined,
       })
 
-      if (outputType === 'video') {
-        const videoResults = await Promise.allSettled(
-          resp.variations.map(async (v) => {
-            if (!v.imagePrompt) return v
-            try {
-              const job = await generateScaleVideo(v.imagePrompt, aspectRatio, 5)
-              return { ...v, videoJobId: job.id || job.taskId || null }
-            } catch (err: any) {
-              return { ...v, videoError: err.message } as AngleVariation & { videoError?: string }
-            }
-          })
-        )
-        resp.variations = videoResults.map((r, i) =>
-          r.status === 'fulfilled' ? (r.value as AngleVariation) : resp.variations[i]
-        )
-      }
-
       setResult(resp)
       setProductVisualDescription(resp.productVisualDescription ?? null)
 
-      if (outputType === 'image') setShowCarouselOffer(true)
+      setShowCarouselOffer(true)
 
       const firstImg = resp.variations.find((v) => v.imageUrl)?.imageUrl
       saveHistoryEntry({
         kind: 'scale',
         productName: selectedProduct.name,
         thumbnailUrl: firstImg || null,
-        payload: { ...resp, outputType, aspectRatio },
+        payload: { ...resp, aspectRatio },
       })
     } catch (e: any) {
       setError(e?.response?.data?.error || e.message || 'Gagal generate variasi')
@@ -285,24 +262,6 @@ export default function ScalePage() {
                 )}
 
                 <div className="space-y-2">
-                  <Label>Output type</Label>
-                  <div className="flex gap-2">
-                    <Button
-                      type="button"
-                      variant={outputType === 'image' ? 'default' : 'outline'}
-                      onClick={() => setOutputType('image')}
-                      className="flex-1"
-                    >Image</Button>
-                    <Button
-                      type="button"
-                      variant={outputType === 'video' ? 'default' : 'outline'}
-                      onClick={() => setOutputType('video')}
-                      className="flex-1"
-                    >Video</Button>
-                  </div>
-                </div>
-
-                <div className="space-y-2">
                   <Label>Aspect ratio</Label>
                   <Select value={aspectRatio} onValueChange={(v) => setAspectRatio(v as AspectRatio)}>
                     <SelectTrigger><SelectValue /></SelectTrigger>
@@ -316,15 +275,13 @@ export default function ScalePage() {
                   </Select>
                 </div>
 
-                {outputType === 'image' && (
-                  <div className="flex items-center justify-between rounded-lg border p-3">
-                    <div>
-                      <Label htmlFor="genImg">Generate gambar AI</Label>
-                      <p className="text-xs text-muted-foreground">Kalau OFF, hanya copy + prompt.</p>
-                    </div>
-                    <Switch id="genImg" checked={generateImages} onCheckedChange={setGenerateImages} />
+                <div className="flex items-center justify-between rounded-lg border p-3">
+                  <div>
+                    <Label htmlFor="genImg">Generate gambar AI</Label>
+                    <p className="text-xs text-muted-foreground">Kalau OFF, hanya copy + prompt.</p>
                   </div>
-                )}
+                  <Switch id="genImg" checked={generateImages} onCheckedChange={setGenerateImages} />
+                </div>
 
                 <div>
                   <Label className="mb-2 block">Pilih angle</Label>
@@ -413,7 +370,6 @@ export default function ScalePage() {
                       bodyText: v.bodyText,
                       cta: v.cta,
                       imageUrl: v.imageUrl ?? null,
-                      videoJobId: (v as any).videoJobId ?? null,
                       imagePrompt: v.imagePrompt,
                       translatedConcept: v.translatedConcept ?? null,
                       error: v.imageError || v.promptError,

@@ -167,14 +167,18 @@ async function generateImage({ prompt, size = '1024x1024', model, referenceImage
   throw new Error(`Image generation timed out after ${timeoutMs}ms (task ${taskId})`);
 }
 
-async function generateVideo({ prompt, duration = 5, aspectRatio = '16:9', model }) {
+async function generateVideo({ prompt, duration = 10, aspectRatio = '9:16', model, imageUrl }) {
   const payload = {
     model: model || config.models.video,
     prompt,
     duration,
     aspect_ratio: aspectRatio,
   };
-  const response = await imageClient.post('/videos/generations', payload);
+  // image-to-video: pass product photo as reference when available
+  if (imageUrl) {
+    payload.image_url = imageUrl;
+  }
+  const response = await imageClient.post('/videos/generations', payload, { timeout: 60000 });
   const rawData = response.data?.data;
   return Array.isArray(rawData) ? rawData[0] : (rawData || response.data);
 }

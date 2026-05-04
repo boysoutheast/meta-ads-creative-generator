@@ -100,18 +100,28 @@ export async function analyzeWinningVideo(file: File) {
   const res = await api.post('/scale-video/analyze', fd, {
     headers: { 'Content-Type': 'multipart/form-data' },
   })
-  return res.data as { analysis: any; framesAnalyzed: number; filename: string }
+  return res.data as { analysis: any; framesAnalyzed: number; filename: string; availableAngles: import('./types').ScalingAngle[] }
+}
+
+export interface ScaleVideoGenerateResponse {
+  productName: string
+  aspectRatio: string
+  totalVariations: number
+  variations: import('./types').AngleVariation[]
+  productVisualDescription?: string | null
 }
 
 export async function generateScaleVideoJob(payload: {
   videoAnalysis: any
   productName: string
   productDescription?: string
-  productPhotoBase64?: string
+  selectedAngles?: string[]
   aspectRatio?: string
-  duration?: number
-}): Promise<ScaleVideoJobResponse> {
-  const res = await api.post('/scale-video/generate', payload)
+  productPhotoBase64?: string
+  productPhotoMime?: string
+}): Promise<ScaleVideoGenerateResponse> {
+  // Videos take longer — 10s each × N angles × kling queue time = up to 10 min
+  const res = await api.post('/scale-video/generate', payload, { timeout: 600000 })
   return res.data
 }
 
