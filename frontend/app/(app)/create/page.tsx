@@ -1,5 +1,5 @@
 'use client'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Loader2, ChevronLeft, ChevronRight, Sparkles, Wand2, AlertCircle, Check } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -25,6 +25,8 @@ import {
   analyzeReference,
   generateCreateAd,
   generateCreateCarousel,
+  getProducts,
+  type Product,
 } from '@/lib/api'
 import { saveHistoryEntry } from '@/lib/history'
 import { ASPECT_RATIOS } from '@/lib/types'
@@ -78,6 +80,30 @@ export default function CreatePage() {
   const [error, setError] = useState<string | null>(null)
   const [result, setResult] = useState<CreateGenerateResponse | null>(null)
   const [carousel, setCarousel] = useState<CarouselResponse | null>(null)
+
+  // Saved products for autofill
+  const [savedProducts, setSavedProducts] = useState<Product[]>([])
+  const [selectedProductId, setSelectedProductId] = useState<string>('')
+
+  useEffect(() => {
+    getProducts()
+      .then((list) => {
+        setSavedProducts(list)
+        const def = list.find((p) => p.isDefault)
+        if (def) {
+          setSelectedProductId(def.id)
+          setProduct({
+            productName: def.name,
+            description: def.description || '',
+            usp: def.usp || '',
+            targetAudience: def.targetAudience || '',
+            adGoal: def.adGoal || '',
+            brandColors: def.brandColors || '',
+          })
+        }
+      })
+      .catch(() => {})
+  }, [])
 
   const canGoNext = (() => {
     if (step === 1) return !!refAnalysis
@@ -206,7 +232,36 @@ export default function CreatePage() {
             <CardTitle className="text-base">Info produk</CardTitle>
             <CardDescription>Semakin lengkap, hasil makin relevan.</CardDescription>
           </CardHeader>
-          <CardContent className="grid gap-4 md:grid-cols-2">
+          <CardContent className="space-y-4">
+            {savedProducts.length > 0 && (
+              <div className="space-y-2">
+                <Label>Muat dari produk tersimpan</Label>
+                <Select
+                  value={selectedProductId}
+                  onValueChange={(id) => {
+                    setSelectedProductId(id)
+                    const p = savedProducts.find((x) => x.id === id)
+                    if (p) setProduct({
+                      productName: p.name,
+                      description: p.description || '',
+                      usp: p.usp || '',
+                      targetAudience: p.targetAudience || '',
+                      adGoal: p.adGoal || '',
+                      brandColors: p.brandColors || '',
+                    })
+                  }}
+                >
+                  <SelectTrigger><SelectValue placeholder="Pilih produk…" /></SelectTrigger>
+                  <SelectContent>
+                    {savedProducts.map((p) => (
+                      <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">Form akan terisi otomatis. Kamu tetap bisa edit manual.</p>
+              </div>
+            )}
+          <div className="grid gap-4 md:grid-cols-2">
             <Field label="Nama produk *" required>
               <Input
                 value={product.productName}
@@ -251,6 +306,7 @@ export default function CreatePage() {
                 placeholder="Contoh: pink pastel, cream, gold"
               />
             </Field>
+          </div>
           </CardContent>
         </Card>
       )}

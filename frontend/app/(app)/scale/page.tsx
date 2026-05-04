@@ -1,5 +1,5 @@
 'use client'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Loader2, Sparkles, AlertCircle, Layers } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -22,6 +22,8 @@ import {
   analyzeWinningAd,
   generateScalingVariations,
   generateScaleVideo,
+  getProducts,
+  type Product,
 } from '@/lib/api'
 import { saveHistoryEntry } from '@/lib/history'
 import { ASPECT_RATIOS } from '@/lib/types'
@@ -47,6 +49,22 @@ export default function ScalePage() {
   const [analysisResp, setAnalysisResp] = useState<AnalyzeWinningResponse | null>(null)
   const [selectedAngles, setSelectedAngles] = useState<string[]>([])
   const [result, setResult] = useState<GenerateVariationsResponse | null>(null)
+
+  const [products, setProducts] = useState<Product[]>([])
+  const [selectedProductId, setSelectedProductId] = useState<string>('')
+
+  useEffect(() => {
+    getProducts()
+      .then((list) => {
+        setProducts(list)
+        const def = list.find((p) => p.isDefault)
+        if (def) {
+          setSelectedProductId(def.id)
+          setProductName(def.name)
+        }
+      })
+      .catch(() => {})
+  }, [])
 
   const isVideo = file?.type.startsWith('video/') ?? false
 
@@ -161,6 +179,27 @@ export default function ScalePage() {
                 <CardTitle className="text-base">2. Setting & angle</CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
+                {products.length > 0 && (
+                  <div className="space-y-2">
+                    <Label>Produk tersimpan</Label>
+                    <Select
+                      value={selectedProductId}
+                      onValueChange={(id) => {
+                        setSelectedProductId(id)
+                        const p = products.find((x) => x.id === id)
+                        if (p) setProductName(p.name)
+                      }}
+                    >
+                      <SelectTrigger><SelectValue placeholder="Pilih produk…" /></SelectTrigger>
+                      <SelectContent>
+                        {products.map((p) => (
+                          <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+
                 <div className="space-y-2">
                   <Label htmlFor="productName">Nama produk</Label>
                   <Input

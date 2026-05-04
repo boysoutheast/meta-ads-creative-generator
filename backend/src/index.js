@@ -20,6 +20,9 @@ const healthRoutes = require('./routes/health');
 const authRoutes = require('./routes/auth');
 const libraryRoutes = require('./routes/library');
 const singleImageRoutes = require('./routes/single-image');
+const productRoutes = require('./routes/products');
+const { requireAuth } = require('./middleware/auth');
+const { getTask } = require('./services/apimart');
 
 const app = express();
 
@@ -48,7 +51,14 @@ app.use('/health', healthRoutes);
 // API
 app.use('/api/auth', authRoutes);
 app.use('/api/library', libraryRoutes);
+app.use('/api/products', productRoutes);
 app.use('/api/scale/single-image', singleImageRoutes);
+
+// Generic task polling for async video jobs
+app.get('/api/tasks/:id', requireAuth, async (req, res) => {
+  const task = await getTask(req.params.id);
+  res.json(task);
+});
 
 // Existing v1 routes
 app.use('/api/generate', generateRoutes);

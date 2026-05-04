@@ -19,6 +19,7 @@ model User {
   libraryItems    LibraryItem[]
   generationJobs  GenerationJob[]
   auditLogs       AuditLog[]
+  products        Product[]
 
   @@map("users")
 }
@@ -85,4 +86,23 @@ model AuditLog {
   @@index([userId, createdAt(sort: Desc)])
   @@index([action, createdAt(sort: Desc)])
   @@map("audit_logs")
+}
+
+model Product {
+  id             String   @id @default(cuid())
+  userId         String   @map("user_id")
+  name           String
+  description    String?  @db.Text
+  usp            String?  @db.Text
+  targetAudience String?  @map("target_audience")
+  adGoal         String?  @map("ad_goal")
+  brandColors    String?  @map("brand_colors")
+  isDefault      Boolean  @default(false) @map("is_default")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@map("products")
 }

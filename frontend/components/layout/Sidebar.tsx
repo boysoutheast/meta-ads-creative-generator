@@ -9,6 +9,8 @@ import {
   Sparkles,
   LogOut,
   User as UserIcon,
+  History,
+  Package,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/lib/auth'
@@ -20,14 +22,21 @@ const navGroups = [
     items: [
       { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
       { href: '/library', label: 'Library', icon: Library },
+      { href: '/history', label: 'History', icon: History },
     ],
   },
   {
     label: 'Generate',
     items: [
       { href: '/generate/single-image', label: 'Single Image', icon: ImageIcon },
-      { href: '/scale', label: 'Scale Winning (legacy)', icon: Wand2 },
+      { href: '/scale', label: 'Scale Winning', icon: Wand2 },
       { href: '/create', label: 'Create w/ Reference', icon: Sparkles },
+    ],
+  },
+  {
+    label: 'Produk',
+    items: [
+      { href: '/products', label: 'Insert Produk', icon: Package },
     ],
   },
   {

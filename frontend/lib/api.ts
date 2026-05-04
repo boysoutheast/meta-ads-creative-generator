@@ -105,3 +105,41 @@ export async function generateCreateCarousel(payload: {
 }
 
 export default api
+
+// ─── Products ───────────────────────────────────────────────────────────────
+
+export interface Product {
+  id: string
+  name: string
+  description?: string
+  usp?: string
+  targetAudience?: string
+  adGoal?: string
+  brandColors?: string
+  isDefault: boolean
+  createdAt: string
+}
+
+export async function getProducts(): Promise<Product[]> {
+  const res = await api.get<{ products: Product[] }>('/api/products')
+  return res.data.products
+}
+
+export async function createProduct(
+  data: Omit<Product, 'id' | 'createdAt'>
+): Promise<Product> {
+  const res = await api.post<{ product: Product }>('/api/products', data)
+  return res.data.product
+}
+
+export async function updateProduct(
+  id: string,
+  data: Partial<Omit<Product, 'id' | 'createdAt'>>
+): Promise<Product> {
+  const res = await api.put<{ product: Product }>(`/api/products/${id}`, data)
+  return res.data.product
+}
+
+export async function deleteProduct(id: string): Promise<void> {
+  await api.delete(`/api/products/${id}`)
+}

@@ -1,16 +1,6 @@
 const axios = require('axios');
 const config = require('../config');
 
-/**
- * Apimart.ai client.
- *
- * Two distinct hosts/paths:
- *  - Chat:   https://apimart.ai/api/v1/chat/completions   (sync, OpenAI-compat)
- *  - Image:  https://api.apimart.ai/v1/images/generations (async, returns task_id)
- *  - Task:   https://api.apimart.ai/v1/tasks/:id          (poll for image result)
- *  - Video:  uses task pattern too via /v1/videos/...
- */
-
 const CHAT_BASE = config.apimart.baseUrl; // https://apimart.ai/api/v1
 const IMAGE_BASE = process.env.APIMART_IMAGE_BASE || 'https://api.apimart.ai/v1';
 
@@ -32,9 +22,6 @@ const imageClient = axios.create({
   timeout: 60000,
 });
 
-/**
- * Chat completion (sync).
- */
 async function chatCompletion({ model, messages, maxTokens = 1500, temperature = 0.7 }) {
   const response = await chatClient.post('/chat/completions', {
     model: model || config.models.chat,
@@ -45,9 +32,6 @@ async function chatCompletion({ model, messages, maxTokens = 1500, temperature =
   return response.data.choices[0].message.content;
 }
 
-/**
- * Vision analysis - same chat endpoint with image_url part.
- */
 async function analyzeImage({ imageBase64, mimeType = 'image/jpeg', prompt }) {
   const messages = [
     {
@@ -61,77 +45,111 @@ async function analyzeImage({ imageBase64, mimeType = 'image/jpeg', prompt }) {
   return await chatCompletion({ model: config.models.vision, messages, maxTokens: 2000 });
 }
 
-/**
- * Submit image generation. Returns task_id.
- */
 async function submitImageJob({ prompt, size = '1024x1024', model, n = 1 }) {
-  const response = await imageClient.post('/images/generations', {
+  const payload = {
     model: model || config.models.image,
     prompt,
     size,
     n,
-  });
-  // Async response: { code: 200, data: [ { status: "submitted", task_id: "..." } ] }
-  // Or sync (rare): { code: 200, data: [ { url: "..." } ] }
-  const data = response.data?.data;
-  if (!Array.isArray(data) || !data.length) {
-    throw new Error('Invalid image-generation response: ' + JSON.stringify(response.data).slice(0, 200));
+  };
+  const response = await imageClient.post('/images/generations', payload);
+  // Async: { code:200, data:[{ status:"submitted", task_id:"..." }] }
+  // Sync:  { code:200, data:[{ url:"..." }] }
+  // Also handle: { data: { task_id: "..." } } flat shape
+  const rawData = response.data?.data;
+  const firstItem = Array.isArray(rawData) ? rawData[0] : rawData;
+  if (!firstItem) {
+    throw new Error('Invalid image-generation response: ' + JSON.stringify(response.data).slice(0, 300));
   }
-  return data[0]; // { task_id, status } or { url }
+  return firstItem;
 }
 
-/**
- * Poll a task. Returns the data object.
- */
 async function getTask(taskId) {
   const response = await imageClient.get(`/tasks/${taskId}`);
-  return response.data.data;
+  // Handle both { data: {...} } and { data: { data: {...} } }
+  return response.data?.data ?? response.data;
 }
 
-/**
- * Submit + poll until terminal. Returns the first image URL or throws.
- */
-async function generateImage({ prompt, size = '1024x1024', model, pollIntervalMs = 4000, timeoutMs = 180000 }) {
+async function generateImage({ prompt, size = '1024x1024', model, pollIntervalMs = 5000, timeoutMs = 180000 }) {
   const submitted = await submitImageJob({ prompt, size, model });
 
-  // Sync path
-  if (submitted.url) return [{ url: Array.isArray(submitted.url) ? submitted.url[0] : submitted.url }];
+  // Sync path — url returned immediately
+  if (submitted.url) {
+    const url = Array.isArray(submitted.url) ? submitted.url[0] : submitted.url;
+    return [{ url }];
+  }
 
   const taskId = submitted.task_id || submitted.taskId || submitted.id;
   if (!taskId) {
-    throw new Error('No task_id returned: ' + JSON.stringify(submitted).slice(0, 200));
+    throw new Error('No task_id in image response: ' + JSON.stringify(submitted).slice(0, 300));
   }
 
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
     await new Promise((r) => setTimeout(r, pollIntervalMs));
     const task = await getTask(taskId);
-    if (task.status === 'completed') {
-      const images = task.result?.images;
-      if (!images?.length) {
-        throw new Error('Task completed but no images: ' + JSON.stringify(task).slice(0, 200));
+    const status = (task.status || '').toLowerCase();
+
+    if (status === 'completed' || status === 'succeed' || status === 'success') {
+      // Various result shapes from different providers
+      const images =
+        task.result?.images ||
+        task.images ||
+        task.result?.data ||
+        task.output?.images ||
+        [];
+      if (images.length) {
+        const url = Array.isArray(images[0].url) ? images[0].url[0] : (images[0].url || images[0]);
+        return [{ url }];
       }
-      const url = Array.isArray(images[0].url) ? images[0].url[0] : images[0].url;
-      return [{ url }];
+      // Some providers put url directly on result
+      const directUrl = task.result?.url || task.url || task.output?.url;
+      if (directUrl) return [{ url: directUrl }];
+      throw new Error('Task completed but no images found: ' + JSON.stringify(task).slice(0, 300));
     }
-    if (task.status === 'failed' || task.status === 'error') {
-      throw new Error('Image generation task failed: ' + JSON.stringify(task).slice(0, 200));
+
+    if (['failed', 'error', 'cancelled'].includes(status)) {
+      throw new Error('Image generation task failed: ' + JSON.stringify(task).slice(0, 300));
     }
+    // status pending/processing/queued — keep polling
   }
   throw new Error(`Image generation timed out after ${timeoutMs}ms (task ${taskId})`);
 }
 
-/**
- * Submit video generation (similar async pattern).
- */
 async function generateVideo({ prompt, duration = 5, aspectRatio = '16:9', model }) {
-  const response = await imageClient.post('/videos/generations', {
+  const payload = {
     model: model || config.models.video,
     prompt,
     duration,
     aspect_ratio: aspectRatio,
-  });
-  return response.data?.data?.[0] || response.data;
+  };
+  const response = await imageClient.post('/videos/generations', payload);
+  const rawData = response.data?.data;
+  return Array.isArray(rawData) ? rawData[0] : (rawData || response.data);
+}
+
+async function pollVideoTask({ taskId, pollIntervalMs = 5000, timeoutMs = 300000 }) {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    await new Promise((r) => setTimeout(r, pollIntervalMs));
+    const task = await getTask(taskId);
+    const status = (task.status || '').toLowerCase();
+
+    if (status === 'completed' || status === 'succeed' || status === 'success') {
+      const videoUrl =
+        task.result?.video_url ||
+        task.result?.url ||
+        task.video_url ||
+        task.url ||
+        task.output?.url;
+      return { status: 'completed', videoUrl };
+    }
+    if (['failed', 'error', 'cancelled'].includes(status)) {
+      return { status: 'failed', error: JSON.stringify(task).slice(0, 200) };
+    }
+    return { status: task.status || 'processing', progress: task.progress };
+  }
+  return { status: 'timeout' };
 }
 
 async function checkVideoStatus(taskId) {
@@ -145,5 +163,6 @@ module.exports = {
   generateImage,
   getTask,
   generateVideo,
+  pollVideoTask,
   checkVideoStatus,
 };
