@@ -97,26 +97,27 @@ async function uploadImageToApimart(base64Data, mimeType = 'image/jpeg') {
   return response.data?.url || response.data?.data?.url || null;
 }
 
-async function generateImage({ prompt, size = '1024x1024', model, imageUrl, pollIntervalMs = 5000, timeoutMs = 180000 }) {
-  // If imageUrl provided, use flux-kontext-pro for reference-based generation
-  let effectiveModel = model || config.models.image;
-  const payload = { prompt, n: 1 };
+// Map legacy sizes to gpt-image-2 supported sizes
+const GPT_IMAGE_SIZE_MAP = {
+  '1024x1024': '1024x1024',
+  '1024x1792': '1024x1536',
+  '1792x1024': '1536x1024',
+  '1024x1536': '1024x1536',
+  '1536x1024': '1536x1024',
+};
 
-  if (imageUrl) {
-    effectiveModel = 'flux-kontext-pro';
-    payload.model = effectiveModel;
-    payload.image_url = imageUrl;
-    // flux-kontext uses aspect_ratio not size
-    const aspectMap = {
-      '1024x1024': '1:1',
-      '1024x1792': '9:16',
-      '1792x1024': '16:9',
-    };
-    payload.aspect_ratio = aspectMap[size] || '1:1';
-  } else {
-    payload.model = effectiveModel;
-    payload.size = size;
-  }
+async function generateImage({ prompt, size = '1024x1024', model, pollIntervalMs = 5000, timeoutMs = 180000 }) {
+  const effectiveModel = model || config.models.image;
+
+  // Normalize size for gpt-image-2 (drops unsupported sizes gracefully)
+  const normalizedSize = GPT_IMAGE_SIZE_MAP[size] || '1024x1024';
+
+  const payload = {
+    model: effectiveModel,
+    prompt,
+    n: 1,
+    size: normalizedSize,
+  };
 
   const submitted = await submitImageJobPayload(payload);
 

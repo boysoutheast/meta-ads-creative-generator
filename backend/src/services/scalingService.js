@@ -122,62 +122,98 @@ async function generateScalingAngles(
     ? selectedAngles
     : Object.keys(SCALING_ANGLES);
 
-  const systemPrompt = `Kamu adalah Meta Ads creative strategist yang ahli "concept translation" — mengambil DNA dari iklan winning dan mengadaptasinya untuk produk yang berbeda.
+  // ── Format winning ad DNA as human-readable "contoh" block, not raw JSON ──
+  const ns = winningAnalysis.narrativeStructure || {};
+  const palette = (winningAnalysis.colorPalette || []).join(', ') || 'tidak diketahui';
+  const winningAdBlock = `
+━━━━ CONTOH IKLAN WINNING — DNA YANG AKAN KAMU REPLIKASI ━━━━
 
-PRINSIP UTAMA: Jangan buat iklan generik. Translate SPESIFIK konsep dari winning ad ke konteks produk ini. Pertahankan: hook mechanism, emotional truth, narrative structure. Ganti: skenario, objek, konteks — sesuaikan ke produk.
+HOOK (cara mencuri atensi 1-3 detik pertama):
+${winningAnalysis.hookMechanism || winningAnalysis.hook || 'Tidak tersedia'}
 
-PENTING: Semua copy (headline, subheadline, bodyText, cta) HARUS Bahasa Indonesia. Jangan gunakan Bahasa Inggris untuk teks iklan.
+SKENARIO MANUSIA (situasi spesifik yang ditampilkan, kenapa orang merasa "ini gue banget"):
+${winningAnalysis.humanScenario || 'Tidak tersedia'}
 
-CRITICAL untuk imageScenario dan imagePromptEN:
-1. Subjek SELALU perempuan Indonesia/Asia Tenggara (Indonesian woman, Southeast Asian features).
-2. Scene HARUS cerminkan komposisi dan intensitas emosional winning ad. Jika winning ad menampilkan orang frustrasi dikelilingi props masalah (kertas, kalkulator, dll) → scene harus menampilkan perempuan Indonesia dengan ekspresi sama frustrasi/khawatir dikelilingi props masalah yang relevan ke produk (botol skincare lama, kulit kering, cermin, dll). SAME emotional intensity, SAME composition type, DIFFERENT product context.
-3. JANGAN buat scene netral/bahagia kecuali itu angle "after" atau "resolution". Hook/problem angle HARUS distressed/frustrated expression.
-4. imagePromptEN HARUS dimulai dengan: "Indonesian woman, Southeast Asian features, relatable everyday person, "`;
+KEBENARAN EMOSIONAL (rasa takut / harapan / malu spesifik yang disentuh):
+${winningAnalysis.emotionalTruth || 'Tidak tersedia'}
 
-  // Build product context block — the richer this is, the better the copy
-  const productContextBlock = [
-    `PRODUK: ${productName}`,
-    productDescription
-      ? `DESKRIPSI LENGKAP PRODUK (WAJIB dipakai dalam copy — sebutkan ingredient spesifik, manfaat unik, dan klaim yang membedakan):\n${productDescription}`
-      : '',
-    productVisualDescription
-      ? `Visual produk: ${productVisualDescription}`
-      : '',
-  ].filter(Boolean).join('\n\n');
+ALUR NARASI:
+• Setup (situasi masalah): ${ns.setup || 'Tidak tersedia'}
+• Tension (kenapa ini menyakitkan/penting): ${ns.tension || 'Tidak tersedia'}
+• Resolution (solusi / harapan): ${ns.resolution || 'Tidak tersedia'}
 
-  const userPrompt = `WINNING AD ANALYSIS:
-${JSON.stringify(winningAnalysis, null, 2)}
+VISUAL STORY (objek, ekspresi, setting yang "bercerita" tanpa kata):
+${winningAnalysis.visualStory || 'Tidak tersedia'}
 
-${productContextBlock}
+COPY PATTERN (formula teks yang dipakai):
+${winningAnalysis.copyPattern || 'Tidak tersedia'}
+
+CETAK BIRU REPLIKASI (instruksi cara replikasi untuk produk berbeda):
+${winningAnalysis.replicationBlueprint || 'Tidak tersedia'}
+
+VISUAL DNA:
+• Style: ${winningAnalysis.visualStyle || 'professional, clean'}
+• Lighting: ${winningAnalysis.lighting || 'natural, warm'}
+• Color palette: ${palette}
+• Mood: ${winningAnalysis.mood || 'engaging'}
+• Composition: ${winningAnalysis.composition || 'centered'}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`.trim();
+
+  // ── Product context — the richer, the better ──
+  const productBlock = `
+━━━━ PRODUKMU — TARGET TRANSLATE ━━━━
+Nama produk: ${productName}
+${productDescription ? `\nDeskripsi lengkap produk:\n${productDescription}` : ''}
+${productVisualDescription ? `\nTampilan visual produk (dari foto):\n${productVisualDescription}` : ''}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`.trim();
+
+  const systemPrompt = `Kamu adalah Meta Ads creative director kelas dunia yang ahli dalam "concept translation" — proses mengambil DNA dari satu iklan winning dan mentranslate-nya secara presisi ke produk yang berbeda. Ini bukan tentang meniru secara visual, tapi mengambil MEKANISME yang membuat iklan itu berhasil (hook, emosi, alur cerita) dan mengaplikasikannya ke konteks produk baru.
+
+Tugas kamu adalah membaca iklan winning dengan sangat cermat, memahami MENGAPA ia berhasil (bukan hanya APA yang ada di dalamnya), lalu menciptakan versi baru untuk produk target yang memiliki daya tarik yang sama kuatnya. Prinsip terpenting: pertahankan mekanisme, ganti konteks.
+
+ATURAN TIDAK BISA DILANGGAR:
+1. Semua copy (headline, subheadline, bodyText, cta) WAJIB Bahasa Indonesia — tidak ada pengecualian.
+2. Jika deskripsi produk menyebut ingredient spesifik (misal: Shea Butter 5%, Inoceramide, Hyaluronic Acid 3%), kondisi target (diabetes, kulit kering parah), atau klaim unik — HARUS muncul di copy. Copy generik ("kulit sehat") = GAGAL. Copy spesifik ("kulit diabetik yang pecah-pecah minta Inoceramide") = BERHASIL.
+3. imagePromptEN HARUS dimulai dengan: "Indonesian woman, Southeast Asian features, relatable everyday person, " — tidak ada variasi, tidak ada karakter lain.
+4. Intensitas emosional gambar HARUS setara dengan winning ad. Hook/problem angle → ekspresi distressed/frustrated. Resolution angle → ekspresi lega/bahagia. JANGAN buat foto produk biasa, buat SCENE yang bercerita.
+5. Produk HARUS terlihat jelas di gambar — deskripsikan tampilannya sedetail mungkin berdasarkan tampilan visual produk yang diberikan.`;
+
+  const userPrompt = `${winningAdBlock}
+
+${productBlock}
 
 ANGLE YANG DIMINTA: ${anglesToGenerate.join(', ')}
 
-TUGAS:
-Untuk tiap angle, buat copy iklan yang:
-1. Menggunakan hook mechanism yang SAMA dengan winning ad (cara menarik perhatian di 3 detik pertama)
-2. Menyentuh emotional truth yang SAMA tapi diaplikasikan ke konteks produk ini
-3. Mengikuti narrative structure yang SAMA (setup→tension→resolution) tapi untuk skenario produk ini
-4. BUKAN menggunakan template angle generik — translate konsep winning ad secara spesifik
-5. WAJIB: Jika deskripsi produk menyebut ingredient spesifik (misal: Shea Butter 5%, Inoceramide, dll), manfaat klinis, atau kondisi target (diabetes, kulit kering parah, dll) — HARUS muncul di bodyText atau subheadline. Copy yang generik ("kulit kering") dinilai GAGAL. Copy yang spesifik ("kulit diabetik yang pecah-pecah") dinilai BERHASIL.
+━━━━ INSTRUKSI TRANSLATE ━━━━
 
-Contoh cara berpikir:
-- Winning ad: orang frustrasi tidak tahu angka bisnisnya (hook: "kamu melakukan kesalahan tanpa sadar")
-- Produk skincare diabetes: orang tidak sadar kulitnya butuh perawatan khusus (hook: "kamu merawat kulit dengan cara yang salah selama ini")
-- Sama hooknya, berbeda konteksnya — dan copy HARUS sebutkan manfaat spesifik produk (Inoceramide, Shea Butter, dll)
+Untuk SETIAP angle yang diminta, kamu harus melakukan proses 3 langkah ini:
 
-Untuk tiap angle, return:
+LANGKAH 1 — DECODE: Baca ulang "Cetak Biru Replikasi" dan "Hook" dari iklan winning. Identifikasi: apa mekanisme spesifik yang membuat orang berhenti scroll? Apa kebenaran universal yang disentuh?
+
+LANGKAH 2 — ADAPT: Terjemahkan mekanisme itu ke konteks produk target. Pertahankan: hook mechanism (cara mencuri atensi), emotional truth (jenis rasa takut/harapan), narrative arc (setup→tension→resolution). Ganti: skenario, objek, referensi spesifik → sesuaikan ke produk ini. WAJIB sebutkan ingredient/klaim spesifik dari deskripsi produk.
+
+LANGKAH 3 — VISUALIZE: Buat scene gambar yang PARALEL dengan winning ad. Jika winning ad menampilkan seorang frustrasi dikelilingi props masalahnya → gambar harus menampilkan perempuan Indonesia dengan ekspresi sama, dikelilingi props masalah yang relevan ke produk ini. SAMA komposisi dan intensitas emosinya, BEDA konteksnya. Embed visual produk yang sudah dideskripsikan ke dalam scene.
+
+Untuk tiap angle, return objek JSON dengan field BERIKUT (isi sedetail mungkin, minimum 2-3 kalimat untuk translatedConcept):
 {
   "angle": "angle_key",
-  "translatedConcept": "penjelasan 1 paragraf: bagaimana konsep winning ad ditranslate ke produk ini untuk angle ini",
-  "headline": "headline max 8 kata, scroll-stopping — BAHASA INDONESIA",
-  "subheadline": "subheadline max 15 kata — BAHASA INDONESIA",
-  "bodyText": "body copy max 30 kata — BAHASA INDONESIA",
-  "cta": "CTA max 4 kata — BAHASA INDONESIA",
-  "imageScenario": "Skenario visual spesifik untuk gambar: siapa, sedang apa, di mana, ekspresi, objek di sekitarnya — harus PARALEL dengan skenario winning ad tapi untuk konteks produk (50 kata, Indonesian). WAJIB: perempuan Indonesia/Asia Tenggara.",
-  "imagePromptEN": "MUST start with: Indonesian woman, Southeast Asian features, relatable everyday person, [then continue with scene]. Detail image prompt (80-150 kata). CRITICAL: No text/words/typography in image. Highly specific and cinematic. Include: subject with distressed/concerned/emotional expression matching winning ad emotional intensity, action, setting, lighting matching winning ad style (${winningAnalysis.lighting || 'natural'}), color palette (${(winningAnalysis.colorPalette || []).join(', ')}), mood (${winningAnalysis.mood || 'engaging'}), camera angle, composition. Product ${productName} must be clearly visible. Surrounded by props relevant to the problem."
+
+  "translatedConcept": "Penjelasan 2-3 paragraf: (1) Apa yang dipertahankan dari winning ad dan mengapa berhasil. (2) Bagaimana konsep itu ditranslate ke produk ini secara spesifik — skenario apa, emosi apa, hook apa. (3) Apa yang beda dan mengapa pilihan itu tepat untuk produk ini.",
+
+  "headline": "Headline max 8 kata, scroll-stopping, mirror hook dari winning ad tapi untuk konteks produk — BAHASA INDONESIA",
+
+  "subheadline": "Subheadline max 15 kata, perkuat headline dengan detail spesifik produk (ingredient/kondisi target jika ada) — BAHASA INDONESIA",
+
+  "bodyText": "Body copy max 40 kata. WAJIB sebutkan minimal 1 ingredient/klaim spesifik dari deskripsi produk. Ikuti narrative arc: setup (masalah) → tension (kenapa menyakitkan) → resolution (produk ini solusinya, sebutkan spesifik kenapa) — BAHASA INDONESIA",
+
+  "cta": "CTA max 4 kata, action-oriented — BAHASA INDONESIA",
+
+  "imageScenario": "Deskripsikan scene gambar dalam Bahasa Indonesia (3-4 kalimat): siapa orangnya (perempuan Indonesia, usia berapa, sedang apa), di mana, ekspresi wajah dan bahasa tubuh (HARUS cerminkan intensitas emosional winning ad), objek/props apa yang ada di sekitarnya yang menceritakan masalah/solusi, dan bagaimana produk ini terlihat dalam scene tersebut.",
+
+  "imagePromptEN": "MUST start with: Indonesian woman, Southeast Asian features, relatable everyday person, [then continue]. This is a cinematic Meta Ads image prompt (150-200 words). CRITICAL: No text, words, letters, or numbers in image. Include ALL of: (1) Subject: Indonesian woman [age], [specific expression matching winning ad: distressed/frustrated/relieved], [exact action], [clothing that fits the scene]. (2) Setting: [specific location], [time of day], [atmosphere]. (3) Props: [list every object in the scene that tells the story — parallel to winning ad props but in product context]. (4) Product: [exact visual description of ${productName} as described — ${productVisualDescription || `the product ${productName} clearly visible and identifiable`}], product is prominently featured. (5) Visual DNA from winning ad: ${winningAnalysis.lighting || 'natural warm'} lighting, color tones of [${palette}], ${winningAnalysis.mood || 'engaging'} mood, ${winningAnalysis.composition || 'centered'} composition, ${winningAnalysis.visualStyle || 'photorealistic, professional'}. (6) Camera: [angle and framing]. Photorealistic, high detail, no CGI look."
 }
 
-Return array JSON valid dengan tepat ${anglesToGenerate.length} item. Tanpa markdown, tanpa komentar.`;
+Return array JSON valid dengan TEPAT ${anglesToGenerate.length} item. Tanpa markdown, tanpa komentar, langsung array.`;
 
   const response = await chatCompletion({
     model: config.models.chat,
@@ -185,8 +221,8 @@ Return array JSON valid dengan tepat ${anglesToGenerate.length} item. Tanpa mark
       { role: 'system', content: systemPrompt },
       { role: 'user', content: userPrompt },
     ],
-    maxTokens: 3500,
-    temperature: 0.8,
+    maxTokens: 6000,
+    temperature: 0.75,
   });
 
   try {
@@ -250,13 +286,13 @@ async function generateVariationPrompts(winningAnalysis, angles, productName, pr
 }
 
 // ─── batchGenerateImages ──────────────────────────────────────────────────────
-// productImageUrl: public URL from uploadImageToApimart → used for flux-kontext-pro reference
+// Uses gpt-image-2 via apimart — text prompt only, no image reference needed.
 
-async function batchGenerateImages(variations, aspectRatio = '1:1', productImageUrl = null) {
+async function batchGenerateImages(variations, aspectRatio = '1:1') {
   const sizeMap = {
     '1:1': '1024x1024',
-    '9:16': '1024x1792',
-    '16:9': '1792x1024',
+    '9:16': '1024x1536',
+    '16:9': '1536x1024',
     '4:5': '1024x1024',
   };
   const size = sizeMap[aspectRatio] || '1024x1024';
@@ -267,7 +303,6 @@ async function batchGenerateImages(variations, aspectRatio = '1:1', productImage
       generateImage({
         prompt: v.imagePrompt,
         size,
-        imageUrl: productImageUrl || undefined,
       })
     )
   );

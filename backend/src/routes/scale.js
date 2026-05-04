@@ -10,7 +10,7 @@ const {
   batchGenerateImages,
 } = require('../services/scalingService');
 const { analyzeVideoReference } = require('../services/videoAnalyzer');
-const { analyzeImage, uploadImageToApimart, generateImage, generateVideo, chatCompletion } = require('../services/apimart');
+const { analyzeImage, generateImage, generateVideo, chatCompletion } = require('../services/apimart');
 const config = require('../config');
 
 router.get('/angles', (req, res) => {
@@ -61,31 +61,17 @@ router.post('/generate-variations', async (req, res) => {
     return res.status(400).json({ error: 'analysis and productName are required' });
   }
 
-  // Step 1: Get product visual description from photo if provided
+  // Describe product visually from photo — used to make image prompts more specific
   let productVisualDescription = null;
   if (productPhotoBase64) {
     try {
       productVisualDescription = await analyzeImage({
         imageBase64: productPhotoBase64,
         mimeType: productPhotoMime || 'image/jpeg',
-        prompt: 'Describe this product visually in detail: shape, color, packaging, texture, size, label/branding. Be specific so an image generation AI can recreate it accurately. Keep response under 100 words.',
+        prompt: 'Describe this product visually in detail: shape, color, packaging, texture, size, label/branding. Be specific so an AI image generator can recreate it. Under 80 words.',
       });
     } catch (e) {
-      console.warn('Product photo analysis failed:', e.message);
-    }
-  }
-
-  // Step 2: Upload photo to apimart to get public URL for flux-kontext-pro reference
-  let productImageUrl = null;
-  if (productPhotoBase64 && generateImages) {
-    try {
-      productImageUrl = await uploadImageToApimart(productPhotoBase64, productPhotoMime || 'image/jpeg');
-      if (productImageUrl) {
-        console.log('Product photo uploaded to apimart:', productImageUrl);
-      }
-    } catch (e) {
-      // Non-fatal: fall back to text-only generation
-      console.warn('Product photo upload to apimart failed (non-fatal):', e.message);
+      console.warn('Product photo analysis failed (non-fatal):', e.message);
     }
   }
 
@@ -98,8 +84,7 @@ router.post('/generate-variations', async (req, res) => {
 
   let finalVariations = variationsWithPrompts;
   if (generateImages) {
-    // Pass productImageUrl so batchGenerateImages uses flux-kontext-pro when available
-    finalVariations = await batchGenerateImages(variationsWithPrompts, aspectRatio, productImageUrl);
+    finalVariations = await batchGenerateImages(variationsWithPrompts, aspectRatio);
   }
 
   res.json({
@@ -108,7 +93,6 @@ router.post('/generate-variations', async (req, res) => {
     totalVariations: finalVariations.length,
     variations: finalVariations,
     productVisualDescription,
-    usedFluxKontext: !!productImageUrl,
   });
 });
 
@@ -184,23 +168,13 @@ Return JSON array dengan tepat ${clampedSlideCount} item, tanpa markdown:
   }
 
   if (generateImages) {
-    const sizeMap = { '1:1': '1024x1024', '9:16': '1024x1792', '16:9': '1792x1024' };
+    const sizeMap = { '1:1': '1024x1024', '9:16': '1024x1536', '16:9': '1536x1024' };
     const size = sizeMap[aspectRatio] || '1024x1024';
-
-    // Upload product photo for flux-kontext-pro reference if available
-    let carouselImageUrl = null;
-    if (productPhotoBase64) {
-      try {
-        carouselImageUrl = await uploadImageToApimart(productPhotoBase64, productPhotoMime || 'image/jpeg');
-      } catch (e) {
-        console.warn('Carousel product photo upload failed (non-fatal):', e.message);
-      }
-    }
 
     const imageResults = await Promise.allSettled(
       slides.map((slide) =>
         slide.imagePrompt
-          ? generateImage({ prompt: slide.imagePrompt, size, imageUrl: carouselImageUrl || undefined })
+          ? generateImage({ prompt: slide.imagePrompt, size })
           : Promise.resolve(null)
       )
     );
