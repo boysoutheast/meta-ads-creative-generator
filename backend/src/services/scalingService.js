@@ -652,8 +652,11 @@ async function batchGenerateVideos(variations, aspectRatio = '9:16', productImag
         });
         const taskId = submitted.task_id || submitted.taskId || submitted.id;
         if (!taskId) {
-          return { ...v, videoUrl: null, videoError: 'No taskId in response: ' + JSON.stringify(submitted).slice(0, 100) };
+          const raw = JSON.stringify(submitted).slice(0, 200);
+          console.error('[batchGenerateVideos] No task_id in response:', raw);
+          return { ...v, videoUrl: null, videoError: `Video API tidak mengembalikan task ID. Detail: ${raw}` };
         }
+        console.log(`[batchGenerateVideos] Task submitted: ${taskId}`);
 
         // Poll until done
         const start = Date.now();

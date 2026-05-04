@@ -168,8 +168,9 @@ async function generateImage({ prompt, size = '1024x1024', model, referenceImage
 }
 
 async function generateVideo({ prompt, duration = 10, aspectRatio = '9:16', model, imageUrl }) {
+  const effectiveModel = model || config.models.video;
   const payload = {
-    model: model || config.models.video,
+    model: effectiveModel,
     prompt,
     duration,
     aspect_ratio: aspectRatio,
@@ -178,9 +179,25 @@ async function generateVideo({ prompt, duration = 10, aspectRatio = '9:16', mode
   if (imageUrl) {
     payload.image_url = imageUrl;
   }
+
+  console.log(`[generateVideo] submitting ${effectiveModel} | aspect=${aspectRatio} | duration=${duration}s`);
   const response = await imageClient.post('/videos/generations', payload, { timeout: 60000 });
+
+  // Detect API-level errors (code !== 200/201) before extracting task_id
+  const code = response.data?.code;
+  if (code && code !== 200 && code !== 201) {
+    const msg = response.data?.message || response.data?.error || JSON.stringify(response.data).slice(0, 200);
+    throw new Error(`Video API error (code ${code}): ${msg}`);
+  }
+
   const rawData = response.data?.data;
-  return Array.isArray(rawData) ? rawData[0] : (rawData || response.data);
+  const item = Array.isArray(rawData) ? rawData[0] : (rawData || response.data);
+
+  // Normalise task_id — kling sometimes uses 'id' or 'taskId'
+  const taskId = item?.task_id || item?.taskId || item?.id;
+  console.log(`[generateVideo] response task_id=${taskId} | raw keys=${Object.keys(item || {}).join(',')}`);
+
+  return item;
 }
 
 async function pollVideoTask({ taskId, pollIntervalMs = 5000, timeoutMs = 300000 }) {
