@@ -134,6 +134,8 @@ export default function ScalePage() {
         productPhotoMime,
         winningAdBase64: winningAdBase64 ?? undefined,
         winningAdMime: winningAdMime,
+        productPrice: selectedProduct.price ?? undefined,
+        productPromoPrice: selectedProduct.promoPrice ?? undefined,
       })
 
       if (outputType === 'video') {

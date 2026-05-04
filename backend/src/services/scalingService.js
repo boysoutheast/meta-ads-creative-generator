@@ -246,7 +246,7 @@ Return array JSON valid dengan TEPAT ${anglesToGenerate.length} item. Tanpa mark
 // Per-angle structured templates — code controls layout/structure,
 // GPT fills in scene details. No more free-form imagePromptEN from GPT.
 
-function buildAngleImagePrompt(angle, winningAnalysis, productName, productVisualDescription) {
+function buildAngleImagePrompt(angle, winningAnalysis, productName, productVisualDescription, productPricing = {}) {
   const palette    = (winningAnalysis.colorPalette || ['#FADBD8', '#A93226', '#D5DBDB']).join(', ');
   const lighting   = winningAnalysis.lighting  || 'warm natural';
   const mood       = winningAnalysis.mood      || 'engaging';
@@ -388,13 +388,26 @@ ${quality}`;
 
     // ── PRICE ANCHOR ─────────────────────────────────────────────────────────
     case 'price_anchor': {
+      const fmt = (n) => 'Rp ' + Number(n).toLocaleString('id-ID');
+      const hasPromo   = productPricing.productPromoPrice != null;
+      const hasPrice   = productPricing.productPrice != null;
+      const promoPrice = hasPromo  ? fmt(productPricing.productPromoPrice) : null;
+      const origPrice  = hasPrice  ? fmt(productPricing.productPrice)      : null;
+      // Build price line — only show real numbers, never invent
+      const priceLine  = hasPromo && hasPrice
+        ? `- Price comparison: crossed-out original price "${origPrice}" in gray strikethrough → actual promo price "${promoPrice}" in large bold dark pink (#D4547A)`
+        : hasPromo
+          ? `- Promo price (large bold dark pink #D4547A): "${promoPrice}"`
+          : hasPrice
+            ? `- Product price (large bold dark pink #D4547A): "${origPrice}"`
+            : `- DO NOT invent or show any price numbers. Show a value/savings message instead.`;
       return `A clean, modern value-proposition Meta Ads image in editorial split layout. Soft cream background (#FFFBF5). Square 1:1 format.
 LEFT 55%: Price comparison typography block on cream background.
 RIGHT 45%: Product showcase lifestyle scene.
 TYPOGRAPHY ON LEFT (rendered exactly, crisp, bold, perfectly legible):
 - Top left: green (#1A7A6E) rounded pill badge "Hemat Sekarang"
 - Bold dark headline (1-2 lines, large): "${headline}"
-- Price comparison (prominently rendered): crossed-out original price in gray → actual price in large bold dark pink (#D4547A)
+${priceLine}
 - Smaller supporting text: "${sub}"
 - Green/orange (#E8541A) rounded CTA pill button, white bold text, bottom left: "${cta} →"
 RIGHT SIDE SCENE: Indonesian woman 25-35yo, ${emotional}. Setting: ${setting}. Props: ${props}.
@@ -442,9 +455,9 @@ ${quality}`;
 // ─── generateVariationPrompts ─────────────────────────────────────────────────
 // Uses per-angle template builder — no free-form GPT prompt, no text overlay append.
 
-async function generateVariationPrompts(winningAnalysis, angles, productName, productVisualDescription = null) {
+async function generateVariationPrompts(winningAnalysis, angles, productName, productVisualDescription = null, productPricing = {}) {
   return angles.map((angle) => {
-    const imagePrompt = buildAngleImagePrompt(angle, winningAnalysis, productName, productVisualDescription);
+    const imagePrompt = buildAngleImagePrompt(angle, winningAnalysis, productName, productVisualDescription, productPricing);
     return { ...angle, imagePrompt };
   });
 }

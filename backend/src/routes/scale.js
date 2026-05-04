@@ -65,6 +65,8 @@ router.post('/generate-variations', async (req, res) => {
     productPhotoMime = 'image/jpeg',
     winningAdBase64 = null,
     winningAdMime = 'image/jpeg',
+    productPrice = null,
+    productPromoPrice = null,
   } = req.body;
 
   if (!analysis || !productName) {
@@ -109,7 +111,7 @@ router.post('/generate-variations', async (req, res) => {
   );
   if (!angles.length) return res.status(500).json({ error: 'Failed to generate scaling angles' });
 
-  const variationsWithPrompts = await generateVariationPrompts(analysis, angles, productName, productVisualDescription);
+  const variationsWithPrompts = await generateVariationPrompts(analysis, angles, productName, productVisualDescription, { productPrice, productPromoPrice });
 
   let finalVariations = variationsWithPrompts;
   if (generateImages) {

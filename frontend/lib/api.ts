@@ -71,6 +71,8 @@ export async function generateScalingVariations(payload: {
   productPhotoMime?: string
   winningAdBase64?: string
   winningAdMime?: string
+  productPrice?: number
+  productPromoPrice?: number
 }): Promise<GenerateVariationsResponse> {
   const res = await api.post('/scale/generate-variations', payload)
   return res.data
