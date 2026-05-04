@@ -9,6 +9,9 @@ import type {
   CarouselResponse,
   Language,
   ScalingAngle,
+  ScaleCarouselResponse,
+  ScaleVideoJobResponse,
+  ScaleVideoStatus,
 } from './types'
 
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000'
@@ -63,8 +66,48 @@ export async function generateScalingVariations(payload: {
   selectedAngles: string[]
   aspectRatio: AspectRatio
   generateImages: boolean
+  productPhotoBase64?: string
 }): Promise<GenerateVariationsResponse> {
   const res = await api.post('/scale/generate-variations', payload)
+  return res.data
+}
+
+export async function generateScaleCarousel(payload: {
+  analysis: any
+  productName: string
+  productDescription?: string
+  productVisualDescription?: string
+  slideCount: number
+  aspectRatio?: string
+  generateImages?: boolean
+}): Promise<ScaleCarouselResponse> {
+  const res = await api.post('/scale/generate-carousel', payload)
+  return res.data
+}
+
+export async function analyzeWinningVideo(file: File) {
+  const fd = new FormData()
+  fd.append('file', file)
+  const res = await api.post('/scale-video/analyze', fd, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  })
+  return res.data as { analysis: any; framesAnalyzed: number; filename: string }
+}
+
+export async function generateScaleVideoJob(payload: {
+  videoAnalysis: any
+  productName: string
+  productDescription?: string
+  productPhotoBase64?: string
+  aspectRatio?: string
+  duration?: number
+}): Promise<ScaleVideoJobResponse> {
+  const res = await api.post('/scale-video/generate', payload)
+  return res.data
+}
+
+export async function getScaleVideoStatus(taskId: string): Promise<ScaleVideoStatus> {
+  const res = await api.get(`/scale-video/status/${taskId}`)
   return res.data
 }
 

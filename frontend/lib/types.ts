@@ -31,6 +31,7 @@ export interface AngleVariation {
   promptError?: string | null
   imageUrl?: string | null
   imageError?: string | null
+  conceptNote?: string | null
 }
 
 export interface WinningAdAnalysis {
@@ -63,6 +64,7 @@ export interface GenerateVariationsResponse {
   aspectRatio: AspectRatio
   totalVariations: number
   variations: AngleVariation[]
+  productVisualDescription?: string | null
 }
 
 // ─── Reference / create ──────────────────────────────────────────────────────
@@ -126,6 +128,64 @@ export interface CarouselResponse {
   totalSlides: number
   blendedContext: string
   slides: CarouselSlide[]
+}
+
+// ─── Scale V2 Carousel ───────────────────────────────────────────────────────
+
+export interface ScaleCarouselSlide {
+  slideNumber: number
+  type: 'hook' | 'benefit' | 'cta'
+  headline: string
+  subtext: string
+  imagePrompt: string
+  imageUrl?: string | null
+  imageError?: string | null
+}
+
+export interface ScaleCarouselResponse {
+  totalSlides: number
+  productName: string
+  slides: ScaleCarouselSlide[]
+}
+
+// ─── Scale Winning Video ─────────────────────────────────────────────────────
+
+export interface VideoScene {
+  scene: number
+  duration: string
+  description: string
+  visualStyle?: string
+  cameraAngle?: string
+}
+
+export interface VideoAnalysis {
+  scenes?: VideoScene[]
+  overallStyle?: string
+  pacing?: string
+  hookType?: string
+  colorPalette?: string[]
+  cameraMovement?: string
+  emotionArc?: string
+  recommendedDuration?: number
+  musicVibe?: string
+  raw?: string
+  [k: string]: any
+}
+
+export interface ScaleVideoJobResponse {
+  taskId: string | null
+  videoScript: VideoScene[]
+  videoPrompt: string
+  productVisualDescription: string | null
+  message?: string
+}
+
+export interface ScaleVideoStatus {
+  taskId: string
+  status: 'processing' | 'completed' | 'failed'
+  videoUrl: string | null
+  progress: number | null
+  error: string | null
 }
 
 // ─── History (localStorage) ──────────────────────────────────────────────────

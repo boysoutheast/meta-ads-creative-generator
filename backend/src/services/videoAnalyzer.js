@@ -1,21 +1,14 @@
 const fs = require('fs');
 const path = require('path');
-const sharp = require('sharp');
 const { analyzeImage, chatCompletion } = require('./apimart');
 const config = require('../config');
 
-/**
- * Extract frames from video using ffmpeg (if available) or use first frame approach
- * Since ffmpeg might not be available in all environments, we handle both cases
- */
 async function extractVideoFrames(videoPath, maxFrames = 5) {
   try {
-    // Try ffmpeg approach
     const { execSync } = require('child_process');
     const framesDir = path.join(path.dirname(videoPath), 'frames_' + Date.now());
     fs.mkdirSync(framesDir, { recursive: true });
 
-    // Extract frames at intervals
     execSync(
       `ffmpeg -i "${videoPath}" -vf "fps=1/5,scale=512:-1" -frames:v ${maxFrames} "${framesDir}/frame%03d.jpg" -y`,
       { timeout: 30000 }
@@ -31,29 +24,19 @@ async function extractVideoFrames(videoPath, maxFrames = 5) {
         return data.toString('base64');
       });
 
-    // Cleanup
     fs.rmSync(framesDir, { recursive: true, force: true });
     return frames;
   } catch (error) {
-    console.warn('ffmpeg not available, skipping frame extraction:', error.message);
+    console.warn('ffmpeg not available:', error.message);
     return [];
   }
 }
 
-/**
- * Analyze image reference for visual style, composition, mood
- */
 async function analyzeImageReference(imagePath) {
   const imageBuffer = fs.readFileSync(imagePath);
   const imageBase64 = imageBuffer.toString('base64');
-
   const ext = path.extname(imagePath).toLowerCase();
-  const mimeTypeMap = {
-    '.jpg': 'image/jpeg',
-    '.jpeg': 'image/jpeg',
-    '.png': 'image/png',
-    '.webp': 'image/webp',
-  };
+  const mimeTypeMap = { '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png', '.webp': 'image/webp' };
   const mimeType = mimeTypeMap[ext] || 'image/jpeg';
 
   const analysisPrompt = `Analyze this image as a creative director for Meta Ads. Describe:
@@ -64,102 +47,132 @@ async function analyzeImageReference(imagePath) {
 5. Overall aesthetic/style
 6. What makes this effective as an ad visual?
 
-Be specific and detailed. This analysis will be used to recreate a similar style for a new ad.`;
+Be specific and detailed.`;
 
-  const analysis = await analyzeImage({
-    imageBase64,
-    mimeType,
-    prompt: analysisPrompt,
-  });
-
-  return analysis;
+  return analyzeImage({ imageBase64, mimeType, prompt: analysisPrompt });
 }
 
-/**
- * Analyze video reference - extract key visual elements and style
- */
 async function analyzeVideoReference(videoPath) {
   const frames = await extractVideoFrames(videoPath, 4);
 
   if (frames.length === 0) {
     return {
-      analysis: 'Video uploaded but frame extraction not available. Please describe your video reference manually.',
+      analysis: {
+        scenes: [],
+        overallStyle: 'Could not extract frames. Please describe manually.',
+        pacing: 'unknown',
+        hookType: 'unknown',
+        colorPalette: [],
+        cameraMovement: 'unknown',
+        emotionArc: 'unknown',
+        recommendedDuration: 30,
+        musicVibe: 'unknown',
+        raw: 'Frame extraction unavailable.',
+      },
       frames: 0,
     };
   }
 
-  // Analyze first and middle frame
-  const analyses = [];
-  const framesToAnalyze = frames.length > 2 ? [frames[0], frames[Math.floor(frames.length / 2)]] : frames;
+  const framesToAnalyze = frames.length > 2 ? [frames[0], frames[Math.floor(frames.length / 2)], frames[frames.length - 1]] : frames;
+  const frameAnalyses = [];
 
-  for (const frameBase64 of framesToAnalyze) {
+  for (let i = 0; i < framesToAnalyze.length; i++) {
     const analysis = await analyzeImage({
-      imageBase64: frameBase64,
+      imageBase64: framesToAnalyze[i],
       mimeType: 'image/jpeg',
-      prompt: `Analyze this video frame for Meta Ads creative reference:
-1. Visual style and aesthetic
-2. Color scheme and mood
-3. Subject matter and composition
-4. Camera style (close-up, wide, etc.)
-5. Lighting and atmosphere
+      prompt: `Analyze this video frame ${i + 1} of ${framesToAnalyze.length} for Meta Ads creative reference:
+1. What's happening in this scene?
+2. Visual style, colors, lighting
+3. Emotion/mood conveyed
+4. Camera angle/movement cues
 Be concise but specific.`,
     });
-    analyses.push(analysis);
+    frameAnalyses.push(analysis);
   }
 
-  // Synthesize all frame analyses
-  const synthesis = await chatCompletion({
+  const synthesisPrompt = `You are a video creative director analyzing a winning ad video for Meta Ads.
+
+Frame analyses:
+${frameAnalyses.map((a, i) => `Frame ${i + 1}: ${a}`).join('\n\n')}
+
+Based on these frames, return a detailed JSON analysis. Return ONLY valid JSON, no markdown:
+{
+  "scenes": [
+    {
+      "sceneNumber": 1,
+      "duration": "0-3s",
+      "description": "what happens in this scene",
+      "hook": true,
+      "visualElements": ["element1", "element2"],
+      "emotion": "emotion name"
+    }
+  ],
+  "overallStyle": "description of overall visual style",
+  "pacing": "description of pacing",
+  "hookType": "how it grabs attention in first 3 seconds",
+  "colorPalette": ["color1", "color2", "color3"],
+  "cameraMovement": "description of camera movement",
+  "emotionArc": "pain → hope → solution → relief (adapt to actual)",
+  "recommendedDuration": 30,
+  "musicVibe": "description of recommended music/sound"
+}`;
+
+  const synthesisRaw = await chatCompletion({
     model: config.models.chat,
     messages: [
-      {
-        role: 'system',
-        content:
-          'You are a creative director. Synthesize video frame analyses into a cohesive visual style guide for recreating a similar ad creative.',
-      },
-      {
-        role: 'user',
-        content: `Based on these video frame analyses, create a concise visual style guide:\n\n${analyses.join('\n\n---\n\n')}\n\nProvide a 100-150 word synthesis focusing on: overall visual style, color palette, mood, and key elements to replicate.`,
-      },
+      { role: 'system', content: 'You are a video creative strategist. Return only valid JSON.' },
+      { role: 'user', content: synthesisPrompt },
     ],
-    maxTokens: 400,
+    maxTokens: 1000,
   });
 
+  let structuredAnalysis;
+  try {
+    const jsonMatch = synthesisRaw.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      structuredAnalysis = JSON.parse(jsonMatch[0]);
+    } else {
+      throw new Error('No JSON found');
+    }
+  } catch (e) {
+    structuredAnalysis = {
+      scenes: [],
+      overallStyle: synthesisRaw.slice(0, 200),
+      pacing: 'varied',
+      hookType: 'visual hook',
+      colorPalette: [],
+      cameraMovement: 'mixed',
+      emotionArc: 'engagement → desire → action',
+      recommendedDuration: 30,
+      musicVibe: 'uplifting, engaging',
+    };
+  }
+
   return {
-    analysis: synthesis,
+    analysis: structuredAnalysis,
     frames: frames.length,
-    frameAnalyses: analyses,
   };
 }
 
-/**
- * Generate video prompt from reference analysis
- */
 async function generateVideoPromptFromReference(referenceAnalysis, productName, adGoal) {
   const videoPrompt = await chatCompletion({
     model: config.models.chat,
     messages: [
       {
         role: 'system',
-        content:
-          'You are an expert at writing prompts for AI video generation tools like Runway, Sora, and Kling. Create cinematic, detailed video prompts.',
+        content: 'You are an expert at writing prompts for AI video generation tools. Create cinematic, detailed video prompts in English.',
       },
       {
         role: 'user',
         content: `Create a video generation prompt for a Meta Ad based on this reference style:
 
-**Reference Style Analysis:**
-${referenceAnalysis}
+Reference Style Analysis:
+${JSON.stringify(referenceAnalysis, null, 2)}
 
-**Product/Service:** ${productName}
-**Ad Goal:** ${adGoal}
+Product: ${productName}
+Ad Goal: ${adGoal}
 
-Write a detailed video prompt (150-250 words) that:
-- Replicates the visual style from the reference
-- Features the product naturally
-- Is optimized for a 15-30 second social media ad
-- Includes: scene description, camera movement, lighting, color grade, mood, pacing
-- Written in English for AI video generation
-
+Write a detailed video prompt (150-250 words) that replicates the visual style for the new product.
 Output ONLY the video prompt, no explanations.`,
       },
     ],

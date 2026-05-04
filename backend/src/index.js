@@ -64,6 +64,7 @@ app.get('/api/tasks/:id', requireAuth, async (req, res) => {
 app.use('/api/generate', generateRoutes);
 app.use('/api/analyze', analyzeRoutes);
 app.use('/api/scale', scaleRoutes);
+app.use('/api/scale-video', require('./routes/scale-video'));
 app.use('/api/create', createRoutes);
 
 // ─── Audit endpoint ─────────────────────────────────────────────────────────

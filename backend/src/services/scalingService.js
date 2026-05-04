@@ -2,9 +2,6 @@ const { analyzeImage, chatCompletion, generateImage } = require('./apimart');
 const config = require('../config');
 const fs = require('fs');
 
-/**
- * Scaling Angles untuk Meta Ads
- */
 const SCALING_ANGLES = {
   price_anchor: {
     label: 'Price Anchor',
@@ -40,13 +37,10 @@ const SCALING_ANGLES = {
   },
 };
 
-/**
- * Deep analysis of a winning ad
- */
 async function analyzeWinningAd(filePath, fileType = 'image') {
   const imageBuffer = fs.readFileSync(filePath);
   const imageBase64 = imageBuffer.toString('base64');
-  const mimeType = fileType === 'image' ? 'image/jpeg' : 'image/jpeg'; // extracted frame
+  const mimeType = 'image/jpeg';
 
   const analysisPrompt = `Kamu adalah Meta Ads creative strategist. Analisis iklan ini secara mendalam dan return dalam format JSON yang VALID.
 
@@ -74,39 +68,39 @@ Return HANYA valid JSON tanpa markdown, tanpa penjelasan:
   "strengths": ["strength 1", "strength 2", "strength 3"],
   "composition": "deskripsi komposisi visual",
   "lighting": "deskripsi lighting",
-  "mood": "mood keseluruhan"
+  "mood": "mood keseluruhan",
+  "suggestedCopyLanguage": "id"
 }`;
 
-  const analysisRaw = await analyzeImage({
-    imageBase64,
-    mimeType,
-    prompt: analysisPrompt,
-  });
+  const analysisRaw = await analyzeImage({ imageBase64, mimeType, prompt: analysisPrompt });
 
-  // Parse JSON dari response
   try {
     const jsonMatch = analysisRaw.match(/\{[\s\S]*\}/);
     if (jsonMatch) {
-      return JSON.parse(jsonMatch[0]);
+      const parsed = JSON.parse(jsonMatch[0]);
+      parsed.suggestedCopyLanguage = 'id';
+      return parsed;
     }
   } catch (e) {
     console.warn('Could not parse winning ad analysis as JSON, returning raw');
   }
 
-  return { raw: analysisRaw };
+  return { raw: analysisRaw, suggestedCopyLanguage: 'id' };
 }
 
-/**
- * Generate multiple scaling angles dari analisis winning ad
- */
-async function generateScalingAngles(winningAnalysis, productName, selectedAngles = []) {
+async function generateScalingAngles(winningAnalysis, productName, selectedAngles = [], productVisualDescription = null) {
   const anglesToGenerate = selectedAngles.length > 0
     ? selectedAngles
     : Object.keys(SCALING_ANGLES);
 
-  const systemPrompt = `Kamu adalah Meta Ads copywriter terbaik di Indonesia. Buat variasi copy iklan yang scroll-stopping, high-CTR, dan cocok untuk Meta Ads.`;
+  const productVisualNote = productVisualDescription
+    ? `\nDeskripsi visual produk: ${productVisualDescription}`
+    : '';
 
-  const userPrompt = `Produk: ${productName}
+  const systemPrompt = `Kamu adalah Meta Ads copywriter terbaik di Indonesia. Buat variasi copy iklan yang scroll-stopping, high-CTR, dan cocok untuk Meta Ads.
+PENTING: Semua output copy (headline, subheadline, bodyText, cta) HARUS dalam Bahasa Indonesia. Jangan gunakan bahasa Inggris sama sekali untuk teks iklan.`;
+
+  const userPrompt = `Produk: ${productName}${productVisualNote}
 
 Analisis iklan winning ini:
 ${JSON.stringify(winningAnalysis, null, 2)}
@@ -116,11 +110,12 @@ Buat copy variasi untuk ${anglesToGenerate.length} angle berikut: ${anglesToGene
 Untuk tiap angle, return:
 {
   "angle": "angle_key",
-  "headline": "headline max 8 kata (impactful, scroll-stopping)",
-  "subheadline": "subheadline max 15 kata",
-  "bodyText": "body copy max 30 kata",
-  "cta": "CTA button text max 4 kata",
-  "imageDirection": "arahan visual singkat untuk gambar (20 kata)"
+  "headline": "headline max 8 kata — BAHASA INDONESIA",
+  "subheadline": "subheadline max 15 kata — BAHASA INDONESIA",
+  "bodyText": "body copy max 30 kata — BAHASA INDONESIA",
+  "cta": "CTA button text max 4 kata — BAHASA INDONESIA",
+  "imageDirection": "arahan visual singkat untuk gambar (20 kata, English untuk AI image generator)",
+  "conceptNote": "penjelasan singkat kenapa angle ini cocok untuk produk ini (Bahasa Indonesia, 1-2 kalimat)"
 }
 
 Return array JSON valid, tanpa markdown.`;
@@ -131,15 +126,13 @@ Return array JSON valid, tanpa markdown.`;
       { role: 'system', content: systemPrompt },
       { role: 'user', content: userPrompt },
     ],
-    maxTokens: 1500,
+    maxTokens: 2000,
     temperature: 0.8,
   });
 
   try {
     const jsonMatch = response.match(/\[[\s\S]*\]/);
-    if (jsonMatch) {
-      return JSON.parse(jsonMatch[0]);
-    }
+    if (jsonMatch) return JSON.parse(jsonMatch[0]);
   } catch (e) {
     console.warn('Could not parse scaling angles as JSON');
   }
@@ -147,44 +140,46 @@ Return array JSON valid, tanpa markdown.`;
   return [];
 }
 
-/**
- * Generate image prompt untuk 1 variasi scaling
- */
-async function generateVariationPrompt(winningAnalysis, angle, productName) {
+async function generateVariationPrompt(winningAnalysis, angle, productName, productVisualDescription = null) {
   const angleInfo = SCALING_ANGLES[angle.angle] || {};
+
+  const productVisualNote = productVisualDescription
+    ? `\n\nProduct visual (recreate EXACTLY in image): ${productVisualDescription}`
+    : '';
 
   const prompt = await chatCompletion({
     model: config.models.chat,
     messages: [
       {
         role: 'system',
-        content: 'Kamu adalah expert AI image prompt engineer untuk Meta Ads. Buat prompt yang detail dan optimized untuk generate iklan yang scroll-stopping.',
+        content: 'You are an expert AI image prompt engineer for Meta Ads. Create detailed, optimized prompts for scroll-stopping ad visuals. Image prompts must be in English.',
       },
       {
         role: 'user',
-        content: `Buat image generation prompt untuk Meta Ads variasi ini:
+        content: `Create an image generation prompt for this Meta Ads variation:
 
-Produk: ${productName}
+Product: ${productName}
 Angle: ${angle.angle} — ${angleInfo.hook || ''}
-Headline: ${angle.headline}
-Image Direction: ${angle.imageDirection}
+Headline (for context only, do NOT include text in image): ${angle.headline}
+Image Direction: ${angle.imageDirection}${productVisualNote}
 
-Style dari winning ad:
-- Visual style: ${winningAnalysis.visualStyle || 'tidak diketahui'}
+Winning ad visual style:
+- Visual style: ${winningAnalysis.visualStyle || 'professional, clean'}
 - Color palette: ${(winningAnalysis.colorPalette || []).join(', ')}
 - Lighting: ${winningAnalysis.lighting || 'natural'}
 - Mood: ${winningAnalysis.mood || 'engaging'}
 - Composition: ${winningAnalysis.composition || 'centered'}
 - Format: ${winningAnalysis.format || 'Feed 1:1'}
 
-Buat prompt dalam bahasa Inggris (100-200 kata) yang:
-1. Replikasi visual style dari winning ad
-2. Sesuai angle yang dipilih
-3. Dimulai dengan: "Meta Ads creative, scroll-stopping, high-CTR visual, "
-4. TIDAK include teks/tulisan dalam prompt
-5. Include: subject, setting, lighting, color, mood, composition, style
+Write an English prompt (100-200 words) that:
+1. Replicates the visual style from the winning ad accurately
+2. Matches the angle and emotion
+3. Starts with: "Meta Ads creative, scroll-stopping, high-CTR visual, "
+4. Does NOT include any text, words, or typography in the image
+5. Includes: subject, setting, lighting, color palette, mood, composition, style
+${productVisualDescription ? '6. Product MUST look exactly as described in the product visual section above' : ''}
 
-Output HANYA prompt text, tanpa penjelasan.`,
+Output ONLY the prompt text, no explanations.`,
       },
     ],
     maxTokens: 400,
@@ -194,12 +189,9 @@ Output HANYA prompt text, tanpa penjelasan.`,
   return prompt.trim();
 }
 
-/**
- * Batch generate prompts untuk semua variasi
- */
-async function generateVariationPrompts(winningAnalysis, angles, productName) {
+async function generateVariationPrompts(winningAnalysis, angles, productName, productVisualDescription = null) {
   const prompts = await Promise.allSettled(
-    angles.map((angle) => generateVariationPrompt(winningAnalysis, angle, productName))
+    angles.map((angle) => generateVariationPrompt(winningAnalysis, angle, productName, productVisualDescription))
   );
 
   return angles.map((angle, i) => ({
@@ -209,9 +201,6 @@ async function generateVariationPrompts(winningAnalysis, angles, productName) {
   }));
 }
 
-/**
- * Batch generate images untuk semua variasi
- */
 async function batchGenerateImages(variations, aspectRatio = '1:1') {
   const sizeMap = {
     '1:1': '1024x1024',
