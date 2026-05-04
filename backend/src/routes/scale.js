@@ -49,6 +49,7 @@ router.post('/generate-variations', async (req, res) => {
   const {
     analysis,
     productName,
+    productDescription = null,
     selectedAngles = [],
     aspectRatio = '1:1',
     generateImages = false,
@@ -88,7 +89,9 @@ router.post('/generate-variations', async (req, res) => {
     }
   }
 
-  const angles = await generateScalingAngles(analysis, productName, selectedAngles, productVisualDescription);
+  const angles = await generateScalingAngles(
+    analysis, productName, selectedAngles, productVisualDescription, productDescription
+  );
   if (!angles.length) return res.status(500).json({ error: 'Failed to generate scaling angles' });
 
   const variationsWithPrompts = await generateVariationPrompts(analysis, angles, productName, productVisualDescription);

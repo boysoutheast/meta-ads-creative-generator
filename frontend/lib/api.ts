@@ -63,6 +63,7 @@ export async function analyzeWinningAd(file: File): Promise<AnalyzeWinningRespon
 export async function generateScalingVariations(payload: {
   analysis: any
   productName: string
+  productDescription?: string
   selectedAngles: string[]
   aspectRatio: AspectRatio
   generateImages: boolean

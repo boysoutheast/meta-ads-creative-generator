@@ -16,6 +16,7 @@ export interface AdCardData {
   bodyText?: string
   cta?: string | null
   imagePrompt?: string | null
+  translatedConcept?: string | null
   error?: string | null
 }
 
@@ -83,8 +84,17 @@ export function AdCard({ data, index }: { data: AdCardData; index: number }) {
         )}
         {data.error && <p className="text-xs text-destructive">{data.error}</p>}
 
+        {data.translatedConcept && (
+          <details className="pt-1">
+            <summary className="cursor-pointer text-xs text-emerald-700 hover:text-emerald-900">
+              ✦ Concept translation
+            </summary>
+            <p className="mt-1 rounded bg-emerald-50 p-2 text-xs leading-relaxed text-emerald-800 border border-emerald-100">{data.translatedConcept}</p>
+          </details>
+        )}
+
         {data.imagePrompt && (
-          <details className="pt-2">
+          <details className="pt-1">
             <summary className="cursor-pointer text-xs text-muted-foreground hover:text-foreground">
               Lihat image prompt
             </summary>

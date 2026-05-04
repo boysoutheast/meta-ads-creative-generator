@@ -119,6 +119,7 @@ export default function ScalePage() {
       const resp = await generateScalingVariations({
         analysis: analysisResp.analysis,
         productName: selectedProduct.name,
+        productDescription: selectedProduct.description,
         selectedAngles,
         aspectRatio,
         generateImages: outputType === 'image' && generateImages,
@@ -396,6 +397,7 @@ export default function ScalePage() {
                       imageUrl: v.imageUrl ?? null,
                       videoJobId: (v as any).videoJobId ?? null,
                       imagePrompt: v.imagePrompt,
+                      translatedConcept: v.translatedConcept ?? null,
                       error: v.imageError || v.promptError,
                     }}
                   />

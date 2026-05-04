@@ -4,7 +4,7 @@ import { Badge } from '@/components/ui/badge'
 import type { WinningAdAnalysis } from '@/lib/types'
 
 export function AnalysisCard({ analysis }: { analysis: WinningAdAnalysis }) {
-  if (analysis.raw && !analysis.hook && !analysis.visualStyle) {
+  if (analysis.raw && !analysis.hook && !analysis.visualStyle && !analysis.hookMechanism) {
     return (
       <Card>
         <CardHeader><CardTitle className="text-base">Analisis</CardTitle></CardHeader>
@@ -15,13 +15,60 @@ export function AnalysisCard({ analysis }: { analysis: WinningAdAnalysis }) {
     )
   }
 
+  // V2 deep analysis (concept translation pipeline)
+  const hasDeepAnalysis = !!(analysis.humanScenario || analysis.emotionalTruth || analysis.hookMechanism)
+
   return (
     <Card>
       <CardHeader>
         <CardTitle className="text-base">Hasil Analisis Iklan Winning</CardTitle>
       </CardHeader>
       <CardContent className="space-y-3 text-sm">
-        {analysis.hook && (
+
+        {/* V2 deep dimensions */}
+        {hasDeepAnalysis && (
+          <>
+            {analysis.humanScenario && (
+              <Field label="Human Scenario" value={analysis.humanScenario} highlight />
+            )}
+            {analysis.emotionalTruth && (
+              <Field label="Emotional Truth" value={analysis.emotionalTruth} highlight />
+            )}
+            {(analysis.hookMechanism || analysis.hook) && (
+              <Field label="Hook Mechanism" value={analysis.hookMechanism || analysis.hook || ''} highlight />
+            )}
+            {analysis.narrativeStructure && (
+              <div>
+                <p className="text-xs font-medium text-muted-foreground mb-1">Narrative Structure</p>
+                <div className="space-y-1 rounded-md bg-muted/40 p-2 text-xs">
+                  {analysis.narrativeStructure.setup && (
+                    <p><span className="font-semibold text-foreground">Setup:</span> {analysis.narrativeStructure.setup}</p>
+                  )}
+                  {analysis.narrativeStructure.tension && (
+                    <p><span className="font-semibold text-foreground">Tension:</span> {analysis.narrativeStructure.tension}</p>
+                  )}
+                  {analysis.narrativeStructure.resolution && (
+                    <p><span className="font-semibold text-foreground">Resolution:</span> {analysis.narrativeStructure.resolution}</p>
+                  )}
+                </div>
+              </div>
+            )}
+            {analysis.replicationBlueprint && (
+              <details>
+                <summary className="cursor-pointer text-xs font-medium text-primary">
+                  Replication Blueprint
+                </summary>
+                <p className="mt-1 rounded bg-primary/5 border border-primary/20 p-2 text-xs text-primary/80 leading-relaxed">
+                  {analysis.replicationBlueprint}
+                </p>
+              </details>
+            )}
+            <hr className="border-dashed" />
+          </>
+        )}
+
+        {/* Standard fields */}
+        {!hasDeepAnalysis && (analysis.hook) && (
           <Field label="Hook" value={analysis.hook} />
         )}
         {analysis.visualStyle && <Field label="Visual style" value={analysis.visualStyle} />}
@@ -44,8 +91,8 @@ export function AnalysisCard({ analysis }: { analysis: WinningAdAnalysis }) {
             </div>
           </div>
         )}
-        {analysis.targetAudience && <Field label="Target audience" value={analysis.targetAudience} />}
         {analysis.primaryEmotion && <Field label="Emosi utama" value={analysis.primaryEmotion} />}
+        {analysis.targetAudience && <Field label="Target audience" value={analysis.targetAudience} />}
         {analysis.strengths && analysis.strengths.length > 0 && (
           <div>
             <p className="mb-1 text-xs font-medium text-muted-foreground">Strengths</p>
@@ -62,11 +109,11 @@ export function AnalysisCard({ analysis }: { analysis: WinningAdAnalysis }) {
   )
 }
 
-function Field({ label, value }: { label: string; value: string }) {
+function Field({ label, value, highlight }: { label: string; value: string; highlight?: boolean }) {
   return (
     <div>
       <p className="text-xs font-medium text-muted-foreground">{label}</p>
-      <p>{value}</p>
+      <p className={highlight ? 'font-medium leading-snug' : ''}>{value}</p>
     </div>
   )
 }

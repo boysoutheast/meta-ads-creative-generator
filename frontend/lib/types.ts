@@ -26,15 +26,27 @@ export interface AngleVariation {
   subheadline: string
   bodyText: string
   cta: string
-  imageDirection: string
+  imageDirection?: string
   imagePrompt?: string | null
   promptError?: string | null
   imageUrl?: string | null
   imageError?: string | null
+  // V2 concept translation fields
+  translatedConcept?: string | null
+  imageScenario?: string | null
+  imagePromptEN?: string | null
   conceptNote?: string | null
 }
 
 export interface WinningAdAnalysis {
+  // V2 deep dimensions (concept translation pipeline)
+  humanScenario?: string
+  emotionalTruth?: string
+  hookMechanism?: string
+  narrativeStructure?: { setup: string; tension: string; resolution: string }
+  visualStory?: string
+  replicationBlueprint?: string
+  // Original fields (kept for backward compat; hook = hookMechanism alias)
   hook?: string
   visualStyle?: string
   colorPalette?: string[]

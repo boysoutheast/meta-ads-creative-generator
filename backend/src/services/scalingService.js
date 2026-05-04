@@ -37,38 +37,51 @@ const SCALING_ANGLES = {
   },
 };
 
-async function analyzeWinningAd(filePath, fileType = 'image') {
+// ─── analyzeWinningAd ────────────────────────────────────────────────────────
+// Extract 7 deep dimensions — not just surface labels.
+// This is the DNA extraction step that makes concept translation possible.
+
+async function analyzeWinningAd(filePath) {
   const imageBuffer = fs.readFileSync(filePath);
   const imageBase64 = imageBuffer.toString('base64');
   const mimeType = 'image/jpeg';
 
-  const analysisPrompt = `Kamu adalah Meta Ads creative strategist. Analisis iklan ini secara mendalam dan return dalam format JSON yang VALID.
+  const analysisPrompt = `Kamu adalah Meta Ads creative strategist kelas dunia. Analisis iklan ini secara SANGAT MENDALAM.
+Tujuan: ekstrak "DNA" dari iklan ini sehingga konsepnya bisa direplikasi untuk produk berbeda.
 
-Analisis:
-1. HOOK: Apa yang menarik perhatian pertama? Elemen visual apa yang stop scroll?
-2. VISUAL STYLE: Color palette, lighting, komposisi, mood, aesthetic
-3. COPY PATTERN: Pola headline yang dipakai (question/statement/number/how-to/curiosity)
-4. ANGLE: Scaling angle mana yang dipakai (price_anchor/fomo/social_proof/tutorial/curiosity_gap/before_after/problem_agitate/authority)
-5. FORMAT: Cocok untuk format apa (Feed 1:1 / Story 9:16 / Reels)
-6. TARGET AUDIENCE: Perkiraan target (usia, minat, pain point)
-7. EMOTION: Emosi utama yang ditrigger (fear/desire/curiosity/trust/urgency)
-8. STRENGTH: 3 hal terkuat dari iklan ini
-9. COLOR_PALETTE: 3-5 warna dominan dalam hex
+Analisis 7 dimensi berikut, return dalam format JSON valid:
+
+1. HUMAN_SCENARIO: Skenario manusia spesifik yang digambarkan. Bukan "orang pakai produk" tapi detail situasinya — siapa orangnya, sedang apa, ada di mana, apa yang terjadi. Ini yang membuat orang berhenti scroll karena merasa "ini tentang aku".
+
+2. EMOTIONAL_TRUTH: Kebenaran emosional universal yang disentuh. Rasa takut, malu, harapan, atau keinginan spesifik apa? Bukan emosi generik, tapi yang sangat spesifik ke situasi yang ditampilkan.
+
+3. HOOK_MECHANISM: Bagaimana tepatnya iklan ini "mencuri" perhatian di 1-3 detik pertama? Apa element pertama yang mata lihat? Mengapa itu bikin penasaran atau berhenti scroll?
+
+4. NARRATIVE_STRUCTURE: Alur cerita/pesan: Setup (situasi masalah) → Tension (kenapa ini penting/menyakitkan) → Resolution (solusi/harapan). Deskripsikan tiap tahap secara spesifik.
+
+5. VISUAL_STORY: Objek-objek, ekspresi, setting spesifik yang "menceritakan" pesan tanpa kata. Apa yang ada di frame dan kenapa itu dipilih? Komposisi, lighting, warna — semua punya makna, jelaskan.
+
+6. COPY_PATTERN: Formula copy yang dipakai. Bukan hanya "problem-agitate" tapi pola spesifiknya: opening word choice, structure, tone, how it creates urgency.
+
+7. REPLICATION_BLUEPRINT: Instruksi singkat cara replikasi konsep ini untuk produk skincare/kesehatan. Apa yang harus dipertahankan (hook mechanism, emotional truth, narrative arc, visual style) dan apa yang diganti (skenario, objek, produk).
 
 Return HANYA valid JSON tanpa markdown, tanpa penjelasan:
 {
-  "hook": "deskripsi hook singkat",
-  "visualStyle": "deskripsi visual style",
+  "humanScenario": "...",
+  "emotionalTruth": "...",
+  "hookMechanism": "...",
+  "narrativeStructure": { "setup": "...", "tension": "...", "resolution": "..." },
+  "visualStory": "...",
+  "copyPattern": "...",
+  "replicationBlueprint": "...",
+  "visualStyle": "...",
   "colorPalette": ["#hex1", "#hex2", "#hex3"],
-  "copyPattern": "pola copy yang dipakai",
-  "dominantAngle": "angle_key",
+  "lighting": "...",
+  "mood": "...",
+  "composition": "...",
+  "dominantAngle": "fomo",
   "format": "Feed/Story/Reels",
-  "targetAudience": "perkiraan target audience",
-  "primaryEmotion": "emosi utama",
-  "strengths": ["strength 1", "strength 2", "strength 3"],
-  "composition": "deskripsi komposisi visual",
-  "lighting": "deskripsi lighting",
-  "mood": "mood keseluruhan",
+  "primaryEmotion": "...",
   "suggestedCopyLanguage": "id"
 }`;
 
@@ -79,6 +92,10 @@ Return HANYA valid JSON tanpa markdown, tanpa penjelasan:
     if (jsonMatch) {
       const parsed = JSON.parse(jsonMatch[0]);
       parsed.suggestedCopyLanguage = 'id';
+      // Backward compat: map hookMechanism → hook for AnalysisCard
+      if (!parsed.hook && parsed.hookMechanism) {
+        parsed.hook = parsed.hookMechanism;
+      }
       return parsed;
     }
   } catch (e) {
@@ -88,37 +105,63 @@ Return HANYA valid JSON tanpa markdown, tanpa penjelasan:
   return { raw: analysisRaw, suggestedCopyLanguage: 'id' };
 }
 
-async function generateScalingAngles(winningAnalysis, productName, selectedAngles = [], productVisualDescription = null) {
+// ─── generateScalingAngles ───────────────────────────────────────────────────
+// CONCEPT TRANSLATION — not template application.
+// Takes the winning ad's hook/scenario/emotional truth and translates it
+// specifically to the user's product context.
+// Critically: generates imagePromptEN inline so no extra API calls needed.
+
+async function generateScalingAngles(
+  winningAnalysis,
+  productName,
+  selectedAngles = [],
+  productVisualDescription = null,
+  productDescription = null,
+) {
   const anglesToGenerate = selectedAngles.length > 0
     ? selectedAngles
     : Object.keys(SCALING_ANGLES);
 
-  const productVisualNote = productVisualDescription
-    ? `\nDeskripsi visual produk: ${productVisualDescription}`
-    : '';
+  const systemPrompt = `Kamu adalah Meta Ads creative strategist yang ahli "concept translation" — mengambil DNA dari iklan winning dan mengadaptasinya untuk produk yang berbeda.
 
-  const systemPrompt = `Kamu adalah Meta Ads copywriter terbaik di Indonesia. Buat variasi copy iklan yang scroll-stopping, high-CTR, dan cocok untuk Meta Ads.
-PENTING: Semua output copy (headline, subheadline, bodyText, cta) HARUS dalam Bahasa Indonesia. Jangan gunakan bahasa Inggris sama sekali untuk teks iklan.`;
+PRINSIP UTAMA: Jangan buat iklan generik. Translate SPESIFIK konsep dari winning ad ke konteks produk ini. Pertahankan: hook mechanism, emotional truth, narrative structure. Ganti: skenario, objek, konteks — sesuaikan ke produk.
 
-  const userPrompt = `Produk: ${productName}${productVisualNote}
+PENTING: Semua copy (headline, subheadline, bodyText, cta) HARUS Bahasa Indonesia. Jangan gunakan Bahasa Inggris untuk teks iklan.`;
 
-Analisis iklan winning ini:
+  const userPrompt = `WINNING AD ANALYSIS:
 ${JSON.stringify(winningAnalysis, null, 2)}
 
-Buat copy variasi untuk ${anglesToGenerate.length} angle berikut: ${anglesToGenerate.join(', ')}
+PRODUK: ${productName}
+${productDescription ? `Deskripsi produk: ${productDescription}` : ''}
+${productVisualDescription ? `Visual produk: ${productVisualDescription}` : ''}
+
+ANGLE YANG DIMINTA: ${anglesToGenerate.join(', ')}
+
+TUGAS:
+Untuk tiap angle, buat copy iklan yang:
+1. Menggunakan hook mechanism yang SAMA dengan winning ad (cara menarik perhatian di 3 detik pertama)
+2. Menyentuh emotional truth yang SAMA tapi diaplikasikan ke konteks produk ini
+3. Mengikuti narrative structure yang SAMA (setup→tension→resolution) tapi untuk skenario produk ini
+4. BUKAN menggunakan template angle generik — translate konsep winning ad secara spesifik
+
+Contoh cara berpikir:
+- Winning ad: orang frustrasi tidak tahu angka bisnisnya (hook: "kamu melakukan kesalahan tanpa sadar")
+- Produk skincare diabetes: orang tidak sadar kulitnya butuh perawatan khusus (hook: "kamu merawat kulit dengan cara yang salah selama ini")
+- Sama hooknya, berbeda konteksnya
 
 Untuk tiap angle, return:
 {
   "angle": "angle_key",
-  "headline": "headline max 8 kata — BAHASA INDONESIA",
+  "translatedConcept": "penjelasan 1 paragraf: bagaimana konsep winning ad ditranslate ke produk ini untuk angle ini",
+  "headline": "headline max 8 kata, scroll-stopping — BAHASA INDONESIA",
   "subheadline": "subheadline max 15 kata — BAHASA INDONESIA",
   "bodyText": "body copy max 30 kata — BAHASA INDONESIA",
-  "cta": "CTA button text max 4 kata — BAHASA INDONESIA",
-  "imageDirection": "arahan visual singkat untuk gambar (20 kata, English untuk AI image generator)",
-  "conceptNote": "penjelasan singkat kenapa angle ini cocok untuk produk ini (Bahasa Indonesia, 1-2 kalimat)"
+  "cta": "CTA max 4 kata — BAHASA INDONESIA",
+  "imageScenario": "Skenario visual spesifik untuk gambar: siapa, sedang apa, di mana, ekspresi, objek di sekitarnya — harus PARALEL dengan skenario winning ad tapi untuk konteks produk (50 kata, Indonesian)",
+  "imagePromptEN": "Detail image prompt dalam English untuk AI image generator (80-150 kata). CRITICAL: No text/words/typography in image. Highly specific and cinematic. Include: subject description with emotion, action, setting, lighting matching winning ad style (${winningAnalysis.lighting || 'natural'}), color palette (${(winningAnalysis.colorPalette || []).join(', ')}), mood (${winningAnalysis.mood || 'engaging'}), camera angle, composition. Product ${productName} must be clearly visible."
 }
 
-Return array JSON valid, tanpa markdown.`;
+Return array JSON valid dengan tepat ${anglesToGenerate.length} item. Tanpa markdown, tanpa komentar.`;
 
   const response = await chatCompletion({
     model: config.models.chat,
@@ -126,7 +169,7 @@ Return array JSON valid, tanpa markdown.`;
       { role: 'system', content: systemPrompt },
       { role: 'user', content: userPrompt },
     ],
-    maxTokens: 2000,
+    maxTokens: 3500,
     temperature: 0.8,
   });
 
@@ -134,72 +177,48 @@ Return array JSON valid, tanpa markdown.`;
     const jsonMatch = response.match(/\[[\s\S]*\]/);
     if (jsonMatch) return JSON.parse(jsonMatch[0]);
   } catch (e) {
-    console.warn('Could not parse scaling angles as JSON');
+    console.warn('Could not parse scaling angles as JSON:', e.message);
   }
 
   return [];
 }
 
-async function generateVariationPrompt(winningAnalysis, angle, productName, productVisualDescription = null) {
-  const angleInfo = SCALING_ANGLES[angle.angle] || {};
+// ─── buildFallbackPrompt ─────────────────────────────────────────────────────
+// Only used when imagePromptEN is missing (shouldn't happen with new pipeline).
 
-  const productVisualNote = productVisualDescription
-    ? `\n\nProduct visual (recreate EXACTLY in image): ${productVisualDescription}`
-    : '';
+function buildFallbackPrompt(angle, winningAnalysis, productName, productVisualDescription) {
+  const conceptContext = angle.translatedConcept
+    ? `Translated concept: ${angle.translatedConcept}\nScene to depict: ${angle.imageScenario || ''}`
+    : `Image direction: ${angle.imageDirection || ''}`;
 
-  const prompt = await chatCompletion({
-    model: config.models.chat,
-    messages: [
-      {
-        role: 'system',
-        content: 'You are an expert AI image prompt engineer for Meta Ads. Create detailed, optimized prompts for scroll-stopping ad visuals. Image prompts must be in English.',
-      },
-      {
-        role: 'user',
-        content: `Create an image generation prompt for this Meta Ads variation:
-
-Product: ${productName}
-Angle: ${angle.angle} — ${angleInfo.hook || ''}
-Headline (for context only, do NOT include text in image): ${angle.headline}
-Image Direction: ${angle.imageDirection}${productVisualNote}
-
-Winning ad visual style:
-- Visual style: ${winningAnalysis.visualStyle || 'professional, clean'}
-- Color palette: ${(winningAnalysis.colorPalette || []).join(', ')}
-- Lighting: ${winningAnalysis.lighting || 'natural'}
-- Mood: ${winningAnalysis.mood || 'engaging'}
-- Composition: ${winningAnalysis.composition || 'centered'}
-- Format: ${winningAnalysis.format || 'Feed 1:1'}
-
-Write an English prompt (100-200 words) that:
-1. Replicates the visual style from the winning ad accurately
-2. Matches the angle and emotion
-3. Starts with: "Meta Ads creative, scroll-stopping, high-CTR visual, "
-4. Does NOT include any text, words, or typography in the image
-5. Includes: subject, setting, lighting, color palette, mood, composition, style
-${productVisualDescription ? '6. Product MUST look exactly as described in the product visual section above' : ''}
-
-Output ONLY the prompt text, no explanations.`,
-      },
-    ],
-    maxTokens: 400,
-    temperature: 0.8,
-  });
-
-  return prompt.trim();
+  return [
+    `Meta Ads creative image, ${winningAnalysis.visualStyle || 'professional, clean'}.`,
+    conceptContext,
+    `Product: ${productName} — must be clearly visible and recognizable.`,
+    productVisualDescription ? `Product looks like: ${productVisualDescription}` : '',
+    `Maintain winning ad visual DNA: ${(winningAnalysis.colorPalette || []).join(', ')} color palette,`,
+    `${winningAnalysis.lighting || 'natural'} lighting, ${winningAnalysis.mood || 'engaging'} mood,`,
+    `${winningAnalysis.composition || 'centered'} composition.`,
+    'NO text, words, numbers, or typography in image.',
+    'Highly detailed, photorealistic, Meta Ads format.',
+  ].filter(Boolean).join('\n').trim();
 }
+
+// ─── generateVariationPrompts ─────────────────────────────────────────────────
+// Now SYNCHRONOUS — no extra API calls needed.
+// generateScalingAngles already inlines imagePromptEN in the same call.
+// This collapses what used to be N+1 API calls into just 1.
 
 async function generateVariationPrompts(winningAnalysis, angles, productName, productVisualDescription = null) {
-  const prompts = await Promise.allSettled(
-    angles.map((angle) => generateVariationPrompt(winningAnalysis, angle, productName, productVisualDescription))
-  );
-
-  return angles.map((angle, i) => ({
-    ...angle,
-    imagePrompt: prompts[i].status === 'fulfilled' ? prompts[i].value : null,
-    promptError: prompts[i].status === 'rejected' ? prompts[i].reason?.message : null,
-  }));
+  return angles.map((angle) => {
+    const imagePrompt = angle.imagePromptEN
+      || buildFallbackPrompt(angle, winningAnalysis, productName, productVisualDescription);
+    return { ...angle, imagePrompt };
+  });
 }
+
+// ─── batchGenerateImages ──────────────────────────────────────────────────────
+// productImageUrl: public URL from uploadImageToApimart → used for flux-kontext-pro reference
 
 async function batchGenerateImages(variations, aspectRatio = '1:1', productImageUrl = null) {
   const sizeMap = {
@@ -212,23 +231,21 @@ async function batchGenerateImages(variations, aspectRatio = '1:1', productImage
 
   const filteredVariations = variations.filter((v) => v.imagePrompt);
   const results = await Promise.allSettled(
-    filteredVariations.map((variation) =>
+    filteredVariations.map((v) =>
       generateImage({
-        prompt: variation.imagePrompt,
+        prompt: v.imagePrompt,
         size,
-        imageUrl: productImageUrl || undefined, // flux-kontext-pro when product photo available
+        imageUrl: productImageUrl || undefined,
       })
     )
   );
 
   let filteredIdx = 0;
-  return variations.map((variation) => {
-    if (!variation.imagePrompt) {
-      return { ...variation, imageUrl: null, imageError: 'No prompt generated' };
-    }
+  return variations.map((v) => {
+    if (!v.imagePrompt) return { ...v, imageUrl: null, imageError: 'No prompt generated' };
     const result = results[filteredIdx++];
     return {
-      ...variation,
+      ...v,
       imageUrl: result.status === 'fulfilled' ? result.value[0]?.url : null,
       imageError: result.status === 'rejected' ? result.reason?.message : null,
     };

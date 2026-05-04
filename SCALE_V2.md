@@ -15,14 +15,42 @@ AI yang kerja: analisis mendalam → translate ke prompt detail → adaptasi ke 
 
 ---
 
+## Root Cause: Kenapa Output Masih Generik
+
+**Pipeline lama (SALAH):**
+```
+Analyze winning ad → extract "angle type" (fomo/price_anchor/dll) → 
+generate copy dengan angle standar + nama produk
+```
+Hasilnya generik karena angle-nya **lepas dari konteks winning ad**.
+
+**Pipeline baru (BENAR) — Concept Translation:**
+```
+Analyze winning ad → extract CORE HOOK MECHANISM secara mendalam →
+translate hook ke konteks produk user →
+generate image yang SAMA komposisinya tapi relevan ke produk
+```
+
+**Contoh nyata:**
+- Winning ad: "Orang frustrasi di meja kerja, dikelilingi kertas, laptop, kalkulator — masalahnya dia nggak tau angka bisnisnya sendiri"
+- Core hook: *Orang yang sudah lama melakukan sesuatu tapi ternyata melakukan kesalahan mendasar tanpa sadar → shock/realization moment*
+- Translated ke diabetes lotion: *Orang yang sudah lama pakai skincare biasa tapi kulitnya tetap kering/retak — ternyata kulit diabetik butuh perawatan khusus yang selama ini diabaikan*
+- Image direction: *Sama — wanita distressed, close-up ekspresi khawatir, melihat tangannya/kulitnya yang kering, ada lotion di sekitarnya*
+
+**Yang harus berubah:** `analyzeWinningAd` harus extract hook mechanism, bukan cuma angle label. `generateVariationPrompts` harus translate hook secara spesifik ke produk, bukan apply angle template.
+
+---
+
 ## Apa yang Difix & Dibangun
 
 ### FIX (bug aktif)
+- [ ] Pipeline AI diubah dari "angle selection" ke "concept translation"
+- [ ] analyzeWinningAd: extract 7 dimensi mendalam (lihat Task 2)
+- [ ] generateVariationPrompts: translate concept ke produk, bukan apply template
 - [ ] Bahasa output selalu Indonesia
-- [ ] Foto produk dipakai untuk describe visual produk ke AI (bukan cuma nama)
+- [ ] Foto produk → upload → flux-kontext-pro (real image reference)
 
 ### BARU
-- [ ] Scale Winning Image v2 (enhanced dengan product visual injection)
 - [ ] Carousel option setelah image generation
 - [ ] Menu baru: Scale Winning Video
 
@@ -60,6 +88,164 @@ POST https://api.apimart.ai/v1/images/generations
 ```
 
 **Ini kuncinya**: produk foto di-upload dulu → dapat URL → pass ke flux-kontext-pro → AI generate dengan visual reference produk yang akurat.
+
+---
+
+## TASK 2 — Rewrite AI Pipeline: Concept Translation (PALING PENTING)
+
+### Masalah di scalingService.js saat ini:
+1. `analyzeWinningAd` hanya extract surface info (color, angle label, visual style)
+2. `generateScalingAngles` apply template angle standar (fomo/price_anchor) tanpa reference ke concept winning ad
+3. `generateVariationPrompt` copy visual style tapi tidak translate narrative/scenario
+
+### Fix: Rewrite semua 3 fungsi AI prompt di backend/src/services/scalingService.js
+
+#### 2a. Rewrite analyzeWinningAd — extract 7 dimensi concept
+
+Ganti `analysisPrompt` dengan ini:
+
+```
+Kamu adalah Meta Ads creative strategist kelas dunia. Analisis iklan ini secara SANGAT MENDALAM.
+Tujuan: ekstrak "DNA" dari iklan ini sehingga konsepnya bisa direplikasi untuk produk berbeda.
+
+Analisis 7 dimensi berikut, return dalam format JSON valid:
+
+1. HUMAN_SCENARIO: Skenario manusia spesifik yang digambarkan. Bukan "orang pakai produk" tapi detail situasinya — siapa orangnya, sedang apa, ada di mana, apa yang terjadi. Ini yang membuat orang berhenti scroll karena merasa "ini tentang aku".
+
+2. EMOTIONAL_TRUTH: Kebenaran emosional universal yang disentuh. Rasa takut, malu, harapan, atau keinginan spesifik apa? Bukan emosi generik, tapi yang sangat spesifik ke situasi yang ditampilkan.
+
+3. HOOK_MECHANISM: Bagaimana tepatnya iklan ini "mencuri" perhatian di 1-3 detik pertama? Apa element pertama yang mata lihat? Mengapa itu bikin penasaran atau berhenti scroll?
+
+4. NARRATIVE_STRUCTURE: Alur cerita/pesan: Setup (situasi masalah) → Tension (kenapa ini penting/menyakitkan) → Resolution (solusi/harapan). Deskripsikan tiap tahap secara spesifik.
+
+5. VISUAL_STORY: Objek-objek, ekspresi, setting spesifik yang "menceritakan" pesan tanpa kata. Apa yang ada di frame dan kenapa itu dipilih? Komposisi, lighting, warna — semua punya makna, jelaskan.
+
+6. COPY_PATTERN: Formula copy yang dipakai. Bukan hanya "problem-agitate" tapi pola spesifiknya: opening word choice, structure, tone, how it creates urgency.
+
+7. REPLICATION_BLUEPRINT: Instruksi singkat "cara replikasi konsep ini untuk produk skincare/kesehatan". Apa yang harus dipertahankan dan apa yang diganti.
+
+Return HANYA valid JSON:
+{
+  "humanScenario": "...",
+  "emotionalTruth": "...",
+  "hookMechanism": "...",
+  "narrativeStructure": { "setup": "...", "tension": "...", "resolution": "..." },
+  "visualStory": "...",
+  "copyPattern": "...",
+  "replicationBlueprint": "...",
+  "visualStyle": "...",
+  "colorPalette": ["#hex1", "#hex2"],
+  "lighting": "...",
+  "mood": "...",
+  "composition": "...",
+  "dominantAngle": "angle_key",
+  "format": "Feed/Story/Reels",
+  "primaryEmotion": "..."
+}
+```
+
+#### 2b. Rewrite generateScalingAngles — translate concept, tidak apply template
+
+Ganti seluruh prompt di `generateScalingAngles` dengan ini:
+
+```js
+const systemPrompt = `Kamu adalah Meta Ads creative strategist yang ahli "concept translation" — mengambil DNA dari iklan winning dan mengadaptasinya untuk produk yang berbeda.
+
+PRINSIP UTAMA: Jangan buat iklan generik. Translate SPESIFIK konsep dari winning ad ke konteks produk ini. Pertahankan: hook mechanism, emotional truth, narrative structure. Ganti: skenario, objek, konteks — sesuaikan ke produk.
+
+PENTING: Semua copy (headline, subheadline, bodyText, cta) HARUS Bahasa Indonesia.`;
+
+const userPrompt = `WINNING AD ANALYSIS:
+${JSON.stringify(winningAnalysis, null, 2)}
+
+PRODUK: ${productName}
+${productDescription ? `Deskripsi produk: ${productDescription}` : ''}
+${productVisualDescription ? `Visual produk: ${productVisualDescription}` : ''}
+
+ANGLE YANG DIMINTA: ${anglesToGenerate.join(', ')}
+
+TUGAS:
+Untuk tiap angle, buat copy iklan yang:
+1. Menggunakan hook mechanism yang SAMA dengan winning ad (cara menarik perhatian di 3 detik pertama)
+2. Menyentuh emotional truth yang SAMA tapi diaplikasikan ke konteks produk ini
+3. Mengikuti narrative structure yang SAMA (setup→tension→resolution) tapi untuk skenario produk ini
+4. BUKAN menggunakan template angle generik — translate konsep winning ad secara spesifik
+
+Contoh cara berpikir:
+- Winning ad: orang frustrasi tidak tahu angka bisnisnya (hook: "kamu melakukan kesalahan tanpa sadar")  
+- Produk skincare diabetes: orang tidak sadar kulitnya butuh perawatan khusus (hook: "kamu merawat kulit dengan cara yang salah selama ini")
+- Sama hooknya, berbeda konteksnya
+
+Untuk tiap angle, return:
+{
+  "angle": "angle_key",
+  "translatedConcept": "penjelasan 1 paragraf: bagaimana konsep winning ad ditranslate ke produk ini untuk angle ini",
+  "headline": "headline max 8 kata, scroll-stopping — BAHASA INDONESIA",
+  "subheadline": "subheadline max 15 kata — BAHASA INDONESIA",
+  "bodyText": "body copy max 30 kata — BAHASA INDONESIA",
+  "cta": "CTA max 4 kata — BAHASA INDONESIA",
+  "imageScenario": "Skenario visual spesifik untuk gambar: siapa, sedang apa, di mana, ekspresi, objek di sekitarnya — harus PARALEL dengan skenario winning ad tapi untuk konteks produk (50 kata, Indonesian)",
+  "imagePromptEN": "Detail image prompt dalam English untuk AI image generator (80-150 kata)"
+}
+
+Return array JSON valid.`;
+```
+
+#### 2c. Rewrite generateVariationPrompt — gunakan imageScenario dari step sebelumnya
+
+Ubah fungsi `generateVariationPrompt` untuk menggunakan `angle.imageScenario` (dari step 2b) sebagai basis, bukan `angle.imageDirection` yang generik:
+
+```js
+const conceptContext = angle.translatedConcept 
+  ? `\nTranslated concept: ${angle.translatedConcept}\nScene to depict: ${angle.imageScenario}`
+  : `\nImage direction: ${angle.imageDirection}`;
+
+const prompt = `Meta Ads creative image, ${winningAnalysis.visualStyle || 'professional, clean'}, 
+${conceptContext}
+Product: ${productName} — must be clearly visible and recognizable.
+${productVisualDescription ? `Product looks like: ${productVisualDescription}` : ''}
+Maintain winning ad visual DNA: ${winningAnalysis.colorPalette?.join(', ')} color palette, ${winningAnalysis.lighting} lighting, ${winningAnalysis.mood} mood, ${winningAnalysis.composition} composition.
+NO text, words, numbers, or typography in image.
+Highly detailed, photorealistic, Meta Ads format.`;
+
+return prompt.trim();
+```
+
+Jika `angle.imagePromptEN` sudah ada (digenerate di step 2b), gunakan langsung tanpa memanggil chatCompletion lagi — hemat API call:
+
+```js
+async function generateVariationPrompts(winningAnalysis, angles, productName, productVisualDescription) {
+  return angles.map((angle) => {
+    // Use pre-generated imagePromptEN if available
+    const imagePrompt = angle.imagePromptEN || buildFallbackPrompt(angle, winningAnalysis, productName, productVisualDescription);
+    return { ...angle, imagePrompt };
+  });
+}
+```
+
+Ini menggabungkan step 2b dan 2c jadi 1 API call, lebih efisien.
+
+#### 2d. Update batchGenerateImages
+
+Terima `productImageUrl` dan pass ke generateImage:
+
+```js
+async function batchGenerateImages(variations, aspectRatio = '1:1', productImageUrl = null) {
+  const sizeMap = { '1:1': '1024x1024', '9:16': '1024x1792', '16:9': '1792x1024' };
+  const size = sizeMap[aspectRatio] || '1024x1024';
+  const results = await Promise.allSettled(
+    variations.filter(v => v.imagePrompt).map((v) =>
+      generateImage({ prompt: v.imagePrompt, size, imageUrl: productImageUrl })
+    )
+  );
+  let idx = 0;
+  return variations.map((v) => {
+    if (!v.imagePrompt) return { ...v, imageUrl: null, imageError: 'No prompt' };
+    const r = results[idx++];
+    return { ...v, imageUrl: r.status === 'fulfilled' ? r.value[0]?.url : null, imageError: r.status === 'rejected' ? r.reason?.message : null };
+  });
+}
+```
 
 ---
 
