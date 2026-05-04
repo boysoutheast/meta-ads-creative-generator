@@ -223,7 +223,7 @@ Untuk tiap angle, return objek JSON dengan field BERIKUT (isi sedetail mungkin, 
 Return array JSON valid dengan TEPAT ${anglesToGenerate.length} item. Tanpa markdown, tanpa komentar, langsung array.`;
 
   const response = await chatCompletion({
-    model: config.models.chat,
+    model: config.models.scalingChat,
     messages: [
       { role: 'system', content: systemPrompt },
       { role: 'user', content: userPrompt },
@@ -247,152 +247,193 @@ Return array JSON valid dengan TEPAT ${anglesToGenerate.length} item. Tanpa mark
 // GPT fills in scene details. No more free-form imagePromptEN from GPT.
 
 function buildAngleImagePrompt(angle, winningAnalysis, productName, productVisualDescription) {
-  const palette    = (winningAnalysis.colorPalette || ['#FADBD8', '#A93226']).join(', ');
+  const palette    = (winningAnalysis.colorPalette || ['#FADBD8', '#A93226', '#D5DBDB']).join(', ');
   const lighting   = winningAnalysis.lighting  || 'warm natural';
   const mood       = winningAnalysis.mood      || 'engaging';
   const headline   = angle.headline   || '';
   const sub        = angle.subheadline || '';
   const cta        = (angle.cta || 'Coba Sekarang').replace(/^CTA:\s*/i, '');
   const sd         = angle.sceneDetails || {};
-  const emotional  = sd.emotionalMoment || 'relatable everyday expression';
-  const setting    = sd.setting        || 'clean bright environment';
+  // Strip leading "Indonesian woman" from emotionalMoment if present — templates add it themselves
+  const rawEmotional = sd.emotionalMoment || 'relatable everyday expression, Southeast Asian features';
+  const emotional  = rawEmotional.replace(/^Indonesian woman[^,]*,?\s*/i, '').trim() || rawEmotional;
+  const setting    = sd.setting        || 'clean bright environment, Indonesian home';
   const props      = sd.keyProps       || 'product prominently displayed';
 
-  const prodDesc   = productVisualDescription
+  // Product description — from uploaded photo analysis or hardcoded fallback
+  const prodBase = productVisualDescription
     ? `${productName} — ${productVisualDescription}`
-    : `${productName} pump bottle, tall slim pink bottle, 200ML, pink and white label, pump dispenser top`;
+    : `${productName} pump bottle — tall slim pink bottle, 200ML, pink and white label with "TaraCare Body Lotion" text, pump dispenser top`;
+  const prodDesc = `${prodBase}. IMPORTANT: Match this product's appearance EXACTLY to the uploaded reference product photo — same bottle shape, label colors, label text, and pump dispenser design.`;
 
-  const quality    = `Photorealistic, high-end skincare editorial photography. Clean, trustworthy, Indonesian lifestyle photography feel. No CGI look. No artificial look. Color palette: ${palette}. ${lighting} lighting. ${mood} mood. Square 1:1 format.`;
-  const bpom       = `"BPOM ✓" badge in bottom right corner.`;
+  const quality  = `Photorealistic, high-end skincare beauty editorial photography. Clean and trustworthy aesthetic. Indonesian lifestyle photography feel. No CGI look. No artificial render look. Color palette: ${palette}. ${lighting} lighting. ${mood} mood. Square 1:1 format.`;
+  const bpom     = `"BPOM ✓" badge in bottom right corner, small but legible.`;
+  const refNote  = `NOTE: Two reference images are provided — use the winning ad for layout/style reference and the product photo for EXACT product appearance. The product bottle in the image MUST match the reference product photo.`;
 
   switch (angle.angle) {
 
     // ── BEFORE & AFTER ──────────────────────────────────────────────────────
     case 'before_after': {
-      const beforeState = sd.beforeState || 'skin area looks dry, rough, dull texture, unhealthy';
-      const afterState  = sd.afterState  || 'same skin area looks smooth, luminous, visibly hydrated';
+      const beforeState = sd.beforeState || 'skin area looks visibly dry, rough texture, dull, unhealthy — close-up of forearm/hand';
+      const afterState  = sd.afterState  || 'same skin area looks visibly smooth, luminous, hydrated glow — same close-up';
       const timeClaim   = sd.timeClaim   || '7 hari';
-      return `A clean, modern Meta Ads image in editorial split-screen style. Background: soft pink-cream gradient (#FFF0F5 to #F5F0E8). Square 1:1 format.
-TYPOGRAPHY RENDERED ON IMAGE (must be perfectly legible, crisp, no blur):
-- Top center: dark pink rounded pill badge with white text "Sebelum vs Sesudah"
-- Large bold dark brown text upper area (2-3 lines, centered): "${headline}"
-- Bottom smaller text: "${sub}"
-- CTA rounded pill button bottom center, dark pink (#D4547A): "${cta} →"
+      return `A clean, modern Meta Ads image in editorial split-screen style. Background is soft pink-cream gradient (#FFF0F5 to #F5F0E8). Square 1:1 format.
+TYPOGRAPHY RENDERED ON IMAGE (must be perfectly legible, crisp, bold, no blur):
+- Top center: dark pink (#D4547A) rounded pill badge with white text "Sebelum vs Sesudah"
+- Large bold dark brown/black text upper area (2-3 lines, centered): "${headline}"
+- Bottom smaller supporting text: "${sub}"
+- CTA rounded pill button bottom center, dark pink (#D4547A), white bold text: "${cta} →"
 MAIN SCENE:
-LEFT HALF "Sebelum": Indonesian woman 25-35yo, ${sd.emotionalMoment || 'concerned/frustrated expression'}, ${beforeState}. Muted warm lighting. Small white pill label "Sebelum" in top left corner.
-RIGHT HALF "Sesudah": Same Indonesian woman, smiling softly, ${afterState}. Brighter, warmer lighting. Small white pill label "Sesudah" in top right corner.
-DIVIDING ELEMENT: Thin vertical line in the center with a small white circle containing bold text "${timeClaim}".
-PRODUCT: ${prodDesc} — placed bottom center overlapping both halves, product is the hero, must be clearly identifiable and well-lit.
-FLOATING ELEMENTS: Small pink star/sparkle icons around the sesudah side. Small leaf/natural ingredient icon near product.
+LEFT HALF "Sebelum": Indonesian woman 25-35yo, ${sd.emotionalMoment || 'concerned/frustrated expression, looking at skin problem'}. Close-up shows ${beforeState}. Muted warm lighting, slightly desaturated. Small white rounded pill label "Sebelum" top left corner.
+RIGHT HALF "Sesudah": Same Indonesian woman, smiling softly, relaxed and happy. Close-up shows ${afterState}. Brighter, warmer, more saturated lighting. Sparkle/glow effect on skin. Small white rounded pill label "Sesudah" top right corner.
+DIVIDING ELEMENT: Thin vertical line in the center with a small white circle containing bold dark text "${timeClaim}".
+PRODUCT FEATURED: ${prodDesc} — placed bottom center overlapping both halves, slightly in front. Product is the hero element, must be large and clearly identifiable.
+FLOATING ELEMENTS: Small pink star/sparkle icons (#D4547A) scattered around the sesudah side. Small leaf/natural ingredient icon near the product bottom.
 ${bpom}
+${refNote}
 ${quality}`;
     }
 
     // ── FOMO / URGENCY ───────────────────────────────────────────────────────
     case 'fomo': {
-      return `A clean editorial Meta Ads image. LEFT 55%: large bold typography block on cream/off-white (#FFFBF5) background. RIGHT 45%: photorealistic lifestyle scene. Thin gradient divider between sides. Square 1:1 format.
-TYPOGRAPHY ON LEFT SIDE (rendered exactly, must be large, bold, perfectly legible):
-- Top left: coral/orange rounded pill badge with white text "⚡ Stok Terbatas"
-- Large bold dark brown headline (2-3 lines): "${headline}"
-- Smaller body text: "${sub}"
-- Orange rounded CTA pill button (bottom left): "${cta} →"
-RIGHT SIDE SCENE: Indonesian woman 25-35yo, ${emotional}. Setting: ${setting}. Props: ${props}. Product ${prodDesc} clearly visible in scene.
+      return `A clean, modern Meta Ads image in editorial split layout. Background soft cream/off-white (#FFFBF5). Square 1:1 format.
+LEFT 55%: Large bold typography block on cream background.
+RIGHT 45%: Photorealistic lifestyle scene with thin gradient divider.
+TYPOGRAPHY ON LEFT (rendered exactly, crisp, no blur, high contrast):
+- Top left: coral/orange (#E8541A) rounded pill badge with white text "⚡ Stok Terbatas"
+- Large bold dark brown/black headline (2-3 lines, large sans-serif): "${headline}"
+- Smaller supporting text below: "${sub}"
+- Orange rounded CTA pill button (#E8541A), white bold text, bottom left: "${cta} →"
+RIGHT SIDE SCENE: Indonesian woman 25-35yo, ${emotional}. Setting: ${setting}. Props: ${props}.
+PRODUCT: ${prodDesc} — visible in scene on right side, clearly identifiable.
+FLOATING: Small urgency indicator "Tersisa sedikit" text overlay near product. Pink sparkle accents.
 ${bpom}
+${refNote}
 ${quality}`;
     }
 
     // ── PROBLEM AGITATE ──────────────────────────────────────────────────────
     case 'problem_agitate': {
-      return `A clean editorial Meta Ads image. LEFT 55%: large bold typography block on cream/light background. RIGHT 45%: emotional problem scene. Square 1:1 format.
-TYPOGRAPHY ON LEFT (rendered exactly, large, perfectly legible):
-- Top left: dark rose/red rounded badge "Masalah Nyata"
-- Large bold dark headline (2-3 lines): "${headline}"
-- Smaller body text: "${sub}"
-- Dark pink CTA pill button (bottom left): "${cta} →"
-RIGHT SIDE SCENE: Indonesian woman 25-35yo, ${emotional}. Setting: ${setting}. Props showing the problem: ${props}. Product ${prodDesc} shown as the solution at bottom of scene, clearly visible.
+      return `A clean, modern Meta Ads image in editorial split layout. Background soft cream/light (#FFF8F5). Square 1:1 format.
+LEFT 55%: Large bold typography block on light background.
+RIGHT 45%: Emotional problem scene with thin divider.
+TYPOGRAPHY ON LEFT (rendered exactly, crisp, bold, perfectly legible):
+- Top left: dark rose (#A93226) rounded pill badge with white text "Masalah Nyata"
+- Large bold dark brown/black headline (2-3 lines): "${headline}"
+- Smaller supporting text: "${sub}"
+- Dark pink (#D4547A) rounded CTA pill button, white bold text, bottom left: "${cta} →"
+RIGHT SIDE SCENE: Indonesian woman 25-35yo, ${emotional}. Setting: ${setting}. Props showing the problem clearly: ${props}.
+PRODUCT: ${prodDesc} — shown as the solution, placed at bottom of right scene or overlapping corner, clearly identifiable.
 ${bpom}
+${refNote}
 ${quality}`;
     }
 
     // ── CURIOSITY GAP ────────────────────────────────────────────────────────
     case 'curiosity_gap': {
-      return `A clean editorial Meta Ads image. LEFT 55%: large bold typography with mystery/question hook on cream background. RIGHT 45%: intriguing lifestyle scene. Square 1:1 format.
-TYPOGRAPHY ON LEFT (rendered exactly, large, perfectly legible):
-- Top left: teal/dark green rounded badge "Tahukah kamu?"
-- Large bold dark question headline (2-3 lines): "${headline}"
-- Teaser body text: "${sub}"
-- CTA pill button (bottom left): "${cta} →"
-RIGHT SIDE SCENE: Indonesian woman 25-35yo, ${emotional}. Setting: ${setting}. Props: ${props}. Product ${prodDesc} clearly visible, looking intriguing/inviting.
+      return `A clean, modern Meta Ads image in editorial split layout. Background soft cream (#FFFBF5). Square 1:1 format.
+LEFT 55%: Bold typography with mystery/question hook on cream background.
+RIGHT 45%: Intriguing lifestyle scene.
+TYPOGRAPHY ON LEFT (rendered exactly, crisp, bold, perfectly legible):
+- Top left: teal/dark green (#1A7A6E) rounded pill badge with white text "Tahukah kamu?"
+- Large bold dark headline with question/mystery (2-3 lines): "${headline}"
+- Teaser supporting text: "${sub}"
+- Teal/dark pink rounded CTA pill button, white bold text, bottom left: "${cta} →"
+RIGHT SIDE SCENE: Indonesian woman 25-35yo, ${emotional}. Setting: ${setting}. Props: ${props}.
+PRODUCT: ${prodDesc} — clearly visible, prominently placed, looking intriguing.
+FLOATING: Small question mark or lightbulb accent icons in teal. Pink sparkle accents.
 ${bpom}
+${refNote}
 ${quality}`;
     }
 
     // ── SOCIAL PROOF ─────────────────────────────────────────────────────────
     case 'social_proof': {
-      return `A clean testimonial-style Meta Ads image. TOP SECTION: star rating + headline. CENTER: lifestyle scene with satisfied customer. BOTTOM: product + CTA. Square 1:1 format.
-TYPOGRAPHY RENDERED ON IMAGE (perfectly legible):
-- Top center: gold star rating "⭐⭐⭐⭐⭐" with text "1000+ Pelanggan Puas"
-- Bold dark headline (2 lines, centered): "${headline}"
+      return `A clean, modern testimonial-style Meta Ads image. Soft pink-cream background (#FFF0F5). Square 1:1 format.
+TOP SECTION: Star rating badge + headline.
+CENTER: Lifestyle scene with satisfied customer.
+BOTTOM: Product + CTA button.
+TYPOGRAPHY RENDERED ON IMAGE (perfectly legible, crisp):
+- Top center: gold star rating "⭐⭐⭐⭐⭐" with pink badge "1000+ Pelanggan Puas"
+- Bold dark headline (1-2 lines, large, centered): "${headline}"
 - Subtext: "${sub}"
-- Dark pink CTA pill button bottom center: "${cta} →"
-MAIN SCENE: Indonesian woman 25-35yo, ${emotional}. Setting: ${setting}. Props: ${props}. Before/after skin comparison circles visible as overlay elements.
-PRODUCT: ${prodDesc} — hero product bottom center, clearly identifiable.
+- Dark pink (#D4547A) CTA pill button, white bold text, bottom center: "${cta} →"
+MAIN SCENE: Indonesian woman 25-35yo, ${emotional}. Setting: ${setting}. Props: ${props}.
+OVERLAY ELEMENTS: Floating speech bubble testimonial snippet. Before/after skin comparison circles (left: rough, right: smooth).
+PRODUCT: ${prodDesc} — hero product, bottom center, large and clearly identifiable.
 ${bpom}
+${refNote}
 ${quality}`;
     }
 
     // ── TUTORIAL / HOW-TO ────────────────────────────────────────────────────
     case 'tutorial': {
-      return `A clean informational Meta Ads image with step-by-step layout. TOP: badge + headline. MIDDLE: 3-step card row with numbered steps. BOTTOM: product + CTA. Square 1:1 format.
-TYPOGRAPHY RENDERED ON IMAGE (perfectly legible):
-- Top center: teal/green rounded pill badge "Cara Pakai"
-- Bold dark headline (1-2 lines, centered): "${headline}"
-- STEP 1 card: circle with "1" + short instruction text
-- STEP 2 card: circle with "2" + short instruction text
-- STEP 3 card: circle with "3" + short instruction text
-- CTA pill button bottom center: "${cta} →"
+      return `A clean, modern informational Meta Ads image with step-by-step layout. Soft cream/white background. Square 1:1 format.
+TOP: Teal badge + headline.
+MIDDLE: 3-step numbered card row.
+BOTTOM: Product + CTA button.
+TYPOGRAPHY RENDERED ON IMAGE (perfectly legible, crisp):
+- Top center: teal/green (#1A7A6E) rounded pill badge "Cara Pakai"
+- Bold dark headline (1-2 lines, large, centered): "${headline}"
+- STEP 1 card: teal circle "1" + short instruction (10 words max)
+- STEP 2 card: teal circle "2" + short instruction (10 words max)
+- STEP 3 card: teal circle "3" + short instruction (10 words max)
+- Dark pink (#D4547A) CTA pill button, white bold text, bottom center: "${cta} →"
 BACKGROUND SCENE: Indonesian woman 25-35yo, ${emotional}. Setting: ${setting}. Props: ${props}. Soft, instructional, calm atmosphere.
-PRODUCT: ${prodDesc} — shown being applied/used in one of the step cards. Clearly identifiable.
+PRODUCT: ${prodDesc} — shown in use in one of the step illustrations. Clearly identifiable.
 ${bpom}
+${refNote}
 ${quality}`;
     }
 
     // ── PRICE ANCHOR ─────────────────────────────────────────────────────────
     case 'price_anchor': {
-      return `A clean value-proposition Meta Ads image. LEFT 55%: price comparison typography on cream background. RIGHT 45%: product showcase scene. Square 1:1 format.
-TYPOGRAPHY ON LEFT (rendered exactly, large, perfectly legible):
-- Top: green/teal badge "Hemat Sekarang"
-- Bold dark headline (2 lines): "${headline}"
-- Price comparison (large, bold): crossed-out higher price → actual discounted price in dark pink
-- Subtext: "${sub}"
-- Green/orange CTA pill button: "${cta} →"
-RIGHT SIDE SCENE: Indonesian woman 25-35yo, ${emotional}. Setting: ${setting}. Props: ${props}. Product ${prodDesc} prominently displayed, large and clear.
+      return `A clean, modern value-proposition Meta Ads image in editorial split layout. Soft cream background (#FFFBF5). Square 1:1 format.
+LEFT 55%: Price comparison typography block on cream background.
+RIGHT 45%: Product showcase lifestyle scene.
+TYPOGRAPHY ON LEFT (rendered exactly, crisp, bold, perfectly legible):
+- Top left: green (#1A7A6E) rounded pill badge "Hemat Sekarang"
+- Bold dark headline (1-2 lines, large): "${headline}"
+- Price comparison (prominently rendered): crossed-out original price in gray → actual price in large bold dark pink (#D4547A)
+- Smaller supporting text: "${sub}"
+- Green/orange (#E8541A) rounded CTA pill button, white bold text, bottom left: "${cta} →"
+RIGHT SIDE SCENE: Indonesian woman 25-35yo, ${emotional}. Setting: ${setting}. Props: ${props}.
+PRODUCT: ${prodDesc} — large, prominently displayed on right side, clearly identifiable.
 ${bpom}
+${refNote}
 ${quality}`;
     }
 
     // ── AUTHORITY / EXPERT ───────────────────────────────────────────────────
     case 'authority': {
-      return `A clean authority/expert-style Meta Ads image. Professional, trustworthy aesthetic. LEFT 55%: credentials + headline typography. RIGHT 45%: confident professional scene. Square 1:1 format.
-TYPOGRAPHY ON LEFT (rendered exactly, large, perfectly legible):
-- Top: dark blue/professional badge "Direkomendasikan Dokter" or "Terbukti Klinis"
-- Bold authoritative headline (2 lines): "${headline}"
-- Credential subtext: "${sub}"
-- Dark professional CTA pill button: "${cta} →"
-RIGHT SIDE SCENE: Indonesian woman professional/confident 25-40yo, ${emotional}. Setting: ${setting}. Props: ${props}. Product ${prodDesc} presented as the endorsed, certified product.
-TRUST OVERLAY ELEMENTS: BPOM badge, certification icon, 5-star badge as floating overlays.
+      return `A clean, modern authority/expert Meta Ads image in editorial split layout. Professional, trustworthy aesthetic. Soft cream/light blue-white background. Square 1:1 format.
+LEFT 55%: Credentials + headline typography on clean background.
+RIGHT 45%: Confident professional lifestyle scene.
+TYPOGRAPHY ON LEFT (rendered exactly, crisp, bold, perfectly legible):
+- Top left: dark navy/professional (#1A3A5C) rounded pill badge "Direkomendasikan Dokter"
+- Bold authoritative dark headline (2 lines): "${headline}"
+- Credential supporting text: "${sub}"
+- Dark professional (#1A3A5C or #D4547A) rounded CTA pill button, white bold text, bottom left: "${cta} →"
+RIGHT SIDE SCENE: Indonesian woman professional/confident 28-40yo, ${emotional}. Setting: ${setting}. Props: ${props}.
+PRODUCT: ${prodDesc} — presented as the endorsed certified product, clearly identifiable.
+TRUST OVERLAY BADGES: BPOM certified badge, 5-star rating badge, small certification icon — as floating overlays.
+${refNote}
 ${quality}`;
     }
 
     // ── DEFAULT FALLBACK ─────────────────────────────────────────────────────
     default: {
-      return `A clean editorial Meta Ads image. LEFT 55%: large bold typography on cream (#FFFBF5) background. RIGHT 45%: lifestyle scene. Square 1:1 format.
-TYPOGRAPHY ON LEFT (rendered exactly, large, perfectly legible):
-- Bold dark headline (2-3 lines): "${headline}"
-- Subtext: "${sub}"
-- Dark pink CTA pill button bottom left: "${cta} →"
-RIGHT SCENE: Indonesian woman 25-35yo, ${emotional}. Setting: ${setting}. Props: ${props}. Product ${prodDesc} clearly visible.
+      return `A clean, modern Meta Ads image in editorial split layout. Soft cream (#FFFBF5) background. Square 1:1 format.
+LEFT 55%: Large bold typography block on cream background.
+RIGHT 45%: Lifestyle scene with thin gradient divider.
+TYPOGRAPHY ON LEFT (rendered exactly, crisp, bold, perfectly legible):
+- Bold dark brown/black headline (2-3 lines, large): "${headline}"
+- Supporting subtext: "${sub}"
+- Dark pink (#D4547A) rounded CTA pill button, white bold text, bottom left: "${cta} →"
+RIGHT SCENE: Indonesian woman 25-35yo, ${emotional}. Setting: ${setting}. Props: ${props}.
+PRODUCT: ${prodDesc} — clearly visible and identifiable.
 ${bpom}
+${refNote}
 ${quality}`;
     }
   }

@@ -32,6 +32,8 @@ module.exports = {
     video: process.env.VIDEO_MODEL || 'kling-v3',
     vision: process.env.VISION_MODEL || 'gpt-4o',
     chat: process.env.CHAT_MODEL || 'gpt-4o',
+    // Separate model for scaling prompt/copy generation — use Sonnet for better quality
+    scalingChat: process.env.SCALING_CHAT_MODEL || process.env.CHAT_MODEL || 'gpt-4o',
   },
 
   upload: {
