@@ -31,7 +31,8 @@ function filesToBase64(files) {
 
 function photoUrls(photos) {
   if (!photos || !Array.isArray(photos)) return [];
-  return photos;
+  // Filter out legacy disk paths — Railway filesystem is ephemeral, they no longer resolve
+  return photos.filter((p) => typeof p === 'string' && !p.startsWith('/uploads/'));
 }
 
 // GET /api/products
