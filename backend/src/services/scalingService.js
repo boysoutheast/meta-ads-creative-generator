@@ -134,12 +134,21 @@ CRITICAL untuk imageScenario dan imagePromptEN:
 3. JANGAN buat scene netral/bahagia kecuali itu angle "after" atau "resolution". Hook/problem angle HARUS distressed/frustrated expression.
 4. imagePromptEN HARUS dimulai dengan: "Indonesian woman, Southeast Asian features, relatable everyday person, "`;
 
+  // Build product context block — the richer this is, the better the copy
+  const productContextBlock = [
+    `PRODUK: ${productName}`,
+    productDescription
+      ? `DESKRIPSI LENGKAP PRODUK (WAJIB dipakai dalam copy — sebutkan ingredient spesifik, manfaat unik, dan klaim yang membedakan):\n${productDescription}`
+      : '',
+    productVisualDescription
+      ? `Visual produk: ${productVisualDescription}`
+      : '',
+  ].filter(Boolean).join('\n\n');
+
   const userPrompt = `WINNING AD ANALYSIS:
 ${JSON.stringify(winningAnalysis, null, 2)}
 
-PRODUK: ${productName}
-${productDescription ? `Deskripsi produk: ${productDescription}` : ''}
-${productVisualDescription ? `Visual produk: ${productVisualDescription}` : ''}
+${productContextBlock}
 
 ANGLE YANG DIMINTA: ${anglesToGenerate.join(', ')}
 
@@ -149,11 +158,12 @@ Untuk tiap angle, buat copy iklan yang:
 2. Menyentuh emotional truth yang SAMA tapi diaplikasikan ke konteks produk ini
 3. Mengikuti narrative structure yang SAMA (setup→tension→resolution) tapi untuk skenario produk ini
 4. BUKAN menggunakan template angle generik — translate konsep winning ad secara spesifik
+5. WAJIB: Jika deskripsi produk menyebut ingredient spesifik (misal: Shea Butter 5%, Inoceramide, dll), manfaat klinis, atau kondisi target (diabetes, kulit kering parah, dll) — HARUS muncul di bodyText atau subheadline. Copy yang generik ("kulit kering") dinilai GAGAL. Copy yang spesifik ("kulit diabetik yang pecah-pecah") dinilai BERHASIL.
 
 Contoh cara berpikir:
 - Winning ad: orang frustrasi tidak tahu angka bisnisnya (hook: "kamu melakukan kesalahan tanpa sadar")
 - Produk skincare diabetes: orang tidak sadar kulitnya butuh perawatan khusus (hook: "kamu merawat kulit dengan cara yang salah selama ini")
-- Sama hooknya, berbeda konteksnya
+- Sama hooknya, berbeda konteksnya — dan copy HARUS sebutkan manfaat spesifik produk (Inoceramide, Shea Butter, dll)
 
 Untuk tiap angle, return:
 {

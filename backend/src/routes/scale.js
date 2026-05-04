@@ -139,18 +139,18 @@ PENTING: Semua teks copy (headline, subtext) HARUS dalam Bahasa Indonesia.
 
 Buat carousel Meta Ads ${clampedSlideCount} slide untuk:
 Produk: ${productName}
-${productDescription ? `Deskripsi: ${productDescription}` : ''}${productVisualNote}
+${productDescription ? `Deskripsi lengkap (WAJIB dipakai — sebutkan ingredient spesifik, kondisi target, klaim unik di tiap benefit slide):\n${productDescription}` : ''}${productVisualNote}
 
 Referensi dari winning ad:
-- Hook style: ${analysis.hook || 'engaging hook'}
+- Hook style: ${analysis.hook || analysis.hookMechanism || 'engaging hook'}
 - Visual style: ${analysis.visualStyle || 'professional'}
 - Color palette: ${(analysis.colorPalette || []).join(', ')}
 - Mood: ${analysis.mood || 'engaging'}
 - Emotion: ${analysis.primaryEmotion || 'desire'}
 
 Struktur WAJIB:
-- Slide 1: type "hook" — gunakan hook style yang sama dari winning ad, adaptasi untuk ${productName}
-- Slide 2 sampai ${clampedSlideCount - 1}: type "benefit" — tiap slide 1 manfaat/USP berbeda
+- Slide 1: type "hook" — gunakan hook style yang sama dari winning ad, adaptasi untuk ${productName}. Jangan generik.
+- Slide 2 sampai ${clampedSlideCount - 1}: type "benefit" — tiap slide 1 manfaat/USP SPESIFIK dari deskripsi produk (sebutkan ingredient, angka, kondisi target). Beda tiap slide.
 - Slide ${clampedSlideCount}: type "cta" — strong call to action
 
 Return JSON array dengan tepat ${clampedSlideCount} item, tanpa markdown:
