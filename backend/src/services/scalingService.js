@@ -47,50 +47,45 @@ async function analyzeWinningAd(filePath, mimeType = 'image/jpeg') {
   // Use actual file mime type — sending PNG as 'image/jpeg' causes model refusal
   const safeMime = mimeType && mimeType.startsWith('image/') ? mimeType : 'image/jpeg';
 
-  const analysisPrompt = `Kamu adalah Meta Ads creative strategist kelas dunia. Analisis iklan ini secara SANGAT MENDALAM.
-Tujuan: ekstrak "DNA" dari iklan ini sehingga konsepnya bisa direplikasi untuk produk berbeda.
+  const analysisPrompt = `Describe this advertisement image in detail. Return a JSON object with these exact fields — be specific and observational, not generic:
 
-Analisis 7 dimensi berikut, return dalam format JSON valid:
-
-1. HUMAN_SCENARIO: Skenario manusia spesifik yang digambarkan. Bukan "orang pakai produk" tapi detail situasinya — siapa orangnya, sedang apa, ada di mana, apa yang terjadi. Ini yang membuat orang berhenti scroll karena merasa "ini tentang aku".
-
-2. EMOTIONAL_TRUTH: Kebenaran emosional universal yang disentuh. Rasa takut, malu, harapan, atau keinginan spesifik apa? Bukan emosi generik, tapi yang sangat spesifik ke situasi yang ditampilkan.
-
-3. HOOK_MECHANISM: Bagaimana tepatnya iklan ini "mencuri" perhatian di 1-3 detik pertama? Apa element pertama yang mata lihat? Mengapa itu bikin penasaran atau berhenti scroll?
-
-4. NARRATIVE_STRUCTURE: Alur cerita/pesan: Setup (situasi masalah) → Tension (kenapa ini penting/menyakitkan) → Resolution (solusi/harapan). Deskripsikan tiap tahap secara spesifik.
-
-5. VISUAL_STORY: Objek-objek, ekspresi, setting spesifik yang "menceritakan" pesan tanpa kata. Apa yang ada di frame dan kenapa itu dipilih? Komposisi, lighting, warna — semua punya makna, jelaskan.
-
-6. COPY_PATTERN: Formula copy yang dipakai. Bukan hanya "problem-agitate" tapi pola spesifiknya: opening word choice, structure, tone, how it creates urgency.
-
-7. REPLICATION_BLUEPRINT: Instruksi singkat cara replikasi konsep ini untuk produk skincare/kesehatan. Apa yang harus dipertahankan (hook mechanism, emotional truth, narrative arc, visual style) dan apa yang diganti (skenario, objek, produk).
-
-Return HANYA valid JSON tanpa markdown, tanpa penjelasan:
 {
-  "humanScenario": "...",
-  "emotionalTruth": "...",
-  "hookMechanism": "...",
-  "narrativeStructure": { "setup": "...", "tension": "...", "resolution": "..." },
-  "visualStory": "...",
-  "copyPattern": "...",
-  "replicationBlueprint": "...",
-  "visualStyle": "...",
+  "humanScenario": "Describe specifically who is in the image, what they are doing, where they are, and what is happening around them",
+  "emotionalTruth": "What specific feeling or emotion does this image evoke in a viewer — be precise, not generic",
+  "hookMechanism": "Describe what element immediately catches visual attention in the first 1-3 seconds and why it is compelling",
+  "narrativeStructure": {
+    "setup": "What situation or problem is shown or implied",
+    "tension": "What makes this situation feel urgent or important",
+    "resolution": "What solution, hope, or outcome is suggested"
+  },
+  "visualStory": "Describe the specific objects, expressions, props, and setting visible in the image that communicate the message",
+  "copyPattern": "Describe the text/headline structure and tone visible in the image, if any",
+  "replicationBlueprint": "List the core visual and messaging elements that make this ad effective and how they could be adapted for a different product",
+  "visualStyle": "Describe the overall visual aesthetic — photography style, editing, mood board description",
   "colorPalette": ["#hex1", "#hex2", "#hex3"],
-  "lighting": "...",
-  "mood": "...",
-  "composition": "...",
-  "dominantAngle": "fomo",
+  "lighting": "Describe the lighting style and quality",
+  "mood": "Describe the overall mood and atmosphere",
+  "composition": "Describe the layout and visual composition",
+  "dominantAngle": "Choose one: fomo, social_proof, tutorial, curiosity_gap, before_after, problem_agitate, authority, price_anchor",
   "format": "Feed/Story/Reels",
-  "primaryEmotion": "...",
+  "primaryEmotion": "Single primary emotion evoked",
   "suggestedCopyLanguage": "id"
-}`;
+}
 
-  const analysisRaw = await analyzeImage({ imageBase64, mimeType: safeMime, prompt: analysisPrompt });
+Return only valid JSON, no markdown, no explanation.`;
 
-  // Detect model refusal — throw so frontend gets proper error, not silent raw string
+  let analysisRaw = await analyzeImage({ imageBase64, mimeType: safeMime, prompt: analysisPrompt });
+
+  // Detect model refusal — retry with ultra-minimal prompt before giving up
   if (/^i('m| am) sorry|can't assist|cannot assist|i'm unable/i.test(analysisRaw.trim())) {
-    throw new Error('Model menolak analisis gambar ini. Coba dengan gambar iklan lain atau format berbeda (JPG).');
+    console.warn('Vision model refused first attempt — retrying with minimal prompt');
+    const minimalPrompt = `Look at this image and return JSON describing: colors used, layout type, what is shown, mood, and main text visible. Format: {"colorPalette":["#hex"],"composition":"...","humanScenario":"...","mood":"...","hookMechanism":"...","visualStyle":"...","dominantAngle":"fomo","primaryEmotion":"...","lighting":"natural","narrativeStructure":{"setup":"...","tension":"...","resolution":"..."},"replicationBlueprint":"...","copyPattern":"...","visualStory":"...","format":"Feed","suggestedCopyLanguage":"id"}`;
+    analysisRaw = await analyzeImage({ imageBase64, mimeType: safeMime, prompt: minimalPrompt });
+  }
+
+  // Still refusing after retry — throw clear error
+  if (/^i('m| am) sorry|can't assist|cannot assist|i'm unable/i.test(analysisRaw.trim())) {
+    throw new Error('Gagal menganalisis gambar ini. Coba save ulang sebagai JPG dan upload kembali.');
   }
 
   try {
