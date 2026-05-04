@@ -10,7 +10,7 @@ const {
   batchGenerateImages,
 } = require('../services/scalingService');
 const { analyzeVideoReference } = require('../services/videoAnalyzer');
-const { analyzeImage, generateImage, generateVideo, chatCompletion } = require('../services/apimart');
+const { analyzeImage, uploadImageToApimart, generateImage, generateVideo, chatCompletion } = require('../services/apimart');
 const config = require('../config');
 
 router.get('/angles', (req, res) => {
@@ -75,6 +75,17 @@ router.post('/generate-variations', async (req, res) => {
     }
   }
 
+  // Upload product photo → get public URL → flux-kontext-pro uses it for accurate product reference
+  let productImageUrl = null;
+  if (productPhotoBase64 && generateImages) {
+    try {
+      productImageUrl = await uploadImageToApimart(productPhotoBase64, productPhotoMime || 'image/jpeg');
+      console.log('Product photo uploaded:', productImageUrl ? 'OK' : 'failed');
+    } catch (e) {
+      console.warn('Product photo upload failed (non-fatal):', e.message);
+    }
+  }
+
   const angles = await generateScalingAngles(
     analysis, productName, selectedAngles, productVisualDescription, productDescription
   );
@@ -84,7 +95,7 @@ router.post('/generate-variations', async (req, res) => {
 
   let finalVariations = variationsWithPrompts;
   if (generateImages) {
-    finalVariations = await batchGenerateImages(variationsWithPrompts, aspectRatio);
+    finalVariations = await batchGenerateImages(variationsWithPrompts, aspectRatio, productImageUrl);
   }
 
   res.json({
@@ -93,6 +104,7 @@ router.post('/generate-variations', async (req, res) => {
     totalVariations: finalVariations.length,
     variations: finalVariations,
     productVisualDescription,
+    usedFluxKontext: !!productImageUrl,
   });
 });
 
@@ -171,10 +183,19 @@ Return JSON array dengan tepat ${clampedSlideCount} item, tanpa markdown:
     const sizeMap = { '1:1': '1024x1024', '9:16': '1024x1536', '16:9': '1536x1024' };
     const size = sizeMap[aspectRatio] || '1024x1024';
 
+    let carouselImageUrl = null;
+    if (productPhotoBase64) {
+      try {
+        carouselImageUrl = await uploadImageToApimart(productPhotoBase64, productPhotoMime || 'image/jpeg');
+      } catch (e) {
+        console.warn('Carousel product photo upload failed (non-fatal):', e.message);
+      }
+    }
+
     const imageResults = await Promise.allSettled(
       slides.map((slide) =>
         slide.imagePrompt
-          ? generateImage({ prompt: slide.imagePrompt, size })
+          ? generateImage({ prompt: slide.imagePrompt, size, imageUrl: carouselImageUrl || undefined })
           : Promise.resolve(null)
       )
     );

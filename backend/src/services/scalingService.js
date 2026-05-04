@@ -270,25 +270,34 @@ function buildFallbackPrompt(angle, winningAnalysis, productName, productVisualD
   return INDONESIAN_PERSON_PREFIX + base;
 }
 
+// ─── appendTextOverlayToPrompt ───────────────────────────────────────────────
+// Appends text rendering instruction to image prompt.
+// gpt-image-2 excels at rendering legible text on images — use this superpower.
+
+function appendTextOverlayToPrompt(prompt, headline, cta) {
+  if (!headline) return prompt;
+  const ctaPart = cta ? ` and an orange rounded pill button with bold white text "${cta.replace(/^CTA:\s*/i, '')}"` : '';
+  return prompt + ` The image has a dark gradient overlay at the bottom third. Overlaid on this gradient, in large bold white sans-serif typography, the headline text reads exactly: "${headline}"${ctaPart}. Text must be perfectly legible, no blur, no distortion.`;
+}
+
 // ─── generateVariationPrompts ─────────────────────────────────────────────────
-// Now SYNCHRONOUS — no extra API calls needed.
-// generateScalingAngles already inlines imagePromptEN in the same call.
-// This collapses what used to be N+1 API calls into just 1.
-// Always enforces Indonesian person prefix regardless of AI compliance.
 
 async function generateVariationPrompts(winningAnalysis, angles, productName, productVisualDescription = null) {
   return angles.map((angle) => {
     const rawPrompt = angle.imagePromptEN
       || buildFallbackPrompt(angle, winningAnalysis, productName, productVisualDescription);
-    const imagePrompt = ensureIndonesianPrefix(rawPrompt);
+    const withPrefix = ensureIndonesianPrefix(rawPrompt);
+    // Bake the actual headline + CTA text into the image prompt
+    const imagePrompt = appendTextOverlayToPrompt(withPrefix, angle.headline, angle.cta);
     return { ...angle, imagePrompt };
   });
 }
 
 // ─── batchGenerateImages ──────────────────────────────────────────────────────
-// Uses gpt-image-2 via apimart — text prompt only, no image reference needed.
+// productImageUrl: if provided → flux-kontext-pro (img2img, product accuracy)
+// no productImageUrl → gpt-image-2 (text rendering, scene quality)
 
-async function batchGenerateImages(variations, aspectRatio = '1:1') {
+async function batchGenerateImages(variations, aspectRatio = '1:1', productImageUrl = null) {
   const sizeMap = {
     '1:1': '1024x1024',
     '9:16': '1024x1536',
@@ -303,6 +312,7 @@ async function batchGenerateImages(variations, aspectRatio = '1:1') {
       generateImage({
         prompt: v.imagePrompt,
         size,
+        imageUrl: productImageUrl || undefined,
       })
     )
   );

@@ -106,18 +106,37 @@ const GPT_IMAGE_SIZE_MAP = {
   '1536x1024': '1536x1024',
 };
 
-async function generateImage({ prompt, size = '1024x1024', model, pollIntervalMs = 5000, timeoutMs = 180000 }) {
-  const effectiveModel = model || config.models.image;
+async function generateImage({ prompt, size = '1024x1024', model, imageUrl, pollIntervalMs = 5000, timeoutMs = 180000 }) {
+  let effectiveModel = model || config.models.image;
+  let payload;
 
-  // Normalize size for gpt-image-2 (drops unsupported sizes gracefully)
-  const normalizedSize = GPT_IMAGE_SIZE_MAP[size] || '1024x1024';
-
-  const payload = {
-    model: effectiveModel,
-    prompt,
-    n: 1,
-    size: normalizedSize,
-  };
+  if (imageUrl) {
+    // Product photo available → flux-kontext-pro for accurate product reference (img2img)
+    effectiveModel = 'flux-kontext-pro';
+    const aspectMap = {
+      '1024x1024': '1:1',
+      '1024x1536': '9:16',
+      '1536x1024': '16:9',
+      '1024x1792': '9:16',
+      '1792x1024': '16:9',
+    };
+    payload = {
+      model: effectiveModel,
+      prompt,
+      n: 1,
+      image_url: imageUrl,
+      aspect_ratio: aspectMap[size] || '1:1',
+    };
+  } else {
+    // No product photo → gpt-image-2 (best text rendering + scene quality)
+    const normalizedSize = GPT_IMAGE_SIZE_MAP[size] || '1024x1024';
+    payload = {
+      model: effectiveModel,
+      prompt,
+      n: 1,
+      size: normalizedSize,
+    };
+  }
 
   const submitted = await submitImageJobPayload(payload);
 
