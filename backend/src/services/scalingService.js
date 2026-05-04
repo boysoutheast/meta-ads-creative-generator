@@ -256,6 +256,19 @@ Return array JSON valid dengan TEPAT ${anglesToGenerate.length} item. Tanpa mark
   return [];
 }
 
+// ─── truncateForImage ─────────────────────────────────────────────────────────
+// gpt-image-2 garbles long Indonesian text. Cap text elements used in image
+// prompts to prevent character-level hallucinations. Copy in the card (headline/
+// subheadline fields) remains full-length — only the text embedded in image
+// prompt strings gets truncated.
+
+function truncateForImage(text, maxWords = 5) {
+  if (!text) return '';
+  const words = text.trim().split(/\s+/);
+  if (words.length <= maxWords) return text.trim();
+  return words.slice(0, maxWords).join(' ') + '…';
+}
+
 // ─── buildAngleLayer ─────────────────────────────────────────────────────────
 // Angle-specific instructions that are LAYERED ON TOP of the masterImagePrompt base.
 // Used when masterImagePrompt is available (primary path).
@@ -339,9 +352,14 @@ function buildAngleImagePrompt(angle, winningAnalysis, productName, productVisua
   const palette    = (winningAnalysis.colorPalette || ['#FADBD8', '#A93226', '#D5DBDB']).join(', ');
   const lighting   = winningAnalysis.lighting  || 'warm natural';
   const mood       = winningAnalysis.mood      || 'engaging';
+  // Full copy for card display — only shortened versions used inside image prompts
   const headline   = angle.headline   || '';
   const sub        = angle.subheadline || '';
   const cta        = (angle.cta || 'Coba Sekarang').replace(/^CTA:\s*/i, '');
+  // Truncated versions embedded in image prompt — gpt-image-2 garbles long text
+  const imgHeadline = truncateForImage(headline, 6);
+  const imgSub      = truncateForImage(sub, 5);
+  const imgCta      = truncateForImage(cta, 4);
   const sd         = angle.sceneDetails || {};
   // Strip leading "Indonesian woman" from emotionalMoment if present — templates add it themselves
   const rawEmotional = sd.emotionalMoment || 'relatable everyday expression, Southeast Asian features';
@@ -358,18 +376,19 @@ function buildAngleImagePrompt(angle, winningAnalysis, productName, productVisua
   const quality  = `Photorealistic, high-end skincare beauty editorial photography. Clean and trustworthy aesthetic. Indonesian lifestyle photography feel. No CGI look. No artificial render look. Color palette: ${palette}. ${lighting} lighting. ${mood} mood. Square 1:1 format.`;
   const bpom     = `"BPOM ✓" badge in bottom right corner, small but legible.`;
   const refNote  = `NOTE: Two reference images are provided — use the winning ad for layout/style reference and the product photo for EXACT product appearance. The product bottle in the image MUST match the reference product photo.`;
+  const textAccuracy = `CRITICAL — TEXT RENDERING: Render every word EXACTLY as written, letter by letter. Do not change, substitute, or rearrange any characters. If a word looks unusual, render it exactly as-is. Clean crisp legible typography — no blur, no warped letters.`;
 
   // ── Use masterImagePrompt as base when available ─────────────────────────
-  // Replace placeholders then append angle-specific layer on top.
+  // Replace placeholders (truncated for image) then append angle-specific layer.
   if (masterImagePrompt) {
     let base = masterImagePrompt
-      .replace(/\[HEADLINE\]/g, headline)
-      .replace(/\[SUBTEXT\]/g,  sub)
-      .replace(/\[CTA\]/g,      cta)
+      .replace(/\[HEADLINE\]/g, imgHeadline)
+      .replace(/\[SUBTEXT\]/g,  imgSub)
+      .replace(/\[CTA\]/g,      imgCta)
       .replace(/\[PRODUCT\]/g,  prodDesc);
 
     const angleLayer = buildAngleLayer(angle, sd, emotional, setting, props, productPricing);
-    return `${base}\n\nANGLE-SPECIFIC LAYER (${(angle.angle || '').toUpperCase()}):\n${angleLayer}\n\n${bpom}\n${refNote}\n${quality}`;
+    return `${base}\n\nANGLE-SPECIFIC LAYER (${(angle.angle || '').toUpperCase()}):\n${angleLayer}\n\n${textAccuracy}\n${bpom}\n${refNote}\n${quality}`;
   }
 
   switch (angle.angle) {
@@ -382,15 +401,16 @@ function buildAngleImagePrompt(angle, winningAnalysis, productName, productVisua
       return `A clean, modern Meta Ads image in editorial split-screen style. Background is soft pink-cream gradient (#FFF0F5 to #F5F0E8). Square 1:1 format.
 TYPOGRAPHY RENDERED ON IMAGE (must be perfectly legible, crisp, bold, no blur):
 - Top center: dark pink (#D4547A) rounded pill badge with white text "Sebelum vs Sesudah"
-- Large bold dark brown/black text upper area (2-3 lines, centered): "${headline}"
-- Bottom smaller supporting text: "${sub}"
-- CTA rounded pill button bottom center, dark pink (#D4547A), white bold text: "${cta} →"
+- Large bold dark brown/black text upper area (2-3 lines, centered): "${imgHeadline}"
+- Bottom smaller supporting text: "${imgSub}"
+- CTA rounded pill button bottom center, dark pink (#D4547A), white bold text: "${imgCta} →"
 MAIN SCENE:
 LEFT HALF "Sebelum": Indonesian woman 25-35yo, ${sd.emotionalMoment || 'concerned/frustrated expression, looking at skin problem'}. Close-up shows ${beforeState}. Muted warm lighting, slightly desaturated. Small white rounded pill label "Sebelum" top left corner.
 RIGHT HALF "Sesudah": Same Indonesian woman, smiling softly, relaxed and happy. Close-up shows ${afterState}. Brighter, warmer, more saturated lighting. Sparkle/glow effect on skin. Small white rounded pill label "Sesudah" top right corner.
 DIVIDING ELEMENT: Thin vertical line in the center with a small white circle containing bold dark text "${timeClaim}".
 PRODUCT FEATURED: ${prodDesc} — placed bottom center overlapping both halves, slightly in front. Product is the hero element, must be large and clearly identifiable.
 FLOATING ELEMENTS: Small pink star/sparkle icons (#D4547A) scattered around the sesudah side. Small leaf/natural ingredient icon near the product bottom.
+${textAccuracy}
 ${bpom}
 ${refNote}
 ${quality}`;
@@ -403,12 +423,13 @@ LEFT 55%: Large bold typography block on cream background.
 RIGHT 45%: Photorealistic lifestyle scene with thin gradient divider.
 TYPOGRAPHY ON LEFT (rendered exactly, crisp, no blur, high contrast):
 - Top left: coral/orange (#E8541A) rounded pill badge with white text "⚡ Stok Terbatas"
-- Large bold dark brown/black headline (2-3 lines, large sans-serif): "${headline}"
-- Smaller supporting text below: "${sub}"
-- Orange rounded CTA pill button (#E8541A), white bold text, bottom left: "${cta} →"
+- Large bold dark brown/black headline (2-3 lines, large sans-serif): "${imgHeadline}"
+- Smaller supporting text below: "${imgSub}"
+- Orange rounded CTA pill button (#E8541A), white bold text, bottom left: "${imgCta} →"
 RIGHT SIDE SCENE: Indonesian woman 25-35yo, ${emotional}. Setting: ${setting}. Props: ${props}.
 PRODUCT: ${prodDesc} — visible in scene on right side, clearly identifiable.
 FLOATING: Small urgency indicator "Tersisa sedikit" text overlay near product. Pink sparkle accents.
+${textAccuracy}
 ${bpom}
 ${refNote}
 ${quality}`;
@@ -421,11 +442,12 @@ LEFT 55%: Large bold typography block on light background.
 RIGHT 45%: Emotional problem scene with thin divider.
 TYPOGRAPHY ON LEFT (rendered exactly, crisp, bold, perfectly legible):
 - Top left: dark rose (#A93226) rounded pill badge with white text "Masalah Nyata"
-- Large bold dark brown/black headline (2-3 lines): "${headline}"
-- Smaller supporting text: "${sub}"
-- Dark pink (#D4547A) rounded CTA pill button, white bold text, bottom left: "${cta} →"
+- Large bold dark brown/black headline (2-3 lines): "${imgHeadline}"
+- Smaller supporting text: "${imgSub}"
+- Dark pink (#D4547A) rounded CTA pill button, white bold text, bottom left: "${imgCta} →"
 RIGHT SIDE SCENE: Indonesian woman 25-35yo, ${emotional}. Setting: ${setting}. Props showing the problem clearly: ${props}.
 PRODUCT: ${prodDesc} — shown as the solution, placed at bottom of right scene or overlapping corner, clearly identifiable.
+${textAccuracy}
 ${bpom}
 ${refNote}
 ${quality}`;
@@ -438,12 +460,13 @@ LEFT 55%: Bold typography with mystery/question hook on cream background.
 RIGHT 45%: Intriguing lifestyle scene.
 TYPOGRAPHY ON LEFT (rendered exactly, crisp, bold, perfectly legible):
 - Top left: teal/dark green (#1A7A6E) rounded pill badge with white text "Tahukah kamu?"
-- Large bold dark headline with question/mystery (2-3 lines): "${headline}"
-- Teaser supporting text: "${sub}"
-- Teal/dark pink rounded CTA pill button, white bold text, bottom left: "${cta} →"
+- Large bold dark headline with question/mystery (2-3 lines): "${imgHeadline}"
+- Teaser supporting text: "${imgSub}"
+- Teal/dark pink rounded CTA pill button, white bold text, bottom left: "${imgCta} →"
 RIGHT SIDE SCENE: Indonesian woman 25-35yo, ${emotional}. Setting: ${setting}. Props: ${props}.
 PRODUCT: ${prodDesc} — clearly visible, prominently placed, looking intriguing.
 FLOATING: Small question mark or lightbulb accent icons in teal. Pink sparkle accents.
+${textAccuracy}
 ${bpom}
 ${refNote}
 ${quality}`;
@@ -457,12 +480,13 @@ CENTER: Lifestyle scene with satisfied customer.
 BOTTOM: Product + CTA button.
 TYPOGRAPHY RENDERED ON IMAGE (perfectly legible, crisp):
 - Top center: gold star rating "⭐⭐⭐⭐⭐" with pink badge "1000+ Pelanggan Puas"
-- Bold dark headline (1-2 lines, large, centered): "${headline}"
-- Subtext: "${sub}"
-- Dark pink (#D4547A) CTA pill button, white bold text, bottom center: "${cta} →"
+- Bold dark headline (1-2 lines, large, centered): "${imgHeadline}"
+- Subtext: "${imgSub}"
+- Dark pink (#D4547A) CTA pill button, white bold text, bottom center: "${imgCta} →"
 MAIN SCENE: Indonesian woman 25-35yo, ${emotional}. Setting: ${setting}. Props: ${props}.
 OVERLAY ELEMENTS: Floating speech bubble testimonial snippet. Before/after skin comparison circles (left: rough, right: smooth).
 PRODUCT: ${prodDesc} — hero product, bottom center, large and clearly identifiable.
+${textAccuracy}
 ${bpom}
 ${refNote}
 ${quality}`;
@@ -476,13 +500,14 @@ MIDDLE: 3-step numbered card row.
 BOTTOM: Product + CTA button.
 TYPOGRAPHY RENDERED ON IMAGE (perfectly legible, crisp):
 - Top center: teal/green (#1A7A6E) rounded pill badge "Cara Pakai"
-- Bold dark headline (1-2 lines, large, centered): "${headline}"
-- STEP 1 card: teal circle "1" + short instruction (10 words max)
-- STEP 2 card: teal circle "2" + short instruction (10 words max)
-- STEP 3 card: teal circle "3" + short instruction (10 words max)
-- Dark pink (#D4547A) CTA pill button, white bold text, bottom center: "${cta} →"
+- Bold dark headline (1-2 lines, large, centered): "${imgHeadline}"
+- STEP 1 card: teal circle "1" + short instruction (5 words max)
+- STEP 2 card: teal circle "2" + short instruction (5 words max)
+- STEP 3 card: teal circle "3" + short instruction (5 words max)
+- Dark pink (#D4547A) CTA pill button, white bold text, bottom center: "${imgCta} →"
 BACKGROUND SCENE: Indonesian woman 25-35yo, ${emotional}. Setting: ${setting}. Props: ${props}. Soft, instructional, calm atmosphere.
 PRODUCT: ${prodDesc} — shown in use in one of the step illustrations. Clearly identifiable.
+${textAccuracy}
 ${bpom}
 ${refNote}
 ${quality}`;
@@ -508,12 +533,13 @@ LEFT 55%: Price comparison typography block on cream background.
 RIGHT 45%: Product showcase lifestyle scene.
 TYPOGRAPHY ON LEFT (rendered exactly, crisp, bold, perfectly legible):
 - Top left: green (#1A7A6E) rounded pill badge "Hemat Sekarang"
-- Bold dark headline (1-2 lines, large): "${headline}"
+- Bold dark headline (1-2 lines, large): "${imgHeadline}"
 ${priceLine}
-- Smaller supporting text: "${sub}"
-- Green/orange (#E8541A) rounded CTA pill button, white bold text, bottom left: "${cta} →"
+- Smaller supporting text: "${imgSub}"
+- Green/orange (#E8541A) rounded CTA pill button, white bold text, bottom left: "${imgCta} →"
 RIGHT SIDE SCENE: Indonesian woman 25-35yo, ${emotional}. Setting: ${setting}. Props: ${props}.
 PRODUCT: ${prodDesc} — large, prominently displayed on right side, clearly identifiable.
+${textAccuracy}
 ${bpom}
 ${refNote}
 ${quality}`;
@@ -526,12 +552,13 @@ LEFT 55%: Credentials + headline typography on clean background.
 RIGHT 45%: Confident professional lifestyle scene.
 TYPOGRAPHY ON LEFT (rendered exactly, crisp, bold, perfectly legible):
 - Top left: dark navy/professional (#1A3A5C) rounded pill badge "Direkomendasikan Dokter"
-- Bold authoritative dark headline (2 lines): "${headline}"
-- Credential supporting text: "${sub}"
-- Dark professional (#1A3A5C or #D4547A) rounded CTA pill button, white bold text, bottom left: "${cta} →"
+- Bold authoritative dark headline (2 lines): "${imgHeadline}"
+- Credential supporting text: "${imgSub}"
+- Dark professional (#1A3A5C or #D4547A) rounded CTA pill button, white bold text, bottom left: "${imgCta} →"
 RIGHT SIDE SCENE: Indonesian woman professional/confident 28-40yo, ${emotional}. Setting: ${setting}. Props: ${props}.
 PRODUCT: ${prodDesc} — presented as the endorsed certified product, clearly identifiable.
 TRUST OVERLAY BADGES: BPOM certified badge, 5-star rating badge, small certification icon — as floating overlays.
+${textAccuracy}
 ${refNote}
 ${quality}`;
     }
@@ -542,11 +569,12 @@ ${quality}`;
 LEFT 55%: Large bold typography block on cream background.
 RIGHT 45%: Lifestyle scene with thin gradient divider.
 TYPOGRAPHY ON LEFT (rendered exactly, crisp, bold, perfectly legible):
-- Bold dark brown/black headline (2-3 lines, large): "${headline}"
-- Supporting subtext: "${sub}"
-- Dark pink (#D4547A) rounded CTA pill button, white bold text, bottom left: "${cta} →"
+- Bold dark brown/black headline (2-3 lines, large): "${imgHeadline}"
+- Supporting subtext: "${imgSub}"
+- Dark pink (#D4547A) rounded CTA pill button, white bold text, bottom left: "${imgCta} →"
 RIGHT SCENE: Indonesian woman 25-35yo, ${emotional}. Setting: ${setting}. Props: ${props}.
 PRODUCT: ${prodDesc} — clearly visible and identifiable.
+${textAccuracy}
 ${bpom}
 ${refNote}
 ${quality}`;
