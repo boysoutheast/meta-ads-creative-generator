@@ -34,6 +34,10 @@ router.post('/analyze-winning', upload.single('file'), async (req, res) => {
       analysis = await analyzeWinningAd(req.file.path, winningAdMime);
       analysis.type = 'image';
     }
+    // Extract masterImagePrompt from analysis — return it separately so frontend
+    // can store it and pass it back at generate-time (avoids re-generating it per angle).
+    const masterImagePrompt = analysis.masterImagePrompt || null;
+
     fs.unlink(req.file.path, () => {});
     res.json({
       analysis,
@@ -41,6 +45,7 @@ router.post('/analyze-winning', upload.single('file'), async (req, res) => {
       // Return base64 so frontend can pass it back for image generation reference
       winningAdBase64,
       winningAdMime,
+      masterImagePrompt,
       availableAngles: Object.entries(SCALING_ANGLES).map(([key, val]) => ({
         key,
         label: val.label,
@@ -67,6 +72,7 @@ router.post('/generate-variations', async (req, res) => {
     winningAdMime = 'image/jpeg',
     productPrice = null,
     productPromoPrice = null,
+    masterImagePrompt = null,
   } = req.body;
 
   if (!analysis || !productName) {
@@ -107,11 +113,11 @@ router.post('/generate-variations', async (req, res) => {
   }
 
   const angles = await generateScalingAngles(
-    analysis, productName, selectedAngles, productVisualDescription, productDescription
+    analysis, productName, selectedAngles, productVisualDescription, productDescription, masterImagePrompt
   );
   if (!angles.length) return res.status(500).json({ error: 'Failed to generate scaling angles' });
 
-  const variationsWithPrompts = await generateVariationPrompts(analysis, angles, productName, productVisualDescription, { productPrice, productPromoPrice });
+  const variationsWithPrompts = await generateVariationPrompts(analysis, angles, productName, productVisualDescription, { productPrice, productPromoPrice }, masterImagePrompt);
 
   let finalVariations = variationsWithPrompts;
   if (generateImages) {

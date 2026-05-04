@@ -71,6 +71,7 @@ export interface AnalyzeWinningResponse {
   availableAngles: ScalingAngle[]
   winningAdBase64?: string
   winningAdMime?: string
+  masterImagePrompt?: string
 }
 
 export interface GenerateVariationsResponse {

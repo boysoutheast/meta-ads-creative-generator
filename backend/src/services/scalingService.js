@@ -69,7 +69,8 @@ async function analyzeWinningAd(filePath, mimeType = 'image/jpeg') {
   "dominantAngle": "Choose one: fomo, social_proof, tutorial, curiosity_gap, before_after, problem_agitate, authority, price_anchor",
   "format": "Feed/Story/Reels",
   "primaryEmotion": "Single primary emotion evoked",
-  "suggestedCopyLanguage": "id"
+  "suggestedCopyLanguage": "id",
+  "masterImagePrompt": "A 250-300 word image generation prompt that recreates THIS AD's exact visual layout and style for a different product. Structure it exactly like this: (1) One sentence describing the overall layout and format. (2) TYPOGRAPHY RENDERED ON IMAGE section — describe badge placement/color, headline placement/size/color, subtext, CTA button style/color/placement — use [HEADLINE], [SUBTEXT], [CTA] as placeholders. (3) MAIN SCENE section — describe the subject, setting, props, expression, lighting from this exact ad. Use [PRODUCT] as placeholder for the product. (4) FLOATING ELEMENTS — any badges, icons, decorative elements visible. (5) COLOR PALETTE — exact hex codes from this ad. (6) STYLE — photorealistic, no CGI, lighting quality, mood. This will be used as a template — translate [HEADLINE], [CTA], [SUBTEXT], [PRODUCT] for different products."
 }
 
 Return only valid JSON, no markdown, no explanation.`;
@@ -110,7 +111,8 @@ Return only valid JSON, no markdown, no explanation.`;
 // CONCEPT TRANSLATION — not template application.
 // Takes the winning ad's hook/scenario/emotional truth and translates it
 // specifically to the user's product context.
-// Critically: generates imagePromptEN inline so no extra API calls needed.
+// masterImagePrompt: the long structured prompt generated at analyze-time —
+// passed in as context so sceneDetails align with the actual ad layout.
 
 async function generateScalingAngles(
   winningAnalysis,
@@ -118,6 +120,7 @@ async function generateScalingAngles(
   selectedAngles = [],
   productVisualDescription = null,
   productDescription = null,
+  masterImagePrompt = null,
 ) {
   const anglesToGenerate = selectedAngles.length > 0
     ? selectedAngles
@@ -168,6 +171,16 @@ ${productDescription ? `\nDeskripsi lengkap produk:\n${productDescription}` : ''
 ${productVisualDescription ? `\nTampilan visual produk (dari foto):\n${productVisualDescription}` : ''}
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`.trim();
 
+  // ── Master image prompt — the base visual template from the actual winning ad ──
+  const masterBlock = masterImagePrompt ? `
+━━━━ MASTER IMAGE TEMPLATE (hasil analisa dari winning ad) ━━━━
+Ini adalah prompt gambar yang sudah diekstrak dari winning ad. Di dalamnya ada placeholder:
+[HEADLINE] = teks headline utama, [SUBTEXT] = subheadline/body text, [CTA] = call to action, [PRODUCT] = deskripsi produk.
+Saat kamu menulis sceneDetails, pastikan emotionalMoment, setting, dan keyProps KONSISTEN dengan layout dan atmosphere yang digambarkan di template ini.
+
+${masterImagePrompt}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`.trim() : '';
+
   const systemPrompt = `Kamu adalah Meta Ads creative director kelas dunia yang ahli dalam "concept translation" — proses mengambil DNA dari satu iklan winning dan mentranslate-nya secara presisi ke produk yang berbeda. Ini bukan tentang meniru secara visual, tapi mengambil MEKANISME yang membuat iklan itu berhasil (hook, emosi, alur cerita) dan mengaplikasikannya ke konteks produk baru.
 
 Tugas kamu adalah membaca iklan winning dengan sangat cermat, memahami MENGAPA ia berhasil (bukan hanya APA yang ada di dalamnya), lalu menciptakan versi baru untuk produk target yang memiliki daya tarik yang sama kuatnya. Prinsip terpenting: pertahankan mekanisme, ganti konteks.
@@ -182,7 +195,7 @@ ATURAN TIDAK BISA DILANGGAR:
   const userPrompt = `${winningAdBlock}
 
 ${productBlock}
-
+${masterBlock ? '\n' + masterBlock + '\n' : ''}
 ANGLE YANG DIMINTA: ${anglesToGenerate.join(', ')}
 
 ━━━━ INSTRUKSI TRANSLATE ━━━━
@@ -243,11 +256,86 @@ Return array JSON valid dengan TEPAT ${anglesToGenerate.length} item. Tanpa mark
   return [];
 }
 
+// ─── buildAngleLayer ─────────────────────────────────────────────────────────
+// Angle-specific instructions that are LAYERED ON TOP of the masterImagePrompt base.
+// Used when masterImagePrompt is available (primary path).
+
+function buildAngleLayer(angle, sd, emotional, setting, props, productPricing) {
+  const fmt = (n) => 'Rp ' + Number(n).toLocaleString('id-ID');
+
+  switch (angle.angle) {
+
+    case 'before_after': {
+      const before    = sd.beforeState  || 'visible problem: rough/dry/dull skin — close-up';
+      const after     = sd.afterState   || 'smooth, hydrated, glowing skin — same close-up angle';
+      const timeClaim = sd.timeClaim    || '7 hari';
+      return `Convert into SPLIT-SCREEN layout.
+LEFT "Sebelum": ${before}. Muted/slightly desaturated lighting. "Sebelum" label pill top-left.
+CENTER: Thin vertical divider with small circle containing bold text "${timeClaim}".
+RIGHT "Sesudah": ${after}. Brighter, warmer lighting with skin glow effect. "Sesudah" label pill top-right.
+EMOTIONAL SCENE: Indonesian woman, ${emotional}. Setting: ${setting}. Props: ${props}.
+Product placed bottom-center overlapping both halves — must be large and clearly identifiable.`;
+    }
+
+    case 'fomo': {
+      return `URGENCY LAYER: Add coral/orange (#E8541A) "⚡ Stok Terbatas" pill badge prominently at top.
+Add small "Tersisa sedikit" urgency text overlay near product.
+EMOTIONAL SCENE: Indonesian woman, ${emotional} — excited/urgent energy. Setting: ${setting}. Props: ${props}.`;
+    }
+
+    case 'problem_agitate': {
+      return `PROBLEM EMPHASIS: Scene highlights the frustration/pain clearly.
+EMOTIONAL SCENE: Indonesian woman, ${emotional} — distressed/frustrated expression. Setting: ${setting}. Props showing problem: ${props}.
+Product appears as the visible solution element in corner or bottom area.`;
+    }
+
+    case 'price_anchor': {
+      const hasPromo = productPricing.productPromoPrice != null;
+      const hasPrice = productPricing.productPrice != null;
+      const priceLine = hasPromo && hasPrice
+        ? `show crossed-out original "${fmt(productPricing.productPrice)}" in gray strikethrough → large bold "${fmt(productPricing.productPromoPrice)}" in dark pink (#D4547A)`
+        : hasPromo  ? `large bold promo price "${fmt(productPricing.productPromoPrice)}" in dark pink (#D4547A)`
+        : hasPrice  ? `large bold price "${fmt(productPricing.productPrice)}" in dark pink (#D4547A)`
+        : `DO NOT invent or display any price numbers — show a savings/value message instead`;
+      return `PRICE LAYER: Add green (#1A7A6E) "Hemat Sekarang" badge. Price display: ${priceLine}.
+EMOTIONAL SCENE: Indonesian woman, ${emotional} — pleased/satisfied. Setting: ${setting}. Props: ${props}.`;
+    }
+
+    case 'social_proof': {
+      return `TRUST LAYER: Add gold star row "⭐⭐⭐⭐⭐" with pink badge "1000+ Pelanggan Puas" at top.
+Add floating speech-bubble testimonial snippet overlay.
+EMOTIONAL SCENE: Indonesian woman, ${emotional} — happy, satisfied, confident. Setting: ${setting}. Props: ${props}.`;
+    }
+
+    case 'tutorial': {
+      return `STEP LAYER: Add teal (#1A7A6E) "Cara Pakai" badge.
+Show 3 numbered step cards: teal circle "1", teal circle "2", teal circle "3" each with short instruction (≤10 words).
+EMOTIONAL SCENE: Indonesian woman, ${emotional} — calm, instructional. Setting: ${setting}. Props: ${props}. Soft background.`;
+    }
+
+    case 'authority': {
+      return `AUTHORITY LAYER: Add dark navy (#1A3A5C) "Direkomendasikan Dokter" badge.
+Add floating trust badges: BPOM certified, 5-star rating, certification icon.
+EMOTIONAL SCENE: Indonesian woman, ${emotional} — confident, professional. Setting: ${setting}. Props: ${props}.`;
+    }
+
+    case 'curiosity_gap': {
+      return `CURIOSITY LAYER: Add teal (#1A7A6E) "Tahukah kamu?" badge.
+Add small question mark or lightbulb accent icons in teal.
+EMOTIONAL SCENE: Indonesian woman, ${emotional} — intrigued/curious expression. Setting: ${setting}. Props: ${props}.`;
+    }
+
+    default: {
+      return `EMOTIONAL SCENE: Indonesian woman, ${emotional}. Setting: ${setting}. Props: ${props}.`;
+    }
+  }
+}
+
 // ─── buildAngleImagePrompt ───────────────────────────────────────────────────
 // Per-angle structured templates — code controls layout/structure,
 // GPT fills in scene details. No more free-form imagePromptEN from GPT.
 
-function buildAngleImagePrompt(angle, winningAnalysis, productName, productVisualDescription, productPricing = {}) {
+function buildAngleImagePrompt(angle, winningAnalysis, productName, productVisualDescription, productPricing = {}, masterImagePrompt = null) {
   const palette    = (winningAnalysis.colorPalette || ['#FADBD8', '#A93226', '#D5DBDB']).join(', ');
   const lighting   = winningAnalysis.lighting  || 'warm natural';
   const mood       = winningAnalysis.mood      || 'engaging';
@@ -270,6 +358,19 @@ function buildAngleImagePrompt(angle, winningAnalysis, productName, productVisua
   const quality  = `Photorealistic, high-end skincare beauty editorial photography. Clean and trustworthy aesthetic. Indonesian lifestyle photography feel. No CGI look. No artificial render look. Color palette: ${palette}. ${lighting} lighting. ${mood} mood. Square 1:1 format.`;
   const bpom     = `"BPOM ✓" badge in bottom right corner, small but legible.`;
   const refNote  = `NOTE: Two reference images are provided — use the winning ad for layout/style reference and the product photo for EXACT product appearance. The product bottle in the image MUST match the reference product photo.`;
+
+  // ── Use masterImagePrompt as base when available ─────────────────────────
+  // Replace placeholders then append angle-specific layer on top.
+  if (masterImagePrompt) {
+    let base = masterImagePrompt
+      .replace(/\[HEADLINE\]/g, headline)
+      .replace(/\[SUBTEXT\]/g,  sub)
+      .replace(/\[CTA\]/g,      cta)
+      .replace(/\[PRODUCT\]/g,  prodDesc);
+
+    const angleLayer = buildAngleLayer(angle, sd, emotional, setting, props, productPricing);
+    return `${base}\n\nANGLE-SPECIFIC LAYER (${(angle.angle || '').toUpperCase()}):\n${angleLayer}\n\n${bpom}\n${refNote}\n${quality}`;
+  }
 
   switch (angle.angle) {
 
@@ -455,10 +556,12 @@ ${quality}`;
 
 // ─── generateVariationPrompts ─────────────────────────────────────────────────
 // Uses per-angle template builder — no free-form GPT prompt, no text overlay append.
+// masterImagePrompt: when provided (from analyze step), used as base; angle-specific
+// layers are appended on top rather than using the hardcoded template switch.
 
-async function generateVariationPrompts(winningAnalysis, angles, productName, productVisualDescription = null, productPricing = {}) {
+async function generateVariationPrompts(winningAnalysis, angles, productName, productVisualDescription = null, productPricing = {}, masterImagePrompt = null) {
   return angles.map((angle) => {
-    const imagePrompt = buildAngleImagePrompt(angle, winningAnalysis, productName, productVisualDescription, productPricing);
+    const imagePrompt = buildAngleImagePrompt(angle, winningAnalysis, productName, productVisualDescription, productPricing, masterImagePrompt);
     return { ...angle, imagePrompt };
   });
 }

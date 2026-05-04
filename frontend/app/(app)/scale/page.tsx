@@ -58,6 +58,7 @@ export default function ScalePage() {
   const [productVisualDescription, setProductVisualDescription] = useState<string | null>(null)
   const [winningAdBase64, setWinningAdBase64] = useState<string | null>(null)
   const [winningAdMime, setWinningAdMime] = useState<string>('image/jpeg')
+  const [masterImagePrompt, setMasterImagePrompt] = useState<string | null>(null)
 
   // Carousel state
   const [showCarouselOffer, setShowCarouselOffer] = useState(false)
@@ -90,6 +91,7 @@ export default function ScalePage() {
     setCarousel(null)
     setShowCarouselOffer(false)
     setShowCarouselForm(false)
+    setMasterImagePrompt(null)
     try {
       const compressed = await compressImage(file)
       const resp = await analyzeWinningAd(compressed)
@@ -100,6 +102,10 @@ export default function ScalePage() {
       if (resp.winningAdBase64) {
         setWinningAdBase64(resp.winningAdBase64)
         setWinningAdMime(resp.winningAdMime || 'image/jpeg')
+      }
+      // Store masterImagePrompt — generated once at analyze-time, used at generate-time
+      if (resp.masterImagePrompt) {
+        setMasterImagePrompt(resp.masterImagePrompt)
       }
     } catch (e: any) {
       setError(e?.response?.data?.error || e.message || 'Gagal menganalisis file')
@@ -136,6 +142,7 @@ export default function ScalePage() {
         winningAdMime: winningAdMime,
         productPrice: selectedProduct.price ?? undefined,
         productPromoPrice: selectedProduct.promoPrice ?? undefined,
+        masterImagePrompt: masterImagePrompt ?? undefined,
       })
 
       if (outputType === 'video') {
