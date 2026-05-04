@@ -31,7 +31,7 @@ router.post('/analyze-winning', upload.single('file'), async (req, res) => {
       const { analysis: videoAnalysis, frames } = await analyzeVideoReference(req.file.path);
       analysis = { ...videoAnalysis, framesAnalyzed: frames, type: 'video' };
     } else {
-      analysis = await analyzeWinningAd(req.file.path, 'image');
+      analysis = await analyzeWinningAd(req.file.path, winningAdMime);
       analysis.type = 'image';
     }
     fs.unlink(req.file.path, () => {});

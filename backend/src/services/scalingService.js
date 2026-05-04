@@ -41,10 +41,11 @@ const SCALING_ANGLES = {
 // Extract 7 deep dimensions — not just surface labels.
 // This is the DNA extraction step that makes concept translation possible.
 
-async function analyzeWinningAd(filePath) {
+async function analyzeWinningAd(filePath, mimeType = 'image/jpeg') {
   const imageBuffer = fs.readFileSync(filePath);
   const imageBase64 = imageBuffer.toString('base64');
-  const mimeType = 'image/jpeg';
+  // Use actual file mime type — sending PNG as 'image/jpeg' causes model refusal
+  const safeMime = mimeType && mimeType.startsWith('image/') ? mimeType : 'image/jpeg';
 
   const analysisPrompt = `Kamu adalah Meta Ads creative strategist kelas dunia. Analisis iklan ini secara SANGAT MENDALAM.
 Tujuan: ekstrak "DNA" dari iklan ini sehingga konsepnya bisa direplikasi untuk produk berbeda.
@@ -85,7 +86,12 @@ Return HANYA valid JSON tanpa markdown, tanpa penjelasan:
   "suggestedCopyLanguage": "id"
 }`;
 
-  const analysisRaw = await analyzeImage({ imageBase64, mimeType, prompt: analysisPrompt });
+  const analysisRaw = await analyzeImage({ imageBase64, mimeType: safeMime, prompt: analysisPrompt });
+
+  // Detect model refusal — throw so frontend gets proper error, not silent raw string
+  if (/^i('m| am) sorry|can't assist|cannot assist|i'm unable/i.test(analysisRaw.trim())) {
+    throw new Error('Model menolak analisis gambar ini. Coba dengan gambar iklan lain atau format berbeda (JPG).');
+  }
 
   try {
     const jsonMatch = analysisRaw.match(/\{[\s\S]*\}/);
