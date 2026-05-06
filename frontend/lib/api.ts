@@ -80,7 +80,8 @@ export async function generateScalingVariations(payload: {
   /** Per-angle image counts — overrides global imagesPerAngle when provided */
   angleQuantities?: Record<string, number>
 }): Promise<GenerateVariationsResponse> {
-  const res = await api.post('/scale/generate-variations', payload)
+  // 20 angles × image generation can take up to 8 min — override the global 180s default
+  const res = await api.post('/scale/generate-variations', payload, { timeout: 600000 })
   return res.data
 }
 

@@ -990,6 +990,22 @@ async function generateVariationPrompts(winningAnalysis, angles, productName, pr
 // productImageUrl: if provided → flux-kontext-pro (img2img, product accuracy)
 // no productImageUrl → gpt-image-2 (text rendering, scene quality)
 
+// Simple concurrency limiter — allows at most `limit` Promises to run simultaneously.
+function makeSemaphore(limit) {
+  let active = 0;
+  const queue = [];
+  const next = () => {
+    if (queue.length === 0 || active >= limit) return;
+    active++;
+    const { fn, resolve, reject } = queue.shift();
+    fn().then(resolve, reject).finally(() => { active--; next(); });
+  };
+  return (fn) => new Promise((resolve, reject) => {
+    queue.push({ fn, resolve, reject });
+    next();
+  });
+}
+
 async function batchGenerateImages(variations, aspectRatio = '1:1', referenceImageUrls = [], imagesPerAngle = 1, angleQuantities = {}) {
   const sizeMap = {
     '1:1': '1024x1024',
@@ -1002,19 +1018,24 @@ async function batchGenerateImages(variations, aspectRatio = '1:1', referenceIma
 
   const filteredVariations = variations.filter((v) => v.imagePrompt);
 
-  // For each variation: use per-angle qty if available, else fall back to global count
+  // Limit concurrent image API calls to 5 — prevents overwhelming the queue
+  // and avoids Express/Railway request timeouts when running 20 angles at once.
+  const CONCURRENCY = 5;
+  const run = makeSemaphore(CONCURRENCY);
+
   const results = await Promise.allSettled(
     filteredVariations.map((v) => {
       const count = (angleQuantities && angleQuantities[v.angle])
         ? Math.min(Math.max(parseInt(angleQuantities[v.angle]) || 1, 1), 5)
         : globalCount;
+      // Each angle's N images also go through the semaphore individually
       return Promise.allSettled(
         Array.from({ length: count }, () =>
-          generateImage({
+          run(() => generateImage({
             prompt: v.imagePrompt,
             size,
             referenceImages: referenceImageUrls.length > 0 ? referenceImageUrls : undefined,
-          })
+          }))
         )
       );
     })

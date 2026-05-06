@@ -1,6 +1,6 @@
 'use client'
 import { useEffect, useState } from 'react'
-import { Loader2, Sparkles, AlertCircle, Layers, Presentation, ChevronDown, ChevronUp } from 'lucide-react'
+import { Loader2, Sparkles, AlertCircle, Layers, Presentation, ChevronDown, ChevronUp, Download } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
@@ -39,6 +39,38 @@ import type {
 
 const fmt = (n?: number) =>
   n !== undefined ? 'Rp ' + n.toLocaleString('id-ID') : ''
+
+async function downloadAllImages(variations: any[], productName: string) {
+  const allUrls: { url: string; filename: string }[] = []
+  variations.forEach((v) => {
+    const urls: string[] = v.imageUrls?.length ? v.imageUrls : (v.imageUrl ? [v.imageUrl] : [])
+    urls.forEach((url, idx) => {
+      const angleSlug = (v.angle || 'ad').replace(/_/g, '-').toLowerCase()
+      const headlineSlug = (v.headline || '').slice(0, 25).toLowerCase()
+        .replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '').replace(/-+/g, '-').replace(/-$/, '')
+      const suffix = urls.length > 1 ? `-${idx + 1}` : ''
+      allUrls.push({ url, filename: `${angleSlug}${headlineSlug ? '-' + headlineSlug : ''}${suffix}.jpg` })
+    })
+  })
+  for (const { url, filename } of allUrls) {
+    try {
+      const res = await fetch(url, { mode: 'cors' })
+      const blob = await res.blob()
+      const blobUrl = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = blobUrl
+      a.download = filename
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(blobUrl)
+      // Small delay to avoid browser blocking rapid downloads
+      await new Promise((r) => setTimeout(r, 300))
+    } catch {
+      window.open(url, '_blank')
+    }
+  }
+}
 
 export default function ScalePage() {
   const [file, setFile] = useState<File | null>(null)
@@ -431,12 +463,19 @@ export default function ScalePage() {
 
           {generating && (
             <div className="space-y-3">
-              <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                <Loader2 className="h-4 w-4 animate-spin" />
-                <span>
-                  Generating {selectedAngles.length} angle
-                  {totalImages > selectedAngles.length ? ` · ${totalImages} gambar total` : ''}…
-                </span>
+              <div className="flex flex-col gap-1">
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <span>
+                    Generating {selectedAngles.length} angle
+                    {totalImages > selectedAngles.length ? ` · ${totalImages} gambar total` : ''}…
+                  </span>
+                </div>
+                {generateImages && totalImages > 5 && (
+                  <p className="text-xs text-muted-foreground pl-6">
+                    Diproses 5 gambar sekaligus — estimasi {Math.ceil(totalImages / 5) * 1}-{Math.ceil(totalImages / 5) * 2} menit. Jangan tutup tab.
+                  </p>
+                )}
               </div>
               <div className="grid gap-4 sm:grid-cols-2">
                 {Array.from({ length: Math.min(selectedAngles.length || 4, 8) }).map((_, i) => (
@@ -473,6 +512,21 @@ export default function ScalePage() {
                       ✓ Visual injected
                     </Badge>
                   )}
+                  {(() => {
+                    const allUrls = result.variations.flatMap((v) =>
+                      v.imageUrls?.length ? v.imageUrls : (v.imageUrl ? [v.imageUrl] : [])
+                    )
+                    return allUrls.length > 0 ? (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => downloadAllImages(result.variations, result.productName)}
+                      >
+                        <Download className="h-3.5 w-3.5" />
+                        Download All ({allUrls.length})
+                      </Button>
+                    ) : null
+                  })()}
                   <p className="text-sm text-muted-foreground">{result.productName} · {result.aspectRatio}</p>
                 </div>
               </div>
