@@ -75,6 +75,7 @@ router.post('/generate-variations', async (req, res) => {
     productPromoPrice = null,
     masterImagePrompt = null,
     imagesPerAngle = 1,
+    angleQuantities = {},
   } = req.body;
 
   if (!analysis || !productName) {
@@ -123,7 +124,7 @@ router.post('/generate-variations', async (req, res) => {
 
   let finalVariations = variationsWithPrompts;
   if (generateImages) {
-    finalVariations = await batchGenerateImages(variationsWithPrompts, aspectRatio, referenceImageUrls, imagesPerAngle);
+    finalVariations = await batchGenerateImages(variationsWithPrompts, aspectRatio, referenceImageUrls, imagesPerAngle, angleQuantities);
   }
 
   res.json({
@@ -141,16 +142,32 @@ router.post('/generate-carousel', async (req, res) => {
     analysis,
     productName,
     productDescription = '',
-    productVisualDescription = null,
+    productVisualDescription: incomingVisualDesc = null,
     slideCount = 5,
     aspectRatio = '1:1',
     generateImages = false,
     productPhotoBase64 = null,
     productPhotoMime = 'image/jpeg',
+    winningAdBase64 = null,
+    winningAdMime = 'image/jpeg',
   } = req.body;
 
   if (!analysis || !productName) {
     return res.status(400).json({ error: 'analysis and productName are required' });
+  }
+
+  // Resolve product visual description — use provided or derive from product photo
+  let productVisualDescription = incomingVisualDesc;
+  if (!productVisualDescription && productPhotoBase64) {
+    try {
+      productVisualDescription = await analyzeImage({
+        imageBase64: productPhotoBase64,
+        mimeType: productPhotoMime || 'image/jpeg',
+        prompt: 'Describe this product visually in detail: shape, color, packaging, label text, texture, size. Be specific for AI image generation. Under 80 words.',
+      });
+    } catch (e) {
+      console.warn('Carousel product photo analysis failed (non-fatal):', e.message);
+    }
   }
 
   const clampedSlideCount = Math.min(Math.max(parseInt(slideCount) || 5, 3), 8);
@@ -218,19 +235,29 @@ Return JSON array dengan tepat ${clampedSlideCount} item, tanpa markdown:
     const sizeMap = { '1:1': '1024x1024', '9:16': '1024x1536', '16:9': '1536x1024' };
     const size = sizeMap[aspectRatio] || '1024x1024';
 
-    let carouselImageUrl = null;
+    // Upload reference images (same pipeline as angle variations)
+    const referenceImageUrls = [];
+    if (winningAdBase64) {
+      try {
+        const url = await uploadImageToApimart(winningAdBase64, winningAdMime || 'image/jpeg');
+        if (url) { referenceImageUrls.push(url); console.log('Carousel: winning ad uploaded:', url.slice(0, 60)); }
+      } catch (e) { console.warn('Carousel winning ad upload failed (non-fatal):', e.message); }
+    }
     if (productPhotoBase64) {
       try {
-        carouselImageUrl = await uploadImageToApimart(productPhotoBase64, productPhotoMime || 'image/jpeg');
-      } catch (e) {
-        console.warn('Carousel product photo upload failed (non-fatal):', e.message);
-      }
+        const url = await uploadImageToApimart(productPhotoBase64, productPhotoMime || 'image/jpeg');
+        if (url) { referenceImageUrls.push(url); console.log('Carousel: product photo uploaded:', url.slice(0, 60)); }
+      } catch (e) { console.warn('Carousel product photo upload failed (non-fatal):', e.message); }
     }
 
     const imageResults = await Promise.allSettled(
       slides.map((slide) =>
         slide.imagePrompt
-          ? generateImage({ prompt: slide.imagePrompt, size, imageUrl: carouselImageUrl || undefined })
+          ? generateImage({
+              prompt: slide.imagePrompt,
+              size,
+              referenceImages: referenceImageUrls.length > 0 ? referenceImageUrls : undefined,
+            })
           : Promise.resolve(null)
       )
     );

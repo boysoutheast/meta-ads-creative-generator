@@ -1,6 +1,6 @@
 'use client'
 import { useEffect, useState } from 'react'
-import { Loader2, Sparkles, AlertCircle, Layers, Presentation } from 'lucide-react'
+import { Loader2, Sparkles, AlertCircle, Layers, Presentation, ChevronDown, ChevronUp } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
@@ -51,18 +51,15 @@ export default function ScalePage() {
 
   const [analysisResp, setAnalysisResp] = useState<AnalyzeWinningResponse | null>(null)
   const [selectedAngles, setSelectedAngles] = useState<string[]>([])
+  const [angleQuantities, setAngleQuantities] = useState<Record<string, number>>({})
   const [result, setResult] = useState<GenerateVariationsResponse | null>(null)
   const [productVisualDescription, setProductVisualDescription] = useState<string | null>(null)
   const [winningAdBase64, setWinningAdBase64] = useState<string | null>(null)
   const [winningAdMime, setWinningAdMime] = useState<string>('image/jpeg')
   const [masterImagePrompt, setMasterImagePrompt] = useState<string | null>(null)
 
-  // Per-angle image count
-  const [imagesPerAngle, setImagesPerAngle] = useState(1)
-
-  // Carousel state
-  const [showCarouselOffer, setShowCarouselOffer] = useState(false)
-  const [showCarouselForm, setShowCarouselForm] = useState(false)
+  // Carousel state — now lives in settings panel
+  const [carouselOpen, setCarouselOpen] = useState(false)
   const [carouselSlideCount, setCarouselSlideCount] = useState(5)
   const [generatingCarousel, setGeneratingCarousel] = useState(false)
   const [carousel, setCarousel] = useState<ScaleCarouselResponse | null>(null)
@@ -80,6 +77,23 @@ export default function ScalePage() {
       .catch(() => {})
   }, [])
 
+  // ── Angle selection — keeps quantities in sync ──────────────────────────────
+  const handleAngleChange = (newSelected: string[]) => {
+    setSelectedAngles(newSelected)
+    setAngleQuantities((prev) => {
+      const next: Record<string, number> = {}
+      newSelected.forEach((key) => { next[key] = prev[key] ?? 1 })
+      return next
+    })
+  }
+
+  const handleQtyChange = (key: string, qty: number) => {
+    setAngleQuantities((prev) => ({ ...prev, [key]: qty }))
+  }
+
+  // Total images to be generated
+  const totalImages = selectedAngles.reduce((sum, key) => sum + (angleQuantities[key] ?? 1), 0)
+
   const handleAnalyze = async () => {
     if (!file) return
     setError(null)
@@ -87,20 +101,16 @@ export default function ScalePage() {
     setResult(null)
     setAnalysisResp(null)
     setCarousel(null)
-    setShowCarouselOffer(false)
-    setShowCarouselForm(false)
     setMasterImagePrompt(null)
     try {
       const compressed = await compressImage(file)
       const resp = await analyzeWinningAd(compressed)
       setAnalysisResp(resp)
-      setSelectedAngles(resp.availableAngles.map((a) => a.key))
-      // Store winning ad for use as reference in image generation
+      handleAngleChange(resp.availableAngles.map((a) => a.key))
       if (resp.winningAdBase64) {
         setWinningAdBase64(resp.winningAdBase64)
         setWinningAdMime(resp.winningAdMime || 'image/jpeg')
       }
-      // Store masterImagePrompt — generated once at analyze-time, used at generate-time
       if (resp.masterImagePrompt) {
         setMasterImagePrompt(resp.masterImagePrompt)
       }
@@ -117,10 +127,7 @@ export default function ScalePage() {
     setGenerating(true)
     setResult(null)
     setCarousel(null)
-    setShowCarouselOffer(false)
-    setShowCarouselForm(false)
     try {
-      // Extract base64 + mime from product photo data URL if available
       const photoDataUrl = selectedProduct.photos?.[0]
       const photoMatch = photoDataUrl?.match(/^data:([^;]+);base64,(.+)$/)
       const productPhotoMime = photoMatch?.[1] ?? undefined
@@ -132,21 +139,19 @@ export default function ScalePage() {
         productDescription: selectedProduct.description,
         selectedAngles,
         aspectRatio,
-        generateImages: generateImages,
+        generateImages,
         productPhotoBase64,
         productPhotoMime,
         winningAdBase64: winningAdBase64 ?? undefined,
-        winningAdMime: winningAdMime,
+        winningAdMime,
         productPrice: selectedProduct.price ?? undefined,
         productPromoPrice: selectedProduct.promoPrice ?? undefined,
         masterImagePrompt: masterImagePrompt ?? undefined,
-        imagesPerAngle,
+        angleQuantities,
       })
 
       setResult(resp)
       setProductVisualDescription(resp.productVisualDescription ?? null)
-
-      setShowCarouselOffer(true)
 
       const firstImg = resp.variations.find((v) => v.imageUrl)?.imageUrl
       saveHistoryEntry({
@@ -165,8 +170,8 @@ export default function ScalePage() {
   const handleGenerateCarousel = async () => {
     if (!analysisResp || !selectedProduct) return
     setGeneratingCarousel(true)
+    setCarousel(null)
     try {
-      // Pass product photo for flux-kontext-pro reference in carousel image generation
       const photoDataUrl = selectedProduct.photos?.[0]
       const photoMatch = photoDataUrl?.match(/^data:([^;]+);base64,(.+)$/)
       const productPhotoMime = photoMatch?.[1] ?? undefined
@@ -182,10 +187,10 @@ export default function ScalePage() {
         generateImages,
         productPhotoBase64,
         productPhotoMime,
+        winningAdBase64: winningAdBase64 ?? undefined,
+        winningAdMime,
       })
       setCarousel(resp)
-      setShowCarouselForm(false)
-      setShowCarouselOffer(false)
       saveHistoryEntry({
         kind: 'carousel',
         productName: selectedProduct.name,
@@ -212,8 +217,9 @@ export default function ScalePage() {
       </div>
 
       <div className="grid gap-6 lg:grid-cols-[420px_1fr]">
-        {/* Left panel */}
+        {/* ── Left panel ── */}
         <div className="space-y-6">
+          {/* Step 1 — Upload */}
           <Card>
             <CardHeader>
               <CardTitle className="text-base">1. Upload iklan winning</CardTitle>
@@ -231,12 +237,14 @@ export default function ScalePage() {
             </CardContent>
           </Card>
 
+          {/* Step 2 — Settings + Angles + Carousel */}
           {analysisResp && (
             <Card>
               <CardHeader>
                 <CardTitle className="text-base">2. Setting & angle</CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
+                {/* Product selector */}
                 {products.length > 0 && (
                   <div className="space-y-2">
                     <Label>Produk</Label>
@@ -265,6 +273,7 @@ export default function ScalePage() {
                   </div>
                 )}
 
+                {/* Aspect ratio */}
                 <div className="space-y-2">
                   <Label>Aspect ratio</Label>
                   <Select value={aspectRatio} onValueChange={(v) => setAspectRatio(v as AspectRatio)}>
@@ -279,6 +288,7 @@ export default function ScalePage() {
                   </Select>
                 </div>
 
+                {/* Generate images toggle */}
                 <div className="flex items-center justify-between rounded-lg border p-3">
                   <div>
                     <Label htmlFor="genImg">Generate gambar AI</Label>
@@ -287,40 +297,35 @@ export default function ScalePage() {
                   <Switch id="genImg" checked={generateImages} onCheckedChange={setGenerateImages} />
                 </div>
 
-                {generateImages && (
-                  <div className="space-y-2">
-                    <Label>Gambar per angle</Label>
-                    <div className="flex gap-2">
-                      {[1, 2, 3].map((n) => (
-                        <Button
-                          key={n}
-                          type="button"
-                          size="sm"
-                          variant={imagesPerAngle === n ? 'default' : 'outline'}
-                          onClick={() => setImagesPerAngle(n)}
-                          className="flex-1"
-                        >
-                          {n}×
-                        </Button>
-                      ))}
-                    </div>
-                    {imagesPerAngle > 1 && (
-                      <p className="text-xs text-amber-600">
-                        {imagesPerAngle}× per angle — akan generate {selectedAngles.length * imagesPerAngle} gambar total.
-                      </p>
+                {/* Angle selector — with per-angle qty when generateImages is on */}
+                <div>
+                  <div className="mb-2 flex items-center justify-between">
+                    <Label>Pilih angle</Label>
+                    {generateImages && selectedAngles.length > 0 && (
+                      <span className="text-xs text-muted-foreground">
+                        {totalImages} gambar total
+                        {totalImages !== selectedAngles.length && (
+                          <span className="ml-1 text-amber-600">({selectedAngles.length} angle)</span>
+                        )}
+                      </span>
                     )}
                   </div>
-                )}
-
-                <div>
-                  <Label className="mb-2 block">Pilih angle</Label>
+                  {generateImages && (
+                    <p className="mb-2 text-xs text-muted-foreground">
+                      Atur jumlah gambar per angle di kotak angka kanan tiap pilihan.
+                    </p>
+                  )}
                   <AngleSelector
                     angles={analysisResp.availableAngles as ScalingAngle[]}
                     selected={selectedAngles}
-                    onChange={setSelectedAngles}
+                    onChange={handleAngleChange}
+                    quantities={angleQuantities}
+                    onQtyChange={handleQtyChange}
+                    showQty={generateImages}
                   />
                 </div>
 
+                {/* Generate variations button */}
                 <Button
                   className="w-full"
                   onClick={handleGenerate}
@@ -329,15 +334,80 @@ export default function ScalePage() {
                   {generating ? (
                     <><Loader2 className="h-4 w-4 animate-spin" /> Generating…</>
                   ) : (
-                    <>Generate {selectedAngles.length} variasi</>
+                    <>
+                      Generate {selectedAngles.length} variasi
+                      {generateImages && totalImages !== selectedAngles.length && (
+                        <span className="ml-1 opacity-70">· {totalImages} gambar</span>
+                      )}
+                    </>
                   )}
                 </Button>
+
+                {/* ── Carousel section ── */}
+                <div className="rounded-lg border border-dashed">
+                  <button
+                    type="button"
+                    onClick={() => setCarouselOpen((v) => !v)}
+                    className="flex w-full items-center justify-between px-4 py-3 text-left hover:bg-muted/30 transition-colors rounded-lg"
+                  >
+                    <div className="flex items-center gap-2">
+                      <Presentation className="h-4 w-4 text-primary" />
+                      <span className="text-sm font-medium">Generate Carousel</span>
+                      {carousel && (
+                        <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
+                          ✓ {carousel.totalSlides} slide
+                        </Badge>
+                      )}
+                    </div>
+                    {carouselOpen
+                      ? <ChevronUp className="h-4 w-4 text-muted-foreground" />
+                      : <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                    }
+                  </button>
+
+                  {carouselOpen && (
+                    <div className="border-t px-4 pb-4 pt-3 space-y-3">
+                      <p className="text-xs text-muted-foreground">
+                        AI buat struktur hook → benefit → CTA otomatis berdasarkan analisis winning ad.
+                      </p>
+                      <div className="space-y-2">
+                        <Label className="text-xs">Berapa slide?</Label>
+                        <div className="flex flex-wrap gap-1.5">
+                          {[3, 4, 5, 6, 7, 8].map((n) => (
+                            <Button
+                              key={n}
+                              type="button"
+                              size="sm"
+                              variant={carouselSlideCount === n ? 'default' : 'outline'}
+                              onClick={() => setCarouselSlideCount(n)}
+                              className="h-8 w-8 p-0 text-xs"
+                            >
+                              {n}
+                            </Button>
+                          ))}
+                        </div>
+                      </div>
+                      <Button
+                        className="w-full"
+                        size="sm"
+                        onClick={handleGenerateCarousel}
+                        disabled={generatingCarousel || !selectedProduct}
+                      >
+                        {generatingCarousel ? (
+                          <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Generating carousel…</>
+                        ) : (
+                          <>Generate {carouselSlideCount} slide</>
+                        )}
+                      </Button>
+                    </div>
+                  )}
+                </div>
               </CardContent>
             </Card>
           )}
         </div>
 
-        {/* Right panel */}
+        {/* ── Right panel ── */}
         <div className="space-y-6">
           {error && (
             <div className="flex items-start gap-2 rounded-lg border border-destructive/40 bg-destructive/5 p-4 text-sm text-destructive">
@@ -365,7 +435,7 @@ export default function ScalePage() {
                 <Loader2 className="h-4 w-4 animate-spin" />
                 <span>
                   Generating {selectedAngles.length} angle
-                  {imagesPerAngle > 1 ? ` × ${imagesPerAngle} gambar = ${selectedAngles.length * imagesPerAngle} gambar total` : ''}…
+                  {totalImages > selectedAngles.length ? ` · ${totalImages} gambar total` : ''}…
                 </span>
               </div>
               <div className="grid gap-4 sm:grid-cols-2">
@@ -429,78 +499,14 @@ export default function ScalePage() {
             </div>
           )}
 
-          {/* Carousel offer banner */}
-          {showCarouselOffer && !showCarouselForm && !carousel && (
-            <div className="rounded-xl border border-primary/20 bg-primary/5 p-5">
-              <div className="mb-1 flex items-center gap-2 font-semibold">
-                <Presentation className="h-5 w-5 text-primary" />
-                Mau dijadikan Carousel juga?
-              </div>
-              <p className="mb-4 text-sm text-muted-foreground">
-                Cocok untuk storytelling produk di Meta Ads. AI buat struktur hook → benefit → CTA otomatis.
-              </p>
-              <div className="flex gap-2">
-                <Button variant="outline" size="sm" onClick={() => setShowCarouselOffer(false)}>
-                  Tidak, makasih
-                </Button>
-                <Button size="sm" onClick={() => { setShowCarouselForm(true); setShowCarouselOffer(false) }}>
-                  Ya, buat carousel →
-                </Button>
-              </div>
-            </div>
-          )}
-
-          {/* Carousel form */}
-          {showCarouselForm && !carousel && (
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-base flex items-center gap-2">
-                  <Presentation className="h-4 w-4" /> Generate Carousel
-                </CardTitle>
-                <CardDescription>AI akan buat struktur hook → benefit → CTA otomatis.</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="space-y-2">
-                  <Label>Berapa slide?</Label>
-                  <div className="flex flex-wrap gap-2">
-                    {[3, 4, 5, 6, 7, 8].map((n) => (
-                      <Button
-                        key={n}
-                        type="button"
-                        size="sm"
-                        variant={carouselSlideCount === n ? 'default' : 'outline'}
-                        onClick={() => setCarouselSlideCount(n)}
-                      >
-                        {n}
-                      </Button>
-                    ))}
-                  </div>
-                </div>
-                <div className="flex gap-2">
-                  <Button
-                    onClick={handleGenerateCarousel}
-                    disabled={generatingCarousel}
-                    className="flex-1"
-                  >
-                    {generatingCarousel ? (
-                      <><Loader2 className="h-4 w-4 animate-spin" /> Generating carousel…</>
-                    ) : (
-                      <>Generate {carouselSlideCount} slide</>
-                    )}
-                  </Button>
-                  <Button variant="outline" onClick={() => setShowCarouselForm(false)} disabled={generatingCarousel}>
-                    Batal
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-          )}
-
           {/* Carousel generating skeleton */}
           {generatingCarousel && (
             <Card>
               <CardContent className="p-6 space-y-3">
-                <Skeleton className="h-4 w-1/3" />
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <span>Generating carousel {carouselSlideCount} slide…</span>
+                </div>
                 <div className="flex gap-2">
                   {Array.from({ length: carouselSlideCount }).map((_, i) => (
                     <Skeleton key={i} className="h-16 w-16 rounded-md" />

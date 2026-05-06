@@ -77,6 +77,8 @@ export async function generateScalingVariations(payload: {
   productPromoPrice?: number
   masterImagePrompt?: string
   imagesPerAngle?: number
+  /** Per-angle image counts — overrides global imagesPerAngle when provided */
+  angleQuantities?: Record<string, number>
 }): Promise<GenerateVariationsResponse> {
   const res = await api.post('/scale/generate-variations', payload)
   return res.data
@@ -92,6 +94,9 @@ export async function generateScaleCarousel(payload: {
   generateImages?: boolean
   productPhotoBase64?: string
   productPhotoMime?: string
+  /** Pass winning ad so carousel uses it as style/layout reference (same as angle variations) */
+  winningAdBase64?: string
+  winningAdMime?: string
 }): Promise<ScaleCarouselResponse> {
   const res = await api.post('/scale/generate-carousel', payload)
   return res.data

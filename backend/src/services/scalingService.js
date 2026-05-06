@@ -978,7 +978,7 @@ async function generateVariationPrompts(winningAnalysis, angles, productName, pr
 // productImageUrl: if provided → flux-kontext-pro (img2img, product accuracy)
 // no productImageUrl → gpt-image-2 (text rendering, scene quality)
 
-async function batchGenerateImages(variations, aspectRatio = '1:1', referenceImageUrls = [], imagesPerAngle = 1) {
+async function batchGenerateImages(variations, aspectRatio = '1:1', referenceImageUrls = [], imagesPerAngle = 1, angleQuantities = {}) {
   const sizeMap = {
     '1:1': '1024x1024',
     '9:16': '1024x1536',
@@ -986,14 +986,17 @@ async function batchGenerateImages(variations, aspectRatio = '1:1', referenceIma
     '4:5': '1024x1024',
   };
   const size = sizeMap[aspectRatio] || '1024x1024';
-  const count = Math.min(Math.max(parseInt(imagesPerAngle) || 1, 1), 3);
+  const globalCount = Math.min(Math.max(parseInt(imagesPerAngle) || 1, 1), 5);
 
   const filteredVariations = variations.filter((v) => v.imagePrompt);
 
-  // For each variation generate `count` images in parallel (all variations × all images concurrently)
+  // For each variation: use per-angle qty if available, else fall back to global count
   const results = await Promise.allSettled(
-    filteredVariations.map((v) =>
-      Promise.allSettled(
+    filteredVariations.map((v) => {
+      const count = (angleQuantities && angleQuantities[v.angle])
+        ? Math.min(Math.max(parseInt(angleQuantities[v.angle]) || 1, 1), 5)
+        : globalCount;
+      return Promise.allSettled(
         Array.from({ length: count }, () =>
           generateImage({
             prompt: v.imagePrompt,
@@ -1001,8 +1004,8 @@ async function batchGenerateImages(variations, aspectRatio = '1:1', referenceIma
             referenceImages: referenceImageUrls.length > 0 ? referenceImageUrls : undefined,
           })
         )
-      )
-    )
+      );
+    })
   );
 
   let filteredIdx = 0;

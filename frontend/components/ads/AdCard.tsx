@@ -56,6 +56,19 @@ export function AdCard({ data, index }: { data: AdCardData; index: number }) {
     setTimeout(() => setPromptCopied(false), 1500)
   }
 
+  // ── Build angle-based filename ──────────────────────────────────────────────
+  const buildFilename = (suffix = '') => {
+    const angleSlug = (data.badge || 'ad').replace(/_/g, '-').toLowerCase()
+    const headlineSlug = (data.headline || '')
+      .slice(0, 30)
+      .toLowerCase()
+      .replace(/\s+/g, '-')
+      .replace(/[^a-z0-9-]/g, '')
+      .replace(/-+/g, '-')
+      .replace(/-$/, '')
+    return `${angleSlug}${headlineSlug ? '-' + headlineSlug : ''}${suffix}.jpg`
+  }
+
   // ── Download single image ───────────────────────────────────────────────────
   const downloadSingle = async (url: string, suffix = '') => {
     try {
@@ -64,7 +77,7 @@ export function AdCard({ data, index }: { data: AdCardData; index: number }) {
       const blobUrl = URL.createObjectURL(blob)
       const link = document.createElement('a')
       link.href = blobUrl
-      link.download = `ad-${data.badge || 'variation'}${suffix}-${Date.now()}.jpg`
+      link.download = buildFilename(suffix)
       document.body.appendChild(link)
       link.click()
       document.body.removeChild(link)
@@ -84,11 +97,11 @@ export function AdCard({ data, index }: { data: AdCardData; index: number }) {
           useCORS: true, allowTaint: true, scale: 2, backgroundColor: null,
         })
         const link = document.createElement('a')
-        link.download = `ad-preview-${data.badge || 'variation'}-${imgIndex + 1}-${Date.now()}.jpg`
+        link.download = buildFilename(`-preview-${imgIndex + 1}`)
         link.href = canvas.toDataURL('image/jpeg', 0.95)
         link.click()
       } else {
-        await downloadSingle(activeImageUrl, `-${imgIndex + 1}`)
+        await downloadSingle(activeImageUrl, hasMultiple ? `-${imgIndex + 1}` : '')
       }
     } finally {
       setDownloading(false)
