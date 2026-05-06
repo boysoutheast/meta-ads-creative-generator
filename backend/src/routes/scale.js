@@ -96,23 +96,16 @@ router.post('/generate-variations', async (req, res) => {
     }
   }
 
-  // Upload both images to apimart to get public URLs for gpt-image-2 reference
+  // Upload ONLY product photo as visual reference.
+  // Winning ad style/layout comes through the text prompt (masterImagePrompt / A-K analysis).
+  // DO NOT pass winning ad as visual reference — it causes the AI to copy the winning product
+  // into the generated image instead of substituting our product.
   const referenceImageUrls = [];
-  if (generateImages) {
-    // Upload winning ad as style/layout reference
-    if (winningAdBase64) {
-      try {
-        const url = await uploadImageToApimart(winningAdBase64, winningAdMime || 'image/jpeg');
-        if (url) { referenceImageUrls.push(url); console.log('Winning ad uploaded:', url.slice(0, 60)); }
-      } catch (e) { console.warn('Winning ad upload failed (non-fatal):', e.message); }
-    }
-    // Upload product photo as product reference
-    if (productPhotoBase64) {
-      try {
-        const url = await uploadImageToApimart(productPhotoBase64, productPhotoMime || 'image/jpeg');
-        if (url) { referenceImageUrls.push(url); console.log('Product photo uploaded:', url.slice(0, 60)); }
-      } catch (e) { console.warn('Product photo upload failed (non-fatal):', e.message); }
-    }
+  if (generateImages && productPhotoBase64) {
+    try {
+      const url = await uploadImageToApimart(productPhotoBase64, productPhotoMime || 'image/jpeg');
+      if (url) { referenceImageUrls.push(url); console.log('Product photo uploaded:', url.slice(0, 60)); }
+    } catch (e) { console.warn('Product photo upload failed (non-fatal):', e.message); }
   }
 
   const angles = await generateScalingAngles(
@@ -235,14 +228,9 @@ Return JSON array dengan tepat ${clampedSlideCount} item, tanpa markdown:
     const sizeMap = { '1:1': '1024x1024', '9:16': '1024x1536', '16:9': '1536x1024' };
     const size = sizeMap[aspectRatio] || '1024x1024';
 
-    // Upload reference images (same pipeline as angle variations)
+    // Upload ONLY product photo as visual reference — same rule as angle variations.
+    // Winning ad is NOT passed visually to prevent product contamination.
     const referenceImageUrls = [];
-    if (winningAdBase64) {
-      try {
-        const url = await uploadImageToApimart(winningAdBase64, winningAdMime || 'image/jpeg');
-        if (url) { referenceImageUrls.push(url); console.log('Carousel: winning ad uploaded:', url.slice(0, 60)); }
-      } catch (e) { console.warn('Carousel winning ad upload failed (non-fatal):', e.message); }
-    }
     if (productPhotoBase64) {
       try {
         const url = await uploadImageToApimart(productPhotoBase64, productPhotoMime || 'image/jpeg');

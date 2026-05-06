@@ -732,16 +732,25 @@ function buildAngleImagePrompt(angle, winningAnalysis, productName, productVisua
   // Product description — from uploaded photo analysis or hardcoded fallback
   const prodBase = productVisualDescription
     ? `${productName} — ${productVisualDescription}`
-    : `${productName} pump bottle — tall slim pink bottle, 200ML, pink and white label with "TaraCare Body Lotion" text, pump dispenser top`;
-  const prodDesc = `${prodBase}. IMPORTANT: Match this product's appearance EXACTLY to the uploaded reference product photo — same bottle shape, label colors, label text, and pump dispenser design.`;
+    : `${productName} — match product appearance EXACTLY to the reference product photo`;
+  const prodDesc = `${prodBase}. IMPORTANT: Match this product's appearance EXACTLY to the uploaded reference product photo — same shape, colors, label text, and design.`;
 
   const quality  = `Photorealistic, high-end skincare beauty editorial photography. Clean and trustworthy aesthetic. Indonesian lifestyle photography feel. No CGI look. No artificial render look. Color palette: ${palette}. ${lighting} lighting. ${mood} mood. Square 1:1 format.`;
   const bpom     = `"BPOM ✓" badge in bottom right corner, small but legible.`;
-  const refNote  = `NOTE: Two reference images are provided — use the winning ad for layout/style reference and the product photo for EXACT product appearance. The product bottle in the image MUST match the reference product photo.`;
+  const refNote  = `REFERENCE IMAGE INSTRUCTION: ONE reference image is provided — it is the product photo. Match the product packaging EXACTLY to this photo: same shape, colors, label text, and design. The reference photo IS the product to feature in this image.`;
   const textAccuracy = `CRITICAL — TEXT RENDERING: Render every word EXACTLY as written, letter by letter. Do not change, substitute, or rearrange any characters. If a word looks unusual, render it exactly as-is. Clean crisp legible typography — no blur, no warped letters.`;
 
+  // ── Product identity override — injected at the top of every prompt ────────
+  // This prevents the AI from reproducing products from the winning ad analysis.
+  const productOverride = `⚠️ PRODUCT IDENTITY — NON-NEGOTIABLE:
+The ONLY product that must appear in this image is: ${prodDesc}
+Do NOT show any other product, brand, drink, sachet pack, or packaging from any reference.
+The winning ad was used ONLY to extract layout, composition, color palette, and typography style.
+Its product has been COMPLETELY REPLACED by the product above.
+If the reference photo shows a different product, IGNORE that product — show ONLY ${productName}.`;
+
   // ── Use masterImagePrompt as base when available ─────────────────────────
-  // Replace placeholders (truncated for image) then append angle-specific layer.
+  // Replace placeholders then inject product override + angle-specific layer.
   if (masterImagePrompt) {
     let base = masterImagePrompt
       .replace(/\[HEADLINE\]/g, imgHeadline)
@@ -750,7 +759,7 @@ function buildAngleImagePrompt(angle, winningAnalysis, productName, productVisua
       .replace(/\[PRODUCT\]/g,  prodDesc);
 
     const angleLayer = buildAngleLayer(angle, sd, emotional, setting, props, productPricing, compositionType, persona);
-    return `${base}\n\nANGLE-SPECIFIC LAYER (${(angle.angle || '').toUpperCase()}):\n${angleLayer}\n\n${textAccuracy}\n${bpom}\n${refNote}\n${quality}`;
+    return `${productOverride}\n\n${base}\n\nANGLE-SPECIFIC LAYER (${(angle.angle || '').toUpperCase()}):\n${angleLayer}\n\n${textAccuracy}\n${bpom}\n${refNote}\n${quality}`;
   }
 
   switch (angle.angle) {
