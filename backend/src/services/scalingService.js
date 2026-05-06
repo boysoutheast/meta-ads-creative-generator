@@ -47,30 +47,54 @@ async function analyzeWinningAd(filePath, mimeType = 'image/jpeg') {
   // Use actual file mime type — sending PNG as 'image/jpeg' causes model refusal
   const safeMime = mimeType && mimeType.startsWith('image/') ? mimeType : 'image/jpeg';
 
-  const analysisPrompt = `Describe this advertisement image in detail. Return a JSON object with these exact fields — be specific and observational, not generic:
+  const analysisPrompt = `You are a forensic advertising analyst. Study this advertisement image with extreme precision and return a JSON object.
+
+CRITICAL RULE: Describe ONLY what you ACTUALLY SEE. Never assume what is "typical" for the product category. If there is no human model in the image, say so — do not invent one.
 
 {
-  "humanScenario": "Describe specifically who is in the image, what they are doing, where they are, and what is happening around them",
-  "emotionalTruth": "What specific feeling or emotion does this image evoke in a viewer — be precise, not generic",
-  "hookMechanism": "Describe what element immediately catches visual attention in the first 1-3 seconds and why it is compelling",
+  "detailedVisualAnalysis": "MINIMUM 5 paragraphs. Be forensically precise — describe what you literally see pixel by pixel:\\n\\nParagraph 1 — LAYOUT & HUMAN PRESENCE: Is there a full human model? Or only a hand/arm? Or just the product with no human at all? Describe the exact layout structure (centered hero / left-right split / top-bottom / grid), background color and texture.\\n\\nParagraph 2 — ALL TEXT VISIBLE: Quote every word you can read. Describe each text element: its exact or approximate position (top-left / center / bottom-right etc.), font weight (bold/regular), approximate size (small/medium/large/xl), and color. Include badge text, headline, subheadline, CTA, product label text, and any footnote.\\n\\nParagraph 3 — PRODUCT DETAIL: Describe the product packaging with extreme detail — shape (bottle/sachet/tube/jar), size impression, lid/cap style, label colors with hex estimates, brand name and text on label, any imagery on the label. Where exactly is it positioned in the frame?\\n\\nParagraph 4 — COLOR PALETTE & STYLE: List the 4-5 dominant colors with hex estimates. Describe the photography/rendering style (studio photo / lifestyle photo / CGI render / illustration / hand-drawn). Describe lighting direction and quality (soft diffused / harsh direct / warm / cool). Describe the overall mood.\\n\\nParagraph 5 — DECORATIVE ELEMENTS: List every floating element you see — certification badges (BPOM/halal/etc), icons, sparkles, leaves, arrows, star ratings, testimonial bubbles, decorative shapes. Describe each: what it is, its color, and its position.",
+
+  "compositionType": "EXACTLY ONE: product_only (zero humans visible, not even a hand) | hand_holding (only a hand/arm visible holding the product, no face or body) | model_with_product (a full or partial person — face, torso, or body — is clearly visible)",
+
+  "hasHumanModel": false,
+
+  "humanScenario": "If hasHumanModel is true: describe who is in the image, their age, what they are doing, where they are. If false: write 'No human model present — product-only or hand-holding composition.'",
+
+  "emotionalTruth": "What specific feeling does this image evoke — be precise based on what you see, not product category assumption",
+
+  "hookMechanism": "What element catches visual attention in the first 1-3 seconds and why",
+
   "narrativeStructure": {
     "setup": "What situation or problem is shown or implied",
-    "tension": "What makes this situation feel urgent or important",
-    "resolution": "What solution, hope, or outcome is suggested"
+    "tension": "What makes this feel urgent or important",
+    "resolution": "What solution or outcome is suggested"
   },
-  "visualStory": "Describe the specific objects, expressions, props, and setting visible in the image that communicate the message",
-  "copyPattern": "Describe the text/headline structure and tone visible in the image, if any",
-  "replicationBlueprint": "List the core visual and messaging elements that make this ad effective and how they could be adapted for a different product",
-  "visualStyle": "Describe the overall visual aesthetic — photography style, editing, mood board description",
+
+  "visualStory": "Describe the specific objects, expressions, props, and setting that communicate the message",
+
+  "copyPattern": "Describe the text/headline structure and tone visible, including any Indonesian text",
+
+  "replicationBlueprint": "List the core visual and messaging elements that make this ad effective and how they could be adapted for a different product — while preserving the same compositionType",
+
+  "visualStyle": "Describe the overall visual aesthetic — photography style, editing style, mood board description",
+
   "colorPalette": ["#hex1", "#hex2", "#hex3"],
-  "lighting": "Describe the lighting style and quality",
+
+  "lighting": "Describe lighting style and quality based on what you see",
+
   "mood": "Describe the overall mood and atmosphere",
-  "composition": "Describe the layout and visual composition",
+
+  "composition": "Describe the layout and visual composition in detail",
+
   "dominantAngle": "Choose one: fomo, social_proof, tutorial, curiosity_gap, before_after, problem_agitate, authority, price_anchor",
+
   "format": "Feed/Story/Reels",
+
   "primaryEmotion": "Single primary emotion evoked",
+
   "suggestedCopyLanguage": "id",
-  "masterImagePrompt": "A 350-450 word image generation prompt that EXACTLY recreates this ad's visual layout for a different product. MANDATORY structure — be specific, not generic:\n\nOVERALL LAYOUT: One sentence describing the exact composition format (split-screen left/right, centered hero, grid, top-bottom, etc.) and background color/gradient with hex code.\n\nTYPOGRAPHY RENDERED ON IMAGE (must be pixel-precise):\n- Badge: exact position (top-left/center/right), shape (pill/square), background hex color, text content placeholder and size\n- Headline: exact position, font weight (bold/extrabold), size (large/xlarge), color hex, line count, alignment — use [HEADLINE] as placeholder\n- Subtext: position, size, color hex — use [SUBTEXT] as placeholder\n- CTA button: shape, background hex color, text color, position (bottom-left/center/right), size — use [CTA] as placeholder\n\nMAIN SCENE:\nIndonesian woman, Southeast Asian features, [describe exact age range, what she is doing, her exact expression and body language from this ad]. Setting: [specific location, time of day, atmosphere]. She is holding or positioned near [PRODUCT]. Lighting: [describe exact lighting style from this ad]. Props visible: [list specific objects from this ad that tell the story].\n\nFLOATING ELEMENTS: [Describe every badge, icon, sparkle, arrow, or decorative element visible — position, color, content].\n\nCOLOR PALETTE: Primary [hex], secondary [hex], accent [hex], background [hex].\n\nSTYLE: Photorealistic, high-end beauty/lifestyle editorial photography. Indonesian lifestyle photography feel. No CGI. No artificial render look. [Describe the exact mood, lighting quality, and photography style of this specific ad]."
+
+  "masterImagePrompt": "400-500 word image generation prompt to EXACTLY recreate this ad's visual layout for a different product. Base this strictly on compositionType you identified above.\\n\\nOVERALL LAYOUT: [Exact composition format + background hex from this image]\\n\\nTYPOGRAPHY RENDERED ON IMAGE:\\n- Top badge: [exact position, shape, background hex, text placeholder]\\n- Headline: [exact position, weight, hex, line count, alignment — use [HEADLINE]]\\n- Subtext: [position, hex — use [SUBTEXT]]\\n- CTA button: [shape, hex, position — use [CTA]]\\n\\nMAIN SCENE — follow compositionType strictly:\\nIF product_only: '[PRODUCT] placed [exact position from this image]. Describe surrounding elements (background surface, decorative props, lighting on product). NO human body or hand present.'\\nIF hand_holding: 'A realistic hand holding [PRODUCT] [describe exact grip, angle, background from this image]. No face. No full body. Lighting: [from image].'\\nIF model_with_product: '[Describe exact person visible: gender, apparent age, expression, action, pose]. Setting: [exact location from this image]. Props: [exact objects from image]. Holding/using [PRODUCT].'\\n\\nFLOATING ELEMENTS: [Forensic list of every decorative element from image — exact position, color, content. If certification badges visible, describe them.]\\n\\nCOLOR PALETTE: Primary [hex], Secondary [hex], Accent [hex], Background [hex]\\n\\nSTYLE: [Exact visual quality — studio photography / lifestyle / product render / illustration — describe the specific feel of this image]\\n\\nSTRICT RULE: Only describe elements present in the original image. Do NOT add humans if none exist. Do NOT add props not visible. Use [PRODUCT] as placeholder for the product description."
 }
 
 Return only valid JSON, no markdown, no explanation.`;
@@ -181,6 +205,18 @@ Saat kamu menulis sceneDetails, pastikan emotionalMoment, setting, dan keyProps 
 ${masterImagePrompt}
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`.trim() : '';
 
+  // Detect compositionType from winning ad — drives rule #3 below
+  const compositionType = winningAnalysis.compositionType || 'model_with_product';
+  const hasModel = compositionType === 'model_with_product';
+  const isHandHolding = compositionType === 'hand_holding';
+  const isProductOnly = compositionType === 'product_only';
+
+  const rule3 = hasModel
+    ? `3. sceneDetails dan imageScenario HARUS menampilkan perempuan Indonesia, Southeast Asian features, relatable everyday person. Intensitas emosional (ekspresi, body language) HARUS setara dengan winning ad — hook/problem angle → ekspresi distressed/frustrated. Resolution angle → ekspresi lega/bahagia.`
+    : isHandHolding
+    ? `3. Winning ad ini TIDAK menampilkan model penuh — hanya tangan memegang produk. sceneDetails dan imageScenario HARUS mengikuti compositionType: 'hand_holding'. Deskripsikan tangan yang memegang [PRODUCT] di setting yang relevan. JANGAN tambahkan wajah, badan, atau model manusia penuh.`
+    : `3. Winning ad ini TIDAK menampilkan manusia sama sekali — ini adalah iklan produk murni (product_only). sceneDetails dan imageScenario HARUS hanya menampilkan produk, background, dan elemen dekoratif. JANGAN ada manusia, tangan, atau model sama sekali.`;
+
   const systemPrompt = `Kamu adalah Meta Ads creative director kelas dunia yang ahli dalam "concept translation" — proses mengambil DNA dari satu iklan winning dan mentranslate-nya secara presisi ke produk yang berbeda. Ini bukan tentang meniru secara visual, tapi mengambil MEKANISME yang membuat iklan itu berhasil (hook, emosi, alur cerita) dan mengaplikasikannya ke konteks produk baru.
 
 Tugas kamu adalah membaca iklan winning dengan sangat cermat, memahami MENGAPA ia berhasil (bukan hanya APA yang ada di dalamnya), lalu menciptakan versi baru untuk produk target yang memiliki daya tarik yang sama kuatnya. Prinsip terpenting: pertahankan mekanisme, ganti konteks.
@@ -188,8 +224,8 @@ Tugas kamu adalah membaca iklan winning dengan sangat cermat, memahami MENGAPA i
 ATURAN TIDAK BISA DILANGGAR:
 1. Semua copy (headline, subheadline, bodyText, cta) WAJIB Bahasa Indonesia — tidak ada pengecualian.
 2. Jika deskripsi produk menyebut ingredient spesifik (misal: Shea Butter 5%, Inoceramide, Hyaluronic Acid 3%), kondisi target (diabetes, kulit kering parah), atau klaim unik — HARUS muncul di copy. Copy generik ("kulit sehat") = GAGAL. Copy spesifik ("kulit diabetik yang pecah-pecah minta Inoceramide") = BERHASIL.
-3. imagePromptEN HARUS dimulai dengan: "Indonesian woman, Southeast Asian features, relatable everyday person, " — tidak ada variasi, tidak ada karakter lain.
-4. Intensitas emosional gambar HARUS setara dengan winning ad. Hook/problem angle → ekspresi distressed/frustrated. Resolution angle → ekspresi lega/bahagia. JANGAN buat foto produk biasa, buat SCENE yang bercerita.
+${rule3}
+4. Intensitas emosional gambar HARUS setara dengan winning ad.
 5. Produk HARUS terlihat jelas di gambar — deskripsikan tampilannya sedetail mungkin berdasarkan tampilan visual produk yang diberikan.`;
 
   const userPrompt = `${winningAdBlock}
@@ -269,36 +305,77 @@ function truncateForImage(text, maxWords = 5) {
   return words.slice(0, maxWords).join(' ') + '…';
 }
 
+// ─── buildMainScene ───────────────────────────────────────────────────────────
+// Composition-aware scene block. Respects the winning ad's compositionType so
+// we never force a human model when the reference had none.
+
+function buildMainScene(compositionType, emotional, setting, props, prodDesc, angleContext = '') {
+  const ct = compositionType || 'model_with_product';
+
+  if (ct === 'product_only') {
+    return `MAIN SCENE: ${prodDesc} — prominently displayed as the sole hero. ` +
+      `No human body, face, or hand present. ` +
+      `Setting: ${setting || 'clean studio background'}. ` +
+      `Props: ${props || 'minimal — product only'}. ` +
+      `Product is sharp, well-lit, centered/positioned as in the reference ad.`;
+  }
+
+  if (ct === 'hand_holding') {
+    return `MAIN SCENE: A realistic hand holding ${prodDesc} — ` +
+      `${setting || 'clean background'}. ` +
+      `Grip and angle consistent with reference ad. ` +
+      `No face, torso, or full body visible. ` +
+      `Lighting: ${emotional || 'warm natural'}. ` +
+      `Props nearby: ${props || 'minimal'}.`;
+  }
+
+  // model_with_product (default)
+  return `MAIN SCENE: Indonesian woman, Southeast Asian features, ${emotional}. ` +
+    `Setting: ${setting}. ` +
+    `Props: ${props}. ` +
+    `${angleContext}`;
+}
+
 // ─── buildAngleLayer ─────────────────────────────────────────────────────────
 // Angle-specific instructions that are LAYERED ON TOP of the masterImagePrompt base.
 // Used when masterImagePrompt is available (primary path).
 
-function buildAngleLayer(angle, sd, emotional, setting, props, productPricing) {
+function buildAngleLayer(angle, sd, emotional, setting, props, productPricing, compositionType = 'model_with_product') {
   const fmt = (n) => 'Rp ' + Number(n).toLocaleString('id-ID');
+  // Build the scene block respecting compositionType — never force model when reference had none
+  const sceneBlock = (context = '') => {
+    if (compositionType === 'product_only') {
+      return `SCENE: Product-only composition. No human present. Product prominently displayed. Setting: ${setting}. Props: ${props}.`;
+    }
+    if (compositionType === 'hand_holding') {
+      return `SCENE: Hand holding product. No face or full body. Setting: ${setting}. Props: ${props}.`;
+    }
+    return `SCENE: Indonesian woman, ${emotional}${context ? ' — ' + context : ''}. Setting: ${setting}. Props: ${props}.`;
+  };
 
   switch (angle.angle) {
 
     case 'before_after': {
-      const before    = sd.beforeState  || 'visible problem: rough/dry/dull skin — close-up';
-      const after     = sd.afterState   || 'smooth, hydrated, glowing skin — same close-up angle';
+      const before    = sd.beforeState  || 'visible problem state — close-up';
+      const after     = sd.afterState   || 'visible improvement state — same close-up angle';
       const timeClaim = sd.timeClaim    || '7 hari';
       return `Convert into SPLIT-SCREEN layout.
 LEFT "Sebelum": ${before}. Muted/slightly desaturated lighting. "Sebelum" label pill top-left.
 CENTER: Thin vertical divider with small circle containing bold text "${timeClaim}".
-RIGHT "Sesudah": ${after}. Brighter, warmer lighting with skin glow effect. "Sesudah" label pill top-right.
-EMOTIONAL SCENE: Indonesian woman, ${emotional}. Setting: ${setting}. Props: ${props}.
+RIGHT "Sesudah": ${after}. Brighter, warmer lighting with glow effect. "Sesudah" label pill top-right.
+${sceneBlock()}
 Product placed bottom-center overlapping both halves — must be large and clearly identifiable.`;
     }
 
     case 'fomo': {
       return `URGENCY LAYER: Add coral/orange (#E8541A) "⚡ Stok Terbatas" pill badge prominently at top.
 Add small "Tersisa sedikit" urgency text overlay near product.
-EMOTIONAL SCENE: Indonesian woman, ${emotional} — excited/urgent energy. Setting: ${setting}. Props: ${props}.`;
+${sceneBlock('excited/urgent energy')}`;
     }
 
     case 'problem_agitate': {
       return `PROBLEM EMPHASIS: Scene highlights the frustration/pain clearly.
-EMOTIONAL SCENE: Indonesian woman, ${emotional} — distressed/frustrated expression. Setting: ${setting}. Props showing problem: ${props}.
+${sceneBlock('distressed/frustrated — problem visible')}
 Product appears as the visible solution element in corner or bottom area.`;
     }
 
@@ -311,35 +388,35 @@ Product appears as the visible solution element in corner or bottom area.`;
         : hasPrice  ? `large bold price "${fmt(productPricing.productPrice)}" in dark pink (#D4547A)`
         : `DO NOT invent or display any price numbers — show a savings/value message instead`;
       return `PRICE LAYER: Add green (#1A7A6E) "Hemat Sekarang" badge. Price display: ${priceLine}.
-EMOTIONAL SCENE: Indonesian woman, ${emotional} — pleased/satisfied. Setting: ${setting}. Props: ${props}.`;
+${sceneBlock('pleased/satisfied')}`;
     }
 
     case 'social_proof': {
       return `TRUST LAYER: Add gold star row "⭐⭐⭐⭐⭐" with pink badge "1000+ Pelanggan Puas" at top.
 Add floating speech-bubble testimonial snippet overlay.
-EMOTIONAL SCENE: Indonesian woman, ${emotional} — happy, satisfied, confident. Setting: ${setting}. Props: ${props}.`;
+${sceneBlock('happy, satisfied, confident')}`;
     }
 
     case 'tutorial': {
       return `STEP LAYER: Add teal (#1A7A6E) "Cara Pakai" badge.
 Show 3 numbered step cards: teal circle "1", teal circle "2", teal circle "3" each with short instruction (≤10 words).
-EMOTIONAL SCENE: Indonesian woman, ${emotional} — calm, instructional. Setting: ${setting}. Props: ${props}. Soft background.`;
+${sceneBlock('calm, instructional')} Soft background.`;
     }
 
     case 'authority': {
       return `AUTHORITY LAYER: Add dark navy (#1A3A5C) "Direkomendasikan Dokter" badge.
 Add floating trust badges: BPOM certified, 5-star rating, certification icon.
-EMOTIONAL SCENE: Indonesian woman, ${emotional} — confident, professional. Setting: ${setting}. Props: ${props}.`;
+${sceneBlock('confident, professional')}`;
     }
 
     case 'curiosity_gap': {
       return `CURIOSITY LAYER: Add teal (#1A7A6E) "Tahukah kamu?" badge.
 Add small question mark or lightbulb accent icons in teal.
-EMOTIONAL SCENE: Indonesian woman, ${emotional} — intrigued/curious expression. Setting: ${setting}. Props: ${props}.`;
+${sceneBlock('intrigued/curious')}`;
     }
 
     default: {
-      return `EMOTIONAL SCENE: Indonesian woman, ${emotional}. Setting: ${setting}. Props: ${props}.`;
+      return sceneBlock();
     }
   }
 }
@@ -352,6 +429,8 @@ function buildAngleImagePrompt(angle, winningAnalysis, productName, productVisua
   const palette    = (winningAnalysis.colorPalette || ['#FADBD8', '#A93226', '#D5DBDB']).join(', ');
   const lighting   = winningAnalysis.lighting  || 'warm natural';
   const mood       = winningAnalysis.mood      || 'engaging';
+  // Composition type from winning ad — drives whether scene has model, hand, or product-only
+  const compositionType = winningAnalysis.compositionType || 'model_with_product';
   // Full copy for card display — only shortened versions used inside image prompts
   const headline   = angle.headline   || '';
   const sub        = angle.subheadline || '';
@@ -387,7 +466,7 @@ function buildAngleImagePrompt(angle, winningAnalysis, productName, productVisua
       .replace(/\[CTA\]/g,      imgCta)
       .replace(/\[PRODUCT\]/g,  prodDesc);
 
-    const angleLayer = buildAngleLayer(angle, sd, emotional, setting, props, productPricing);
+    const angleLayer = buildAngleLayer(angle, sd, emotional, setting, props, productPricing, compositionType);
     return `${base}\n\nANGLE-SPECIFIC LAYER (${(angle.angle || '').toUpperCase()}):\n${angleLayer}\n\n${textAccuracy}\n${bpom}\n${refNote}\n${quality}`;
   }
 
@@ -395,9 +474,19 @@ function buildAngleImagePrompt(angle, winningAnalysis, productName, productVisua
 
     // ── BEFORE & AFTER ──────────────────────────────────────────────────────
     case 'before_after': {
-      const beforeState = sd.beforeState || 'skin area looks visibly dry, rough texture, dull, unhealthy — close-up of forearm/hand';
-      const afterState  = sd.afterState  || 'same skin area looks visibly smooth, luminous, hydrated glow — same close-up';
+      const beforeState = sd.beforeState || 'skin/product area shows the problem — close-up';
+      const afterState  = sd.afterState  || 'same area shows the improvement — same close-up';
       const timeClaim   = sd.timeClaim   || '7 hari';
+      const beforeScene = compositionType === 'product_only'
+        ? `LEFT "Sebelum": ${prodDesc} in a dull/problem context — ${beforeState}. Muted slightly desaturated lighting. "Sebelum" label pill top-left.`
+        : compositionType === 'hand_holding'
+        ? `LEFT "Sebelum": A hand presenting ${prodDesc} against a dim/problem background — ${beforeState}. Muted lighting. "Sebelum" label pill top-left.`
+        : `LEFT "Sebelum": Indonesian woman 25-35yo, ${sd.emotionalMoment || 'concerned/frustrated expression'}. Close-up shows ${beforeState}. Muted warm lighting. "Sebelum" label pill top-left.`;
+      const afterScene = compositionType === 'product_only'
+        ? `RIGHT "Sesudah": ${prodDesc} in a bright/positive context — ${afterState}. Bright warm lighting, glow effect. "Sesudah" label pill top-right.`
+        : compositionType === 'hand_holding'
+        ? `RIGHT "Sesudah": A hand presenting ${prodDesc} against a bright/warm background — ${afterState}. Brighter saturated lighting. "Sesudah" label pill top-right.`
+        : `RIGHT "Sesudah": Same Indonesian woman, smiling softly, relaxed and happy. Close-up shows ${afterState}. Brighter, warmer lighting. Sparkle/glow effect. "Sesudah" label pill top-right.`;
       return `A clean, modern Meta Ads image in editorial split-screen style. Background is soft pink-cream gradient (#FFF0F5 to #F5F0E8). Square 1:1 format.
 TYPOGRAPHY RENDERED ON IMAGE (must be perfectly legible, crisp, bold, no blur):
 - Top center: dark pink (#D4547A) rounded pill badge with white text "Sebelum vs Sesudah"
@@ -405,8 +494,8 @@ TYPOGRAPHY RENDERED ON IMAGE (must be perfectly legible, crisp, bold, no blur):
 - Bottom smaller supporting text: "${imgSub}"
 - CTA rounded pill button bottom center, dark pink (#D4547A), white bold text: "${imgCta} →"
 MAIN SCENE:
-LEFT HALF "Sebelum": Indonesian woman 25-35yo, ${sd.emotionalMoment || 'concerned/frustrated expression, looking at skin problem'}. Close-up shows ${beforeState}. Muted warm lighting, slightly desaturated. Small white rounded pill label "Sebelum" top left corner.
-RIGHT HALF "Sesudah": Same Indonesian woman, smiling softly, relaxed and happy. Close-up shows ${afterState}. Brighter, warmer, more saturated lighting. Sparkle/glow effect on skin. Small white rounded pill label "Sesudah" top right corner.
+${beforeScene}
+${afterScene}
 DIVIDING ELEMENT: Thin vertical line in the center with a small white circle containing bold dark text "${timeClaim}".
 PRODUCT FEATURED: ${prodDesc} — placed bottom center overlapping both halves, slightly in front. Product is the hero element, must be large and clearly identifiable.
 FLOATING ELEMENTS: Small pink star/sparkle icons (#D4547A) scattered around the sesudah side. Small leaf/natural ingredient icon near the product bottom.
@@ -418,17 +507,18 @@ ${quality}`;
 
     // ── FOMO / URGENCY ───────────────────────────────────────────────────────
     case 'fomo': {
+      const fomoScene = buildMainScene(compositionType, emotional, setting, props, prodDesc, 'excited/urgent energy');
       return `A clean, modern Meta Ads image in editorial split layout. Background soft cream/off-white (#FFFBF5). Square 1:1 format.
 LEFT 55%: Large bold typography block on cream background.
-RIGHT 45%: Photorealistic lifestyle scene with thin gradient divider.
+RIGHT 45%: Photorealistic scene with thin gradient divider.
 TYPOGRAPHY ON LEFT (rendered exactly, crisp, no blur, high contrast):
 - Top left: coral/orange (#E8541A) rounded pill badge with white text "⚡ Stok Terbatas"
 - Large bold dark brown/black headline (2-3 lines, large sans-serif): "${imgHeadline}"
 - Smaller supporting text below: "${imgSub}"
 - Orange rounded CTA pill button (#E8541A), white bold text, bottom left: "${imgCta} →"
-RIGHT SIDE SCENE: Indonesian woman 25-35yo, ${emotional}. Setting: ${setting}. Props: ${props}.
+RIGHT SIDE SCENE: ${fomoScene}
 PRODUCT: ${prodDesc} — visible in scene on right side, clearly identifiable.
-FLOATING: Small urgency indicator "Tersisa sedikit" text overlay near product. Pink sparkle accents.
+FLOATING: Small urgency indicator "Tersisa sedikit" text overlay near product. Orange sparkle accents.
 ${textAccuracy}
 ${bpom}
 ${refNote}
@@ -437,6 +527,7 @@ ${quality}`;
 
     // ── PROBLEM AGITATE ──────────────────────────────────────────────────────
     case 'problem_agitate': {
+      const problemScene = buildMainScene(compositionType, emotional, setting, props, prodDesc, 'distressed/frustrated expression — problem clearly visible');
       return `A clean, modern Meta Ads image in editorial split layout. Background soft cream/light (#FFF8F5). Square 1:1 format.
 LEFT 55%: Large bold typography block on light background.
 RIGHT 45%: Emotional problem scene with thin divider.
@@ -445,7 +536,7 @@ TYPOGRAPHY ON LEFT (rendered exactly, crisp, bold, perfectly legible):
 - Large bold dark brown/black headline (2-3 lines): "${imgHeadline}"
 - Smaller supporting text: "${imgSub}"
 - Dark pink (#D4547A) rounded CTA pill button, white bold text, bottom left: "${imgCta} →"
-RIGHT SIDE SCENE: Indonesian woman 25-35yo, ${emotional}. Setting: ${setting}. Props showing the problem clearly: ${props}.
+RIGHT SIDE SCENE: ${problemScene}
 PRODUCT: ${prodDesc} — shown as the solution, placed at bottom of right scene or overlapping corner, clearly identifiable.
 ${textAccuracy}
 ${bpom}
@@ -455,15 +546,16 @@ ${quality}`;
 
     // ── CURIOSITY GAP ────────────────────────────────────────────────────────
     case 'curiosity_gap': {
+      const curiosityScene = buildMainScene(compositionType, emotional, setting, props, prodDesc, 'intrigued/curious expression');
       return `A clean, modern Meta Ads image in editorial split layout. Background soft cream (#FFFBF5). Square 1:1 format.
 LEFT 55%: Bold typography with mystery/question hook on cream background.
-RIGHT 45%: Intriguing lifestyle scene.
+RIGHT 45%: Intriguing scene.
 TYPOGRAPHY ON LEFT (rendered exactly, crisp, bold, perfectly legible):
 - Top left: teal/dark green (#1A7A6E) rounded pill badge with white text "Tahukah kamu?"
 - Large bold dark headline with question/mystery (2-3 lines): "${imgHeadline}"
 - Teaser supporting text: "${imgSub}"
 - Teal/dark pink rounded CTA pill button, white bold text, bottom left: "${imgCta} →"
-RIGHT SIDE SCENE: Indonesian woman 25-35yo, ${emotional}. Setting: ${setting}. Props: ${props}.
+RIGHT SIDE SCENE: ${curiosityScene}
 PRODUCT: ${prodDesc} — clearly visible, prominently placed, looking intriguing.
 FLOATING: Small question mark or lightbulb accent icons in teal. Pink sparkle accents.
 ${textAccuracy}
@@ -474,17 +566,18 @@ ${quality}`;
 
     // ── SOCIAL PROOF ─────────────────────────────────────────────────────────
     case 'social_proof': {
+      const socialScene = buildMainScene(compositionType, emotional, setting, props, prodDesc, 'happy, satisfied, confident');
       return `A clean, modern testimonial-style Meta Ads image. Soft pink-cream background (#FFF0F5). Square 1:1 format.
 TOP SECTION: Star rating badge + headline.
-CENTER: Lifestyle scene with satisfied customer.
+CENTER: Scene with satisfied product showcase.
 BOTTOM: Product + CTA button.
 TYPOGRAPHY RENDERED ON IMAGE (perfectly legible, crisp):
 - Top center: gold star rating "⭐⭐⭐⭐⭐" with pink badge "1000+ Pelanggan Puas"
 - Bold dark headline (1-2 lines, large, centered): "${imgHeadline}"
 - Subtext: "${imgSub}"
 - Dark pink (#D4547A) CTA pill button, white bold text, bottom center: "${imgCta} →"
-MAIN SCENE: Indonesian woman 25-35yo, ${emotional}. Setting: ${setting}. Props: ${props}.
-OVERLAY ELEMENTS: Floating speech bubble testimonial snippet. Before/after skin comparison circles (left: rough, right: smooth).
+MAIN SCENE: ${socialScene}
+OVERLAY ELEMENTS: Floating speech bubble testimonial snippet. Before/after comparison circles (left: rough/dull, right: smooth/bright).
 PRODUCT: ${prodDesc} — hero product, bottom center, large and clearly identifiable.
 ${textAccuracy}
 ${bpom}
@@ -494,6 +587,7 @@ ${quality}`;
 
     // ── TUTORIAL / HOW-TO ────────────────────────────────────────────────────
     case 'tutorial': {
+      const tutorialScene = buildMainScene(compositionType, emotional, setting, props, prodDesc, 'calm, instructional, demonstrating use');
       return `A clean, modern informational Meta Ads image with step-by-step layout. Soft cream/white background. Square 1:1 format.
 TOP: Teal badge + headline.
 MIDDLE: 3-step numbered card row.
@@ -505,7 +599,7 @@ TYPOGRAPHY RENDERED ON IMAGE (perfectly legible, crisp):
 - STEP 2 card: teal circle "2" + short instruction (5 words max)
 - STEP 3 card: teal circle "3" + short instruction (5 words max)
 - Dark pink (#D4547A) CTA pill button, white bold text, bottom center: "${imgCta} →"
-BACKGROUND SCENE: Indonesian woman 25-35yo, ${emotional}. Setting: ${setting}. Props: ${props}. Soft, instructional, calm atmosphere.
+BACKGROUND SCENE: ${tutorialScene} Soft, instructional, calm atmosphere.
 PRODUCT: ${prodDesc} — shown in use in one of the step illustrations. Clearly identifiable.
 ${textAccuracy}
 ${bpom}
@@ -528,16 +622,17 @@ ${quality}`;
           : hasPrice
             ? `- Product price (large bold dark pink #D4547A): "${origPrice}"`
             : `- DO NOT invent or show any price numbers. Show a value/savings message instead.`;
+      const priceScene = buildMainScene(compositionType, emotional, setting, props, prodDesc, 'pleased/satisfied with the value');
       return `A clean, modern value-proposition Meta Ads image in editorial split layout. Soft cream background (#FFFBF5). Square 1:1 format.
 LEFT 55%: Price comparison typography block on cream background.
-RIGHT 45%: Product showcase lifestyle scene.
+RIGHT 45%: Product showcase scene.
 TYPOGRAPHY ON LEFT (rendered exactly, crisp, bold, perfectly legible):
 - Top left: green (#1A7A6E) rounded pill badge "Hemat Sekarang"
 - Bold dark headline (1-2 lines, large): "${imgHeadline}"
 ${priceLine}
 - Smaller supporting text: "${imgSub}"
 - Green/orange (#E8541A) rounded CTA pill button, white bold text, bottom left: "${imgCta} →"
-RIGHT SIDE SCENE: Indonesian woman 25-35yo, ${emotional}. Setting: ${setting}. Props: ${props}.
+RIGHT SIDE SCENE: ${priceScene}
 PRODUCT: ${prodDesc} — large, prominently displayed on right side, clearly identifiable.
 ${textAccuracy}
 ${bpom}
@@ -547,15 +642,16 @@ ${quality}`;
 
     // ── AUTHORITY / EXPERT ───────────────────────────────────────────────────
     case 'authority': {
+      const authorityScene = buildMainScene(compositionType, emotional, setting, props, prodDesc, 'confident, professional, trustworthy');
       return `A clean, modern authority/expert Meta Ads image in editorial split layout. Professional, trustworthy aesthetic. Soft cream/light blue-white background. Square 1:1 format.
 LEFT 55%: Credentials + headline typography on clean background.
-RIGHT 45%: Confident professional lifestyle scene.
+RIGHT 45%: Confident professional scene.
 TYPOGRAPHY ON LEFT (rendered exactly, crisp, bold, perfectly legible):
 - Top left: dark navy/professional (#1A3A5C) rounded pill badge "Direkomendasikan Dokter"
 - Bold authoritative dark headline (2 lines): "${imgHeadline}"
 - Credential supporting text: "${imgSub}"
 - Dark professional (#1A3A5C or #D4547A) rounded CTA pill button, white bold text, bottom left: "${imgCta} →"
-RIGHT SIDE SCENE: Indonesian woman professional/confident 28-40yo, ${emotional}. Setting: ${setting}. Props: ${props}.
+RIGHT SIDE SCENE: ${authorityScene}
 PRODUCT: ${prodDesc} — presented as the endorsed certified product, clearly identifiable.
 TRUST OVERLAY BADGES: BPOM certified badge, 5-star rating badge, small certification icon — as floating overlays.
 ${textAccuracy}
@@ -565,14 +661,15 @@ ${quality}`;
 
     // ── DEFAULT FALLBACK ─────────────────────────────────────────────────────
     default: {
+      const defaultScene = buildMainScene(compositionType, emotional, setting, props, prodDesc);
       return `A clean, modern Meta Ads image in editorial split layout. Soft cream (#FFFBF5) background. Square 1:1 format.
 LEFT 55%: Large bold typography block on cream background.
-RIGHT 45%: Lifestyle scene with thin gradient divider.
+RIGHT 45%: Scene with thin gradient divider.
 TYPOGRAPHY ON LEFT (rendered exactly, crisp, bold, perfectly legible):
 - Bold dark brown/black headline (2-3 lines, large): "${imgHeadline}"
 - Supporting subtext: "${imgSub}"
 - Dark pink (#D4547A) rounded CTA pill button, white bold text, bottom left: "${imgCta} →"
-RIGHT SCENE: Indonesian woman 25-35yo, ${emotional}. Setting: ${setting}. Props: ${props}.
+RIGHT SCENE: ${defaultScene}
 PRODUCT: ${prodDesc} — clearly visible and identifiable.
 ${textAccuracy}
 ${bpom}

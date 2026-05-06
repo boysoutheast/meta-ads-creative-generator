@@ -12,6 +12,8 @@ import type {
   ScaleCarouselResponse,
   ScaleVideoJobResponse,
   ScaleVideoStatus,
+  StartRemakeResponse,
+  RemakeJobResponse,
 } from './types'
 
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000'
@@ -127,6 +129,42 @@ export async function generateScaleVideoJob(payload: {
 
 export async function getScaleVideoStatus(taskId: string): Promise<ScaleVideoStatus> {
   const res = await api.get(`/scale-video/status/${taskId}`)
+  return res.data
+}
+
+/**
+ * Start a video remake job.
+ * Returns remakeId immediately — poll getRemakeStatus() for progress.
+ * Cost: ~$0.044/sec output. 21s ≈ $0.92.
+ */
+export async function startVideoRemake(payload: {
+  file: File
+  productName: string
+  productDescription?: string
+  productPhotoBase64?: string
+  productPhotoMime?: string
+  aspectRatio?: string
+  targetSeconds?: number
+  clipCount?: number
+}): Promise<StartRemakeResponse> {
+  const fd = new FormData()
+  fd.append('file', payload.file)
+  fd.append('productName', payload.productName)
+  if (payload.productDescription) fd.append('productDescription', payload.productDescription)
+  if (payload.productPhotoBase64) fd.append('productPhotoBase64', payload.productPhotoBase64)
+  if (payload.productPhotoMime) fd.append('productPhotoMime', payload.productPhotoMime)
+  if (payload.aspectRatio) fd.append('aspectRatio', payload.aspectRatio)
+  if (payload.targetSeconds) fd.append('targetSeconds', String(payload.targetSeconds))
+  if (payload.clipCount) fd.append('clipCount', String(payload.clipCount))
+  const res = await api.post('/scale-video/remake', fd, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: 60000,
+  })
+  return res.data
+}
+
+export async function getRemakeStatus(remakeId: string): Promise<RemakeJobResponse> {
+  const res = await api.get(`/scale-video/remake/${remakeId}`)
   return res.data
 }
 

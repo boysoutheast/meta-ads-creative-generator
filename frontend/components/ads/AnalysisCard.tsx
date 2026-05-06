@@ -25,6 +25,39 @@ export function AnalysisCard({ analysis }: { analysis: WinningAdAnalysis }) {
       </CardHeader>
       <CardContent className="space-y-3 text-sm">
 
+        {/* Composition type badge — critical for image generation accuracy */}
+        {analysis.compositionType && (
+          <div className="flex items-center gap-2">
+            <p className="text-xs font-medium text-muted-foreground">Komposisi terdeteksi:</p>
+            <Badge
+              variant="outline"
+              className={
+                analysis.compositionType === 'product_only'
+                  ? 'border-blue-400 text-blue-700 bg-blue-50'
+                  : analysis.compositionType === 'hand_holding'
+                  ? 'border-amber-400 text-amber-700 bg-amber-50'
+                  : 'border-emerald-400 text-emerald-700 bg-emerald-50'
+              }
+            >
+              {analysis.compositionType === 'product_only' && '📦 Produk saja — tanpa model'}
+              {analysis.compositionType === 'hand_holding' && '✋ Tangan memegang produk'}
+              {analysis.compositionType === 'model_with_product' && '👤 Ada model + produk'}
+            </Badge>
+          </div>
+        )}
+
+        {/* 5-paragraph detailed description */}
+        {analysis.detailedVisualAnalysis && (
+          <details>
+            <summary className="cursor-pointer text-xs font-medium text-muted-foreground hover:text-foreground">
+              📝 Deskripsi visual detail (5 paragraf)
+            </summary>
+            <p className="mt-2 rounded bg-muted/40 p-3 text-xs leading-relaxed whitespace-pre-wrap text-muted-foreground">
+              {analysis.detailedVisualAnalysis}
+            </p>
+          </details>
+        )}
+
         {/* V2 deep dimensions */}
         {hasDeepAnalysis && (
           <>

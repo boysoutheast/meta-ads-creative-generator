@@ -13,6 +13,7 @@ import {
   Package,
   Layers,
   Video,
+  Scissors,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/lib/auth'
@@ -33,6 +34,7 @@ const navGroups = [
       { href: '/generate/single-image', label: 'Single Image', icon: ImageIcon },
       { href: '/scale', label: 'Scale Winning Image', icon: Layers },
       { href: '/scale-video', label: 'Scale Winning Video', icon: Video },
+      { href: '/remake', label: 'Video Remake', icon: Scissors },
       { href: '/create', label: 'Create w/ Reference', icon: Sparkles },
     ],
   },

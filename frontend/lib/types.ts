@@ -49,6 +49,10 @@ export interface WinningAdAnalysis {
   narrativeStructure?: { setup: string; tension: string; resolution: string }
   visualStory?: string
   replicationBlueprint?: string
+  // Composition detection — drives whether generated images include a model
+  compositionType?: 'product_only' | 'hand_holding' | 'model_with_product'
+  hasHumanModel?: boolean
+  detailedVisualAnalysis?: string   // 5-paragraph forensic description
   // Original fields (kept for backward compat; hook = hookMechanism alias)
   hook?: string
   visualStyle?: string
@@ -206,6 +210,28 @@ export interface ScaleVideoStatus {
   videoUrl: string | null
   progress: number | null
   error: string | null
+}
+
+// ─── Video Remake (doubao-seedance-2.0) ──────────────────────────────────────
+
+export type RemakeStatus = 'analyzing' | 'splitting' | 'generating' | 'merging' | 'done' | 'failed'
+
+export interface RemakeJobResponse {
+  remakeId: string
+  status: RemakeStatus
+  progress: number
+  log: string[]
+  videoUrl: string | null
+  error: string | null
+  createdAt: number
+}
+
+export interface StartRemakeResponse {
+  remakeId: string
+  status: RemakeStatus
+  message: string
+  estimatedCostUsd: string
+  estimatedMinutes: string
 }
 
 // ─── History (localStorage) ──────────────────────────────────────────────────

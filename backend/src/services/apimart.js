@@ -167,6 +167,54 @@ async function generateImage({ prompt, size = '1024x1024', model, referenceImage
   throw new Error(`Image generation timed out after ${timeoutMs}ms (task ${taskId})`);
 }
 
+/**
+ * doubao-seedance-2.0 video-to-video (base mode).
+ * Preserves motion structure of reference clip, swaps product/context via prompt.
+ * @param {Object} opts
+ * @param {string} opts.videoUrl   - Public URL of source clip (3-10s)
+ * @param {string} opts.prompt     - Descriptive prompt for the remade clip
+ * @param {number} opts.duration   - Output duration 3-10s (default 7)
+ * @param {string} opts.aspectRatio
+ * @param {string} [opts.resolution] - '480p' | '720p' (default '720p')
+ * @param {string} [opts.model]
+ */
+async function generateVideoFromReference({
+  videoUrl,
+  prompt,
+  duration = 7,
+  aspectRatio = '9:16',
+  resolution = '720p',
+  model,
+}) {
+  const effectiveModel = model || config.models.remake || 'doubao-seedance-2-0';
+  const payload = {
+    model: effectiveModel,
+    prompt,
+    duration,
+    resolution,
+    aspect_ratio: aspectRatio,
+    video_url: videoUrl,
+    videoReferType: 'base',
+    watermark: false,
+  };
+
+  console.log(`[generateVideoFromReference] model=${effectiveModel} aspect=${aspectRatio} dur=${duration}s videoUrl=${videoUrl?.slice(0, 60)}`);
+
+  const response = await imageClient.post('/videos/generations', payload, { timeout: 60000 });
+
+  const code = response.data?.code;
+  if (code && code !== 200 && code !== 201) {
+    const msg = response.data?.message || response.data?.error || JSON.stringify(response.data).slice(0, 200);
+    throw new Error(`Video API error (code ${code}): ${msg}`);
+  }
+
+  const rawData = response.data?.data;
+  const item = Array.isArray(rawData) ? rawData[0] : (rawData || response.data);
+  const taskId = item?.task_id || item?.taskId || item?.id;
+  console.log(`[generateVideoFromReference] task_id=${taskId} raw keys=${Object.keys(item || {}).join(',')}`);
+  return item;
+}
+
 async function generateVideo({ prompt, duration = 10, aspectRatio = '9:16', model, imageUrl }) {
   const effectiveModel = model || config.models.video;
   const payload = {
@@ -236,6 +284,7 @@ module.exports = {
   generateImage,
   getTask,
   generateVideo,
+  generateVideoFromReference,
   pollVideoTask,
   checkVideoStatus,
 };

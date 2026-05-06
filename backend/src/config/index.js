@@ -30,11 +30,19 @@ module.exports = {
   models: {
     image: process.env.IMAGE_MODEL || 'gpt-image-2',
     video: process.env.VIDEO_MODEL || 'kling-v2-6',
+    remake: process.env.REMAKE_MODEL || 'doubao-seedance-2-0',
     vision: process.env.VISION_MODEL || 'gpt-4o',
     chat: process.env.CHAT_MODEL || 'gpt-4o',
     // Separate model for scaling prompt/copy generation — use Sonnet for better quality
     scalingChat: process.env.SCALING_CHAT_MODEL || process.env.CHAT_MODEL || 'gpt-4o',
   },
+
+  // Public-facing backend URL — used to construct static file URLs for video clips
+  backendPublicUrl:
+    process.env.BACKEND_PUBLIC_URL ||
+    (process.env.RAILWAY_PUBLIC_DOMAIN
+      ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`
+      : 'http://localhost:4000'),
 
   upload: {
     maxFileSizeMB: parseInt(process.env.MAX_FILE_SIZE_MB || '50'),

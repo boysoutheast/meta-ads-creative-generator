@@ -10,6 +10,7 @@ const {
   batchGenerateVideos,
 } = require('../services/scalingService');
 const { analyzeImage, uploadImageToApimart, getTask } = require('../services/apimart');
+const { startRemakeJob, getJob } = require('../services/videoRemakeService');
 
 /**
  * POST /api/scale-video/analyze
@@ -154,6 +155,85 @@ router.get('/status/:taskId', async (req, res) => {
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
+});
+
+/**
+ * POST /api/scale-video/remake
+ * Upload source video + product info → start async remake job.
+ * Returns { remakeId } immediately; poll /remake/:remakeId for status.
+ *
+ * Cost: ~$0.044/sec of output. 21s output ≈ $0.92 per remake.
+ * Body (multipart/form-data):
+ *   file            — source video (mp4/mov)
+ *   productName     — required
+ *   productDescription (optional)
+ *   productPhotoBase64 (optional)
+ *   productPhotoMime   (optional)
+ *   aspectRatio     — '9:16' | '16:9' | '1:1' (default '9:16')
+ *   targetSeconds   — desired total output duration (default 21)
+ *   clipCount       — number of clips to extract (default 3)
+ */
+router.post('/remake', upload.single('file'), async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'Video file is required' });
+  if (!req.file.mimetype.startsWith('video/')) {
+    fs.unlink(req.file.path, () => {});
+    return res.status(400).json({ error: 'Only video files are accepted' });
+  }
+
+  const {
+    productName,
+    productDescription = '',
+    productPhotoBase64 = null,
+    productPhotoMime = 'image/jpeg',
+    aspectRatio = '9:16',
+    targetSeconds = 21,
+    clipCount = 3,
+  } = req.body;
+
+  if (!productName) {
+    fs.unlink(req.file.path, () => {});
+    return res.status(400).json({ error: 'productName is required' });
+  }
+
+  const job = startRemakeJob({
+    sourceVideoPath: req.file.path,
+    productName,
+    productDescription,
+    productPhotoBase64: productPhotoBase64 || null,
+    productPhotoMime,
+    aspectRatio,
+    targetSeconds: parseInt(targetSeconds) || 21,
+    clipCount: Math.min(parseInt(clipCount) || 3, 5),
+  });
+
+  const estimatedCost = `$${(Math.min(parseInt(targetSeconds) || 21, 35) * 0.044).toFixed(2)}`;
+
+  res.json({
+    remakeId: job.id,
+    status: job.status,
+    message: 'Remake dimulai. Poll /api/scale-video/remake/' + job.id + ' untuk status.',
+    estimatedCostUsd: estimatedCost,
+    estimatedMinutes: '4-8',
+  });
+});
+
+/**
+ * GET /api/scale-video/remake/:remakeId
+ * Poll status of a remake job.
+ */
+router.get('/remake/:remakeId', (req, res) => {
+  const job = getJob(req.params.remakeId);
+  if (!job) return res.status(404).json({ error: 'Remake job not found (expired or invalid ID)' });
+
+  res.json({
+    remakeId: job.id,
+    status: job.status,
+    progress: job.progress,
+    log: job.log,
+    videoUrl: job.videoUrl,
+    error: job.error,
+    createdAt: job.createdAt,
+  });
 });
 
 module.exports = router;
