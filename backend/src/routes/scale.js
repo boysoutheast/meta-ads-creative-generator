@@ -59,6 +59,133 @@ router.post('/analyze-winning', upload.single('file'), async (req, res) => {
   }
 });
 
+// ─── SSE streaming endpoint — same logic as /generate-variations but sends
+// progress events as each image completes so the frontend can show a live bar.
+router.post('/generate-variations-stream', async (req, res) => {
+  // SSE headers
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no'); // Disable nginx proxy buffering (Railway)
+  res.flushHeaders(); // Send headers immediately so the client can start reading
+
+  const send = (data) => {
+    if (res.writableEnded) return;
+    res.write(`data: ${JSON.stringify(data)}\n\n`);
+    if (typeof res.flush === 'function') res.flush();
+  };
+
+  const {
+    analysis,
+    productName,
+    productDescription = null,
+    selectedAngles = [],
+    aspectRatio = '1:1',
+    generateImages = false,
+    productPhotoBase64 = null,
+    productPhotoMime = 'image/jpeg',
+    winningAdBase64 = null,
+    winningAdMime = 'image/jpeg',
+    productPrice = null,
+    productPromoPrice = null,
+    masterImagePrompt = null,
+    imagesPerAngle = 1,
+    angleQuantities = {},
+  } = req.body;
+
+  if (!analysis || !productName) {
+    send({ type: 'error', message: 'analysis and productName are required' });
+    return res.end();
+  }
+
+  try {
+    // ── Phase 1: product photo analysis ──────────────────────────────────────
+    let productVisualDescription = null;
+    if (productPhotoBase64) {
+      send({ type: 'status', message: 'Menganalisis foto produk…' });
+      try {
+        productVisualDescription = await analyzeImage({
+          imageBase64: productPhotoBase64,
+          mimeType: productPhotoMime || 'image/jpeg',
+          prompt: 'Describe this product visually in detail: shape, color, packaging, label text, texture, size. Be specific for AI image generation. Under 80 words.',
+          maxTokens: 300,
+        });
+      } catch (e) {
+        console.warn('Product photo analysis failed (non-fatal):', e.message);
+      }
+    }
+
+    // ── Phase 2: upload product photo reference ───────────────────────────────
+    const referenceImageUrls = [];
+    if (generateImages && productPhotoBase64) {
+      send({ type: 'status', message: 'Menyiapkan referensi produk…' });
+      try {
+        const url = await uploadImageToApimart(productPhotoBase64, productPhotoMime || 'image/jpeg');
+        if (url) { referenceImageUrls.push(url); }
+      } catch (e) { console.warn('Product photo upload failed (non-fatal):', e.message); }
+    }
+
+    // ── Phase 3: generate angle concepts + copy ───────────────────────────────
+    send({ type: 'status', message: `Generating copy untuk ${selectedAngles.length || 20} angle…` });
+    const angles = await generateScalingAngles(
+      analysis, productName, selectedAngles, productVisualDescription, productDescription, masterImagePrompt
+    );
+    if (!angles.length) {
+      send({ type: 'error', message: 'Gagal generate scaling angles' });
+      return res.end();
+    }
+
+    const variationsWithPrompts = await generateVariationPrompts(
+      analysis, angles, productName, productVisualDescription,
+      { productPrice, productPromoPrice }, masterImagePrompt, productDescription
+    );
+
+    // ── Phase 4: image generation with live progress ──────────────────────────
+    if (!generateImages) {
+      send({
+        type: 'done',
+        productName, aspectRatio,
+        totalVariations: variationsWithPrompts.length,
+        variations: variationsWithPrompts,
+        productVisualDescription,
+        usedReferenceImages: 0,
+      });
+      return res.end();
+    }
+
+    // Calculate total images upfront so frontend can show the bar immediately
+    const totalImages = variationsWithPrompts
+      .filter((v) => v.imagePrompt)
+      .reduce((sum, v) => {
+        const qty = angleQuantities?.[v.angle];
+        return sum + (qty ? Math.min(Math.max(parseInt(qty) || 1, 1), 5) : Math.min(Math.max(parseInt(imagesPerAngle) || 1, 1), 5));
+      }, 0);
+
+    send({ type: 'start', totalImages, totalAngles: variationsWithPrompts.length });
+
+    const finalVariations = await batchGenerateImages(
+      variationsWithPrompts, aspectRatio, referenceImageUrls, imagesPerAngle, angleQuantities,
+      (completed, total, angle, headline) => {
+        send({ type: 'progress', completed, total, angle, headline });
+      }
+    );
+
+    send({
+      type: 'done',
+      productName, aspectRatio,
+      totalVariations: finalVariations.length,
+      variations: finalVariations,
+      productVisualDescription,
+      usedReferenceImages: referenceImageUrls.length,
+    });
+    res.end();
+  } catch (err) {
+    console.error('[generate-variations-stream] error:', err.message);
+    send({ type: 'error', message: err.message || 'Internal server error' });
+    res.end();
+  }
+});
+
 router.post('/generate-variations', async (req, res) => {
   const {
     analysis,

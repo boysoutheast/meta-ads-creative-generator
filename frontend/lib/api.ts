@@ -62,6 +62,73 @@ export async function analyzeWinningAd(file: File): Promise<AnalyzeWinningRespon
   return res.data
 }
 
+export type StreamEvent =
+  | { type: 'status'; message: string }
+  | { type: 'start'; totalImages: number; totalAngles: number }
+  | { type: 'progress'; completed: number; total: number; angle: string; headline: string }
+  | { type: 'done' } & GenerateVariationsResponse
+  | { type: 'error'; message: string }
+
+/**
+ * Streaming version of generateScalingVariations — uses SSE so the frontend
+ * receives live progress events as each image finishes.
+ */
+export async function generateScalingVariationsStream(
+  payload: Parameters<typeof generateScalingVariations>[0],
+  onEvent: (event: StreamEvent) => void,
+): Promise<GenerateVariationsResponse> {
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(), 600000) // 10 min
+
+  try {
+    const response = await fetch(`${API_URL}/scale/generate-variations-stream`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    })
+
+    if (!response.ok) {
+      const text = await response.text().catch(() => '')
+      throw new Error(`HTTP ${response.status}: ${text}`)
+    }
+
+    const reader = response.body!.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+    let result: GenerateVariationsResponse | null = null
+
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+
+      // SSE messages are separated by \n\n
+      const parts = buffer.split('\n\n')
+      buffer = parts.pop() ?? ''
+
+      for (const part of parts) {
+        for (const line of part.split('\n')) {
+          if (!line.startsWith('data: ')) continue
+          try {
+            const evt = JSON.parse(line.slice(6)) as StreamEvent
+            onEvent(evt)
+            if (evt.type === 'done') result = evt as unknown as GenerateVariationsResponse
+            if (evt.type === 'error') throw new Error(evt.message)
+          } catch (parseErr) {
+            if ((parseErr as Error).message && !(parseErr as Error).message.includes('JSON')) throw parseErr
+          }
+        }
+      }
+    }
+
+    if (!result) throw new Error('Stream ended unexpectedly without a result')
+    return result
+  } finally {
+    clearTimeout(timeoutId)
+  }
+}
+
 export async function generateScalingVariations(payload: {
   analysis: any
   productName: string

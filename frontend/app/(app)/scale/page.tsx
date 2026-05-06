@@ -22,9 +22,11 @@ import { CarouselPreview } from '@/components/ads/CarouselPreview'
 import {
   analyzeWinningAd,
   generateScalingVariations,
+  generateScalingVariationsStream,
   generateScaleCarousel,
   getProducts,
   type Product,
+  type StreamEvent,
 } from '@/lib/api'
 import { saveHistoryEntry } from '@/lib/history'
 import { compressImage } from '@/lib/utils'
@@ -89,6 +91,10 @@ export default function ScalePage() {
   const [winningAdBase64, setWinningAdBase64] = useState<string | null>(null)
   const [winningAdMime, setWinningAdMime] = useState<string>('image/jpeg')
   const [masterImagePrompt, setMasterImagePrompt] = useState<string | null>(null)
+
+  // Live generation progress
+  const [genStatus, setGenStatus] = useState<string>('')
+  const [genProgress, setGenProgress] = useState<{ completed: number; total: number; angle: string } | null>(null)
 
   // Carousel state — now lives in settings panel
   const [carouselOpen, setCarouselOpen] = useState(false)
@@ -159,13 +165,15 @@ export default function ScalePage() {
     setGenerating(true)
     setResult(null)
     setCarousel(null)
+    setGenStatus('')
+    setGenProgress(null)
     try {
       const photoDataUrl = selectedProduct.photos?.[0]
       const photoMatch = photoDataUrl?.match(/^data:([^;]+);base64,(.+)$/)
       const productPhotoMime = photoMatch?.[1] ?? undefined
       const productPhotoBase64 = photoMatch?.[2] ?? undefined
 
-      const resp = await generateScalingVariations({
+      const payload = {
         analysis: analysisResp.analysis,
         productName: selectedProduct.name,
         productDescription: selectedProduct.description,
@@ -180,12 +188,24 @@ export default function ScalePage() {
         productPromoPrice: selectedProduct.promoPrice ?? undefined,
         masterImagePrompt: masterImagePrompt ?? undefined,
         angleQuantities,
-      })
+      }
+
+      const handleStreamEvent = (evt: StreamEvent) => {
+        if (evt.type === 'status') setGenStatus(evt.message)
+        if (evt.type === 'start') setGenProgress({ completed: 0, total: evt.totalImages, angle: '' })
+        if (evt.type === 'progress') setGenProgress({ completed: evt.completed, total: evt.total, angle: evt.angle })
+      }
+
+      // Use streaming endpoint when generating images (shows live progress bar);
+      // fall back to plain axios call when generateImages is false (copy-only, instant)
+      const resp = generateImages
+        ? await generateScalingVariationsStream(payload, handleStreamEvent)
+        : await generateScalingVariations(payload)
 
       setResult(resp)
       setProductVisualDescription(resp.productVisualDescription ?? null)
 
-      const firstImg = resp.variations.find((v) => v.imageUrl)?.imageUrl
+      const firstImg = resp.variations.find((v: any) => v.imageUrl)?.imageUrl
       saveHistoryEntry({
         kind: 'scale',
         productName: selectedProduct.name,
@@ -196,6 +216,8 @@ export default function ScalePage() {
       setError(e?.response?.data?.error || e.message || 'Gagal generate variasi')
     } finally {
       setGenerating(false)
+      setGenProgress(null)
+      setGenStatus('')
     }
   }
 
@@ -462,21 +484,46 @@ export default function ScalePage() {
           {analysisResp && <AnalysisCard analysis={analysisResp.analysis} />}
 
           {generating && (
-            <div className="space-y-3">
-              <div className="flex flex-col gap-1">
-                <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  <span>
-                    Generating {selectedAngles.length} angle
-                    {totalImages > selectedAngles.length ? ` · ${totalImages} gambar total` : ''}…
-                  </span>
-                </div>
-                {generateImages && totalImages > 5 && (
-                  <p className="text-xs text-muted-foreground pl-6">
-                    Diproses 5 gambar sekaligus — estimasi {Math.ceil(totalImages / 5) * 1}-{Math.ceil(totalImages / 5) * 2} menit. Jangan tutup tab.
-                  </p>
+            <div className="space-y-4">
+              {/* ── Progress block ── */}
+              <div className="rounded-xl border bg-card p-5 space-y-4">
+                {genProgress ? (
+                  <>
+                    {/* Fraction + percentage */}
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2 text-sm font-medium">
+                        <Loader2 className="h-4 w-4 animate-spin text-primary" />
+                        <span>Generating gambar…</span>
+                      </div>
+                      <span className="text-sm font-semibold tabular-nums">
+                        {genProgress.completed} / {genProgress.total}
+                      </span>
+                    </div>
+                    {/* Progress bar */}
+                    <div className="h-2.5 w-full overflow-hidden rounded-full bg-muted">
+                      <div
+                        className="h-full rounded-full bg-primary transition-all duration-500 ease-out"
+                        style={{ width: `${genProgress.total > 0 ? Math.round(genProgress.completed / genProgress.total * 100) : 0}%` }}
+                      />
+                    </div>
+                    {/* Current angle */}
+                    <div className="flex items-center justify-between text-xs text-muted-foreground">
+                      {genProgress.angle ? (
+                        <span>Angle: <span className="font-medium text-foreground">{genProgress.angle.replace(/_/g, ' ')}</span></span>
+                      ) : <span>Memulai…</span>}
+                      <span>{genProgress.total > 0 ? Math.round(genProgress.completed / genProgress.total * 100) : 0}%</span>
+                    </div>
+                  </>
+                ) : (
+                  /* Pre-image phase — show status text */
+                  <div className="flex items-center gap-3 text-sm text-muted-foreground">
+                    <Loader2 className="h-4 w-4 animate-spin text-primary shrink-0" />
+                    <span>{genStatus || `Generating ${selectedAngles.length} angle…`}</span>
+                  </div>
                 )}
               </div>
+
+              {/* Skeleton cards */}
               <div className="grid gap-4 sm:grid-cols-2">
                 {Array.from({ length: Math.min(selectedAngles.length || 4, 8) }).map((_, i) => (
                   <Card key={i}>

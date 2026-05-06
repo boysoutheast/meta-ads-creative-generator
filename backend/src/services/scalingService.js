@@ -1006,7 +1006,7 @@ function makeSemaphore(limit) {
   });
 }
 
-async function batchGenerateImages(variations, aspectRatio = '1:1', referenceImageUrls = [], imagesPerAngle = 1, angleQuantities = {}) {
+async function batchGenerateImages(variations, aspectRatio = '1:1', referenceImageUrls = [], imagesPerAngle = 1, angleQuantities = {}, onProgress = null) {
   const sizeMap = {
     '1:1': '1024x1024',
     '9:16': '1024x1536',
@@ -1017,6 +1017,16 @@ async function batchGenerateImages(variations, aspectRatio = '1:1', referenceIma
   const globalCount = Math.min(Math.max(parseInt(imagesPerAngle) || 1, 1), 5);
 
   const filteredVariations = variations.filter((v) => v.imagePrompt);
+
+  // Pre-calculate total images so progress reporting can show X/Y immediately
+  const totalImages = filteredVariations.reduce((sum, v) => {
+    const count = (angleQuantities && angleQuantities[v.angle])
+      ? Math.min(Math.max(parseInt(angleQuantities[v.angle]) || 1, 1), 5)
+      : globalCount;
+    return sum + count;
+  }, 0);
+
+  let completed = 0;
 
   // Limit concurrent image API calls to 5 — prevents overwhelming the queue
   // and avoids Express/Railway request timeouts when running 20 angles at once.
@@ -1031,11 +1041,16 @@ async function batchGenerateImages(variations, aspectRatio = '1:1', referenceIma
       // Each angle's N images also go through the semaphore individually
       return Promise.allSettled(
         Array.from({ length: count }, () =>
-          run(() => generateImage({
-            prompt: v.imagePrompt,
-            size,
-            referenceImages: referenceImageUrls.length > 0 ? referenceImageUrls : undefined,
-          }))
+          run(async () => {
+            const result = await generateImage({
+              prompt: v.imagePrompt,
+              size,
+              referenceImages: referenceImageUrls.length > 0 ? referenceImageUrls : undefined,
+            });
+            completed++;
+            if (onProgress) onProgress(completed, totalImages, v.angle, v.headline || '');
+            return result;
+          })
         )
       );
     })
