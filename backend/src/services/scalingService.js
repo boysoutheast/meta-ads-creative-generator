@@ -87,6 +87,42 @@ const SCALING_ANGLES = {
   },
 };
 
+// ─── detectPersona ───────────────────────────────────────────────────────────
+// Reads product description + name and returns an appropriate character
+// descriptor for image generation. Prevents hardcoded "Indonesian woman 25-35yo"
+// from being used for products targeting elderly, diabetic, male, or child audiences.
+
+function detectPersona(productDescription = '', productName = '') {
+  const text = (productDescription + ' ' + productName).toLowerCase();
+
+  // Diabetes / blood sugar — 50-60yo, male or female
+  if (/diabe[st]|diabetik|gula darah|diabetes/.test(text)) {
+    return 'Indonesian person (male or female, random), 50-65 years old, with visibly dry and rough skin on hands and feet — relatable, warm, everyday look';
+  }
+  // Elderly / senior
+  if (/lansia|manula|nenek|kakek|elderly|senior|orang tua/.test(text)) {
+    return 'Indonesian elderly person (male or female), 60-70 years old, warm and relatable';
+  }
+  // Baby / toddler products → show the mother
+  if (/bayi|baby|balita|newborn|infant/.test(text)) {
+    return 'Indonesian mother, 25-35 years old, caring and gentle expression';
+  }
+  // Clearly male-targeted
+  if (/\bpria\b|laki-laki|men\'s|\bmen\b|\bmale\b|cowok|beard|janggut|cukur/.test(text) && !/wanita|perempuan|ibu/.test(text)) {
+    return 'Indonesian man, 25-40 years old, Southeast Asian features';
+  }
+  // Teen / young adult
+  if (/remaja|teen|teenage|mahasis|siswa|gen ?z/.test(text)) {
+    return 'Indonesian young person (male or female), 18-25 years old, Southeast Asian features';
+  }
+  // Pregnancy / maternity
+  if (/hamil|ibu hamil|pregnant|maternity/.test(text)) {
+    return 'Indonesian pregnant woman, 25-35 years old, gentle and glowing expression';
+  }
+  // Default — general skincare / beauty
+  return 'Indonesian woman, 25-35 years old, Southeast Asian features';
+}
+
 // ─── analyzeWinningAd ────────────────────────────────────────────────────────
 // Extract 7 deep dimensions — not just surface labels.
 // This is the DNA extraction step that makes concept translation possible.
@@ -261,10 +297,13 @@ ${masterImagePrompt}
   const isHandHolding = compositionType === 'hand_holding';
   const isProductOnly = compositionType === 'product_only';
 
+  // Derive persona from product description — no hardcoded demographics
+  const anglesPersona = detectPersona(productDescription || '', productName);
+
   const rule3 = hasModel
-    ? `3. sceneDetails dan imageScenario HARUS menampilkan perempuan Indonesia, Southeast Asian features, relatable everyday person. Intensitas emosional (ekspresi, body language) HARUS setara dengan winning ad — hook/problem angle → ekspresi distressed/frustrated. Resolution angle → ekspresi lega/bahagia.`
+    ? `3. sceneDetails dan imageScenario HARUS menampilkan karakter yang SESUAI dengan target audience produk ini. Gunakan persona berikut secara TEPAT: "${anglesPersona}". JANGAN ganti dengan perempuan muda jika persona bukan itu. Intensitas emosional (ekspresi, body language) HARUS setara dengan winning ad — hook/problem angle → ekspresi distressed/frustrated. Resolution angle → ekspresi lega/bahagia.`
     : isHandHolding
-    ? `3. Winning ad ini TIDAK menampilkan model penuh — hanya tangan memegang produk. sceneDetails dan imageScenario HARUS mengikuti compositionType: 'hand_holding'. Deskripsikan tangan yang memegang [PRODUCT] di setting yang relevan. JANGAN tambahkan wajah, badan, atau model manusia penuh.`
+    ? `3. Winning ad ini TIDAK menampilkan model penuh — hanya tangan memegang produk. sceneDetails dan imageScenario HARUS mengikuti compositionType: 'hand_holding'. Deskripsikan tangan yang memegang produk di setting yang relevan. JANGAN tambahkan wajah, badan, atau model manusia penuh.`
     : `3. Winning ad ini TIDAK menampilkan manusia sama sekali — ini adalah iklan produk murni (product_only). sceneDetails dan imageScenario HARUS hanya menampilkan produk, background, dan elemen dekoratif. JANGAN ada manusia, tangan, atau model sama sekali.`;
 
   const systemPrompt = `Kamu adalah Meta Ads creative director kelas dunia yang ahli dalam "concept translation" — proses mengambil DNA dari satu iklan winning dan mentranslate-nya secara presisi ke produk yang berbeda. Ini bukan tentang meniru secara visual, tapi mengambil MEKANISME yang membuat iklan itu berhasil (hook, emosi, alur cerita) dan mengaplikasikannya ke konteks produk baru.
@@ -292,7 +331,7 @@ LANGKAH 1 — DECODE: Baca ulang "Cetak Biru Replikasi" dan "Hook" dari iklan wi
 
 LANGKAH 2 — ADAPT: Terjemahkan mekanisme itu ke konteks produk target. Pertahankan: hook mechanism (cara mencuri atensi), emotional truth (jenis rasa takut/harapan), narrative arc (setup→tension→resolution). Ganti: skenario, objek, referensi spesifik → sesuaikan ke produk ini. WAJIB sebutkan ingredient/klaim spesifik dari deskripsi produk.
 
-LANGKAH 3 — VISUALIZE: Buat scene gambar yang PARALEL dengan winning ad. Jika winning ad menampilkan seorang frustrasi dikelilingi props masalahnya → gambar harus menampilkan perempuan Indonesia dengan ekspresi sama, dikelilingi props masalah yang relevan ke produk ini. SAMA komposisi dan intensitas emosinya, BEDA konteksnya. Embed visual produk yang sudah dideskripsikan ke dalam scene.
+LANGKAH 3 — VISUALIZE: Buat scene gambar yang PARALEL dengan winning ad. Jika winning ad menampilkan seorang frustrasi dikelilingi props masalahnya → gambar harus menampilkan karakter dengan persona "${anglesPersona}" dengan ekspresi sama, dikelilingi props masalah yang relevan ke produk ini. SAMA komposisi dan intensitas emosinya, BEDA konteksnya. Embed visual produk yang sudah dideskripsikan ke dalam scene.
 
 Untuk tiap angle, return objek JSON dengan field BERIKUT (isi sedetail mungkin, minimum 2-3 kalimat untuk translatedConcept):
 {
@@ -308,10 +347,10 @@ Untuk tiap angle, return objek JSON dengan field BERIKUT (isi sedetail mungkin, 
 
   "cta": "CTA max 4 kata, action-oriented — BAHASA INDONESIA",
 
-  "imageScenario": "Deskripsikan scene gambar dalam Bahasa Indonesia (3-4 kalimat): siapa orangnya (perempuan Indonesia, usia berapa, sedang apa), di mana, ekspresi wajah dan bahasa tubuh (HARUS cerminkan intensitas emosional winning ad), objek/props apa yang ada di sekitarnya yang menceritakan masalah/solusi, dan bagaimana produk ini terlihat dalam scene tersebut.",
+  "imageScenario": "Deskripsikan scene gambar dalam Bahasa Indonesia (3-4 kalimat): siapa orangnya — GUNAKAN persona ini: '${anglesPersona}' — sedang apa, di mana, ekspresi wajah dan bahasa tubuh (HARUS cerminkan intensitas emosional winning ad), objek/props apa yang ada di sekitarnya yang menceritakan masalah/solusi, dan bagaimana produk ini terlihat dalam scene tersebut.",
 
   "sceneDetails": {
-    "emotionalMoment": "1-2 sentences: what the Indonesian woman is doing, her EXACT expression and body language. Must match the angle's emotional truth (frustrated/distressed for problem angles, relieved/happy for solution angles).",
+    "emotionalMoment": "1-2 sentences: describe the person ('${anglesPersona}') and their EXACT expression and body language. Must match the angle's emotional truth (frustrated/distressed for problem angles, relieved/happy for solution angles). NEVER describe as young woman unless that is the persona.",
     "setting": "Specific location and atmosphere (e.g. 'bathroom mirror, soft morning daylight, clean tiles')",
     "keyProps": "List 3-5 specific objects in the scene that tell the story — parallel to winning ad props but relevant to this product context",
     "beforeState": "[before_after angle only] Visual description of the problem state: specific skin condition, texture, expression",
@@ -359,7 +398,7 @@ function truncateForImage(text, maxWords = 5) {
 // Composition-aware scene block. Respects the winning ad's compositionType so
 // we never force a human model when the reference had none.
 
-function buildMainScene(compositionType, emotional, setting, props, prodDesc, angleContext = '') {
+function buildMainScene(compositionType, emotional, setting, props, prodDesc, angleContext = '', persona = null) {
   const ct = compositionType || 'model_with_product';
 
   if (ct === 'product_only') {
@@ -379,8 +418,9 @@ function buildMainScene(compositionType, emotional, setting, props, prodDesc, an
       `Props nearby: ${props || 'minimal'}.`;
   }
 
-  // model_with_product (default)
-  return `MAIN SCENE: Indonesian woman, Southeast Asian features, ${emotional}. ` +
+  // model_with_product — use detected persona, never hardcode young woman
+  const personaDesc = persona || 'Indonesian woman, 25-35 years old, Southeast Asian features';
+  return `MAIN SCENE: ${personaDesc}, ${emotional}. ` +
     `Setting: ${setting}. ` +
     `Props: ${props}. ` +
     `${angleContext}`;
@@ -390,12 +430,14 @@ function buildMainScene(compositionType, emotional, setting, props, prodDesc, an
 // Generates a detailed, composition-aware image prompt for each carousel slide.
 // Output quality mirrors buildAngleImagePrompt — not the old generic 80-120 word string.
 
-function buildCarouselSlidePrompt(slide, winningAnalysis, productName, productVisualDescription) {
+function buildCarouselSlidePrompt(slide, winningAnalysis, productName, productVisualDescription, productDescription = null) {
   const compositionType = winningAnalysis.compositionType || 'model_with_product';
   const palette    = (winningAnalysis.colorPalette || ['#FADBD8', '#A93226', '#D5DBDB']).join(', ');
   const lighting   = winningAnalysis.lighting   || 'warm natural';
   const mood       = winningAnalysis.mood       || 'engaging';
   const visualStyle = winningAnalysis.visualStyle || 'editorial photography';
+  // Derive persona from product description — prevents hardcoded young woman
+  const carouselPersona = detectPersona(productDescription || '', productName);
 
   const imgHeadline = truncateForImage(slide.headline || '', 6);
   const imgSubtext  = truncateForImage(slide.subtext  || '', 6);
@@ -418,7 +460,7 @@ function buildCarouselSlidePrompt(slide, winningAnalysis, productName, productVi
     if (compositionType === 'hand_holding') {
       return `MAIN VISUAL: A realistic hand holding ${prodDesc}. ${context} No face or full body visible. Grip consistent with reference ad.`;
     }
-    return `MAIN VISUAL: Indonesian woman, Southeast Asian features. ${context}`;
+    return `MAIN VISUAL: ${carouselPersona}. ${context}`;
   };
 
   const type = slide.type || 'benefit';
@@ -451,7 +493,7 @@ ${quality}`;
   // ── CTA slide ──────────────────────────────────────────────────────────────
   if (type === 'cta') {
     const ctaContext = compositionType === 'model_with_product'
-      ? `Happy, satisfied, confident expression — holding ${prodDesc}. This is the resolution moment — she got the result.`
+      ? `${carouselPersona} — happy, satisfied, confident expression — holding ${prodDesc}. This is the resolution moment — they got the result.`
       : `${prodDesc} shown as the final hero. Bright, positive, achievement atmosphere.`;
     const ctaScene = buildCarouselScene(ctaContext);
     return `High-converting carousel CTA slide for Meta Ads. ${visualStyle} style.
@@ -473,7 +515,7 @@ ${quality}`;
 
   // ── Benefit slide (default) ─────────────────────────────────────────────────
   const benefitContext = compositionType === 'model_with_product'
-    ? `Demonstrating or experiencing the specific benefit: "${slide.subtext || 'visible product benefit'}". Expression is authentic and relatable — she feels the result.`
+    ? `${carouselPersona} — demonstrating or experiencing the specific benefit: "${slide.subtext || 'visible product benefit'}". Expression is authentic and relatable — they feel the result.`
     : `Positioned to visually communicate the benefit: "${slide.subtext || 'product benefit'}". Product is the evidence.`;
   const benefitScene = buildCarouselScene(benefitContext);
   // Extract 1-2 word benefit label from headline
@@ -500,8 +542,9 @@ ${quality}`;
 // Angle-specific instructions that are LAYERED ON TOP of the masterImagePrompt base.
 // Used when masterImagePrompt is available (primary path).
 
-function buildAngleLayer(angle, sd, emotional, setting, props, productPricing, compositionType = 'model_with_product') {
+function buildAngleLayer(angle, sd, emotional, setting, props, productPricing, compositionType = 'model_with_product', persona = null) {
   const fmt = (n) => 'Rp ' + Number(n).toLocaleString('id-ID');
+  const personaDesc = persona || 'Indonesian woman, 25-35 years old, Southeast Asian features';
   // Build the scene block respecting compositionType — never force model when reference had none
   const sceneBlock = (context = '') => {
     if (compositionType === 'product_only') {
@@ -510,7 +553,7 @@ function buildAngleLayer(angle, sd, emotional, setting, props, productPricing, c
     if (compositionType === 'hand_holding') {
       return `SCENE: Hand holding product. No face or full body. Setting: ${setting}. Props: ${props}.`;
     }
-    return `SCENE: Indonesian woman, ${emotional}${context ? ' — ' + context : ''}. Setting: ${setting}. Props: ${props}.`;
+    return `SCENE: ${personaDesc}, ${emotional}${context ? ' — ' + context : ''}. Setting: ${setting}. Props: ${props}.`;
   };
 
   switch (angle.angle) {
@@ -585,12 +628,14 @@ ${sceneBlock('intrigued/curious')}`;
 // Per-angle structured templates — code controls layout/structure,
 // GPT fills in scene details. No more free-form imagePromptEN from GPT.
 
-function buildAngleImagePrompt(angle, winningAnalysis, productName, productVisualDescription, productPricing = {}, masterImagePrompt = null) {
+function buildAngleImagePrompt(angle, winningAnalysis, productName, productVisualDescription, productPricing = {}, masterImagePrompt = null, productDescription = null) {
   const palette    = (winningAnalysis.colorPalette || ['#FADBD8', '#A93226', '#D5DBDB']).join(', ');
   const lighting   = winningAnalysis.lighting  || 'warm natural';
   const mood       = winningAnalysis.mood      || 'engaging';
   // Composition type from winning ad — drives whether scene has model, hand, or product-only
   const compositionType = winningAnalysis.compositionType || 'model_with_product';
+  // Persona derived from product description — prevents hardcoded young woman for elderly/diabetic/male products
+  const persona = detectPersona(productDescription || '', productName);
   // Full copy for card display — only shortened versions used inside image prompts
   const headline   = angle.headline   || '';
   const sub        = angle.subheadline || '';
@@ -626,7 +671,7 @@ function buildAngleImagePrompt(angle, winningAnalysis, productName, productVisua
       .replace(/\[CTA\]/g,      imgCta)
       .replace(/\[PRODUCT\]/g,  prodDesc);
 
-    const angleLayer = buildAngleLayer(angle, sd, emotional, setting, props, productPricing, compositionType);
+    const angleLayer = buildAngleLayer(angle, sd, emotional, setting, props, productPricing, compositionType, persona);
     return `${base}\n\nANGLE-SPECIFIC LAYER (${(angle.angle || '').toUpperCase()}):\n${angleLayer}\n\n${textAccuracy}\n${bpom}\n${refNote}\n${quality}`;
   }
 
@@ -641,12 +686,12 @@ function buildAngleImagePrompt(angle, winningAnalysis, productName, productVisua
         ? `LEFT "Sebelum": ${prodDesc} in a dull/problem context — ${beforeState}. Muted slightly desaturated lighting. "Sebelum" label pill top-left.`
         : compositionType === 'hand_holding'
         ? `LEFT "Sebelum": A hand presenting ${prodDesc} against a dim/problem background — ${beforeState}. Muted lighting. "Sebelum" label pill top-left.`
-        : `LEFT "Sebelum": Indonesian woman 25-35yo, ${sd.emotionalMoment || 'concerned/frustrated expression'}. Close-up shows ${beforeState}. Muted warm lighting. "Sebelum" label pill top-left.`;
+        : `LEFT "Sebelum": ${persona}, ${sd.emotionalMoment || 'concerned/frustrated expression'}. Close-up shows ${beforeState}. Muted warm lighting. "Sebelum" label pill top-left.`;
       const afterScene = compositionType === 'product_only'
         ? `RIGHT "Sesudah": ${prodDesc} in a bright/positive context — ${afterState}. Bright warm lighting, glow effect. "Sesudah" label pill top-right.`
         : compositionType === 'hand_holding'
         ? `RIGHT "Sesudah": A hand presenting ${prodDesc} against a bright/warm background — ${afterState}. Brighter saturated lighting. "Sesudah" label pill top-right.`
-        : `RIGHT "Sesudah": Same Indonesian woman, smiling softly, relaxed and happy. Close-up shows ${afterState}. Brighter, warmer lighting. Sparkle/glow effect. "Sesudah" label pill top-right.`;
+        : `RIGHT "Sesudah": Same ${persona}, smiling softly, relaxed and relieved. Close-up shows ${afterState}. Brighter, warmer lighting. Sparkle/glow effect. "Sesudah" label pill top-right.`;
       return `A clean, modern Meta Ads image in editorial split-screen style. Background is soft pink-cream gradient (#FFF0F5 to #F5F0E8). Square 1:1 format.
 TYPOGRAPHY RENDERED ON IMAGE (must be perfectly legible, crisp, bold, no blur):
 - Top center: dark pink (#D4547A) rounded pill badge with white text "Sebelum vs Sesudah"
@@ -667,7 +712,7 @@ ${quality}`;
 
     // ── FOMO / URGENCY ───────────────────────────────────────────────────────
     case 'fomo': {
-      const fomoScene = buildMainScene(compositionType, emotional, setting, props, prodDesc, 'excited/urgent energy');
+      const fomoScene = buildMainScene(compositionType, emotional, setting, props, prodDesc, 'excited/urgent energy', persona);
       return `A clean, modern Meta Ads image in editorial split layout. Background soft cream/off-white (#FFFBF5). Square 1:1 format.
 LEFT 55%: Large bold typography block on cream background.
 RIGHT 45%: Photorealistic scene with thin gradient divider.
@@ -687,7 +732,7 @@ ${quality}`;
 
     // ── PROBLEM AGITATE ──────────────────────────────────────────────────────
     case 'problem_agitate': {
-      const problemScene = buildMainScene(compositionType, emotional, setting, props, prodDesc, 'distressed/frustrated expression — problem clearly visible');
+      const problemScene = buildMainScene(compositionType, emotional, setting, props, prodDesc, 'distressed/frustrated expression — problem clearly visible', persona);
       return `A clean, modern Meta Ads image in editorial split layout. Background soft cream/light (#FFF8F5). Square 1:1 format.
 LEFT 55%: Large bold typography block on light background.
 RIGHT 45%: Emotional problem scene with thin divider.
@@ -706,7 +751,7 @@ ${quality}`;
 
     // ── CURIOSITY GAP ────────────────────────────────────────────────────────
     case 'curiosity_gap': {
-      const curiosityScene = buildMainScene(compositionType, emotional, setting, props, prodDesc, 'intrigued/curious expression');
+      const curiosityScene = buildMainScene(compositionType, emotional, setting, props, prodDesc, 'intrigued/curious expression', persona);
       return `A clean, modern Meta Ads image in editorial split layout. Background soft cream (#FFFBF5). Square 1:1 format.
 LEFT 55%: Bold typography with mystery/question hook on cream background.
 RIGHT 45%: Intriguing scene.
@@ -726,7 +771,7 @@ ${quality}`;
 
     // ── SOCIAL PROOF ─────────────────────────────────────────────────────────
     case 'social_proof': {
-      const socialScene = buildMainScene(compositionType, emotional, setting, props, prodDesc, 'happy, satisfied, confident');
+      const socialScene = buildMainScene(compositionType, emotional, setting, props, prodDesc, 'happy, satisfied, confident', persona);
       return `A clean, modern testimonial-style Meta Ads image. Soft pink-cream background (#FFF0F5). Square 1:1 format.
 TOP SECTION: Star rating badge + headline.
 CENTER: Scene with satisfied product showcase.
@@ -747,7 +792,7 @@ ${quality}`;
 
     // ── TUTORIAL / HOW-TO ────────────────────────────────────────────────────
     case 'tutorial': {
-      const tutorialScene = buildMainScene(compositionType, emotional, setting, props, prodDesc, 'calm, instructional, demonstrating use');
+      const tutorialScene = buildMainScene(compositionType, emotional, setting, props, prodDesc, 'calm, instructional, demonstrating use', persona);
       return `A clean, modern informational Meta Ads image with step-by-step layout. Soft cream/white background. Square 1:1 format.
 TOP: Teal badge + headline.
 MIDDLE: 3-step numbered card row.
@@ -782,7 +827,7 @@ ${quality}`;
           : hasPrice
             ? `- Product price (large bold dark pink #D4547A): "${origPrice}"`
             : `- DO NOT invent or show any price numbers. Show a value/savings message instead.`;
-      const priceScene = buildMainScene(compositionType, emotional, setting, props, prodDesc, 'pleased/satisfied with the value');
+      const priceScene = buildMainScene(compositionType, emotional, setting, props, prodDesc, 'pleased/satisfied with the value', persona);
       return `A clean, modern value-proposition Meta Ads image in editorial split layout. Soft cream background (#FFFBF5). Square 1:1 format.
 LEFT 55%: Price comparison typography block on cream background.
 RIGHT 45%: Product showcase scene.
@@ -802,7 +847,7 @@ ${quality}`;
 
     // ── AUTHORITY / EXPERT ───────────────────────────────────────────────────
     case 'authority': {
-      const authorityScene = buildMainScene(compositionType, emotional, setting, props, prodDesc, 'confident, professional, trustworthy');
+      const authorityScene = buildMainScene(compositionType, emotional, setting, props, prodDesc, 'confident, professional, trustworthy', persona);
       return `A clean, modern authority/expert Meta Ads image in editorial split layout. Professional, trustworthy aesthetic. Soft cream/light blue-white background. Square 1:1 format.
 LEFT 55%: Credentials + headline typography on clean background.
 RIGHT 45%: Confident professional scene.
@@ -821,7 +866,7 @@ ${quality}`;
 
     // ── DEFAULT FALLBACK ─────────────────────────────────────────────────────
     default: {
-      const defaultScene = buildMainScene(compositionType, emotional, setting, props, prodDesc);
+      const defaultScene = buildMainScene(compositionType, emotional, setting, props, prodDesc, '', persona);
       return `A clean, modern Meta Ads image in editorial split layout. Soft cream (#FFFBF5) background. Square 1:1 format.
 LEFT 55%: Large bold typography block on cream background.
 RIGHT 45%: Scene with thin gradient divider.
@@ -844,9 +889,9 @@ ${quality}`;
 // masterImagePrompt: when provided (from analyze step), used as base; angle-specific
 // layers are appended on top rather than using the hardcoded template switch.
 
-async function generateVariationPrompts(winningAnalysis, angles, productName, productVisualDescription = null, productPricing = {}, masterImagePrompt = null) {
+async function generateVariationPrompts(winningAnalysis, angles, productName, productVisualDescription = null, productPricing = {}, masterImagePrompt = null, productDescription = null) {
   return angles.map((angle) => {
-    const imagePrompt = buildAngleImagePrompt(angle, winningAnalysis, productName, productVisualDescription, productPricing, masterImagePrompt);
+    const imagePrompt = buildAngleImagePrompt(angle, winningAnalysis, productName, productVisualDescription, productPricing, masterImagePrompt, productDescription);
     return { ...angle, imagePrompt };
   });
 }

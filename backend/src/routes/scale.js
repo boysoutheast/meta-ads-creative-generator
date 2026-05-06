@@ -119,7 +119,7 @@ router.post('/generate-variations', async (req, res) => {
   );
   if (!angles.length) return res.status(500).json({ error: 'Failed to generate scaling angles' });
 
-  const variationsWithPrompts = await generateVariationPrompts(analysis, angles, productName, productVisualDescription, { productPrice, productPromoPrice }, masterImagePrompt);
+  const variationsWithPrompts = await generateVariationPrompts(analysis, angles, productName, productVisualDescription, { productPrice, productPromoPrice }, masterImagePrompt, productDescription);
 
   let finalVariations = variationsWithPrompts;
   if (generateImages) {
@@ -209,10 +209,9 @@ Return JSON array dengan tepat ${clampedSlideCount} item, tanpa markdown:
   }
 
   // Build detailed composition-aware image prompts for each slide
-  const prodVisualDesc = productVisualDescription || null;
   slides = slides.map((slide) => ({
     ...slide,
-    imagePrompt: buildCarouselSlidePrompt(slide, analysis, productName, prodVisualDesc),
+    imagePrompt: buildCarouselSlidePrompt(slide, analysis, productName, productVisualDescription || null, productDescription || null),
   }));
 
   if (generateImages) {
