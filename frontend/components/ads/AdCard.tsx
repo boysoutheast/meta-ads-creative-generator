@@ -1,7 +1,7 @@
 'use client'
 import { useRef, useState } from 'react'
 import html2canvas from 'html2canvas'
-import { Download, Copy, Check, ImageIcon, ChevronLeft, ChevronRight } from 'lucide-react'
+import { Download, Copy, Check, ImageIcon, ChevronLeft, ChevronRight, ClipboardCopy } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -23,91 +23,114 @@ export interface AdCardData {
 }
 
 export function AdCard({ data, index }: { data: AdCardData; index: number }) {
-  const [copied, setCopied]       = useState(false)
-  const [adPreview, setAdPreview] = useState(false)
+  const [copied, setCopied]         = useState(false)
+  const [promptCopied, setPromptCopied] = useState(false)
+  const [adPreview, setAdPreview]   = useState(false)
   const [downloading, setDownloading] = useState(false)
-  const [imgIndex, setImgIndex]   = useState(0)
+  const [downloadingAll, setDownloadingAll] = useState(false)
+  const [imgIndex, setImgIndex]     = useState(0)
   const previewRef = useRef<HTMLDivElement>(null)
 
-  // Merge imageUrls array with legacy single imageUrl into one unified list
+  // Merge imageUrls array with legacy single imageUrl
   const allImages: string[] = data.imageUrls && data.imageUrls.length > 0
     ? data.imageUrls
     : data.imageUrl ? [data.imageUrl] : []
-  const hasImage = allImages.length > 0
+  const hasImage    = allImages.length > 0
   const activeImageUrl = allImages[imgIndex] || null
   const hasMultiple = allImages.length > 1
 
+  // ── Copy copy-text ──────────────────────────────────────────────────────────
   const copyText = () => {
     const txt = [data.headline, data.subheadline, data.bodyText, data.cta && `CTA: ${data.cta}`]
-      .filter(Boolean)
-      .join('\n\n')
+      .filter(Boolean).join('\n\n')
     navigator.clipboard.writeText(txt)
     setCopied(true)
     setTimeout(() => setCopied(false), 1500)
   }
 
+  // ── Copy image prompt ───────────────────────────────────────────────────────
+  const copyPrompt = () => {
+    if (!data.imagePrompt) return
+    navigator.clipboard.writeText(data.imagePrompt)
+    setPromptCopied(true)
+    setTimeout(() => setPromptCopied(false), 1500)
+  }
+
+  // ── Download single image ───────────────────────────────────────────────────
+  const downloadSingle = async (url: string, suffix = '') => {
+    try {
+      const res = await fetch(url, { mode: 'cors' })
+      const blob = await res.blob()
+      const blobUrl = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = blobUrl
+      link.download = `ad-${data.badge || 'variation'}${suffix}-${Date.now()}.jpg`
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+      URL.revokeObjectURL(blobUrl)
+    } catch {
+      window.open(url, '_blank')
+    }
+  }
+
+  // ── Download active image (or preview canvas) ───────────────────────────────
   const handleDownload = async () => {
     if (!activeImageUrl) return
     setDownloading(true)
     try {
       if (adPreview && previewRef.current) {
         const canvas = await html2canvas(previewRef.current, {
-          useCORS: true,
-          allowTaint: true,
-          scale: 2,
-          backgroundColor: null,
+          useCORS: true, allowTaint: true, scale: 2, backgroundColor: null,
         })
         const link = document.createElement('a')
         link.download = `ad-preview-${data.badge || 'variation'}-${imgIndex + 1}-${Date.now()}.jpg`
         link.href = canvas.toDataURL('image/jpeg', 0.95)
         link.click()
       } else {
-        try {
-          const res = await fetch(activeImageUrl, { mode: 'cors' })
-          const blob = await res.blob()
-          const blobUrl = URL.createObjectURL(blob)
-          const link = document.createElement('a')
-          link.href = blobUrl
-          link.download = `ad-${data.badge || 'variation'}-${imgIndex + 1}-${Date.now()}.jpg`
-          document.body.appendChild(link)
-          link.click()
-          document.body.removeChild(link)
-          URL.revokeObjectURL(blobUrl)
-        } catch {
-          window.open(activeImageUrl, '_blank')
-        }
+        await downloadSingle(activeImageUrl, `-${imgIndex + 1}`)
       }
-    } catch {
-      if (activeImageUrl) window.open(activeImageUrl, '_blank')
     } finally {
       setDownloading(false)
     }
   }
 
+  // ── Download all images for this angle ─────────────────────────────────────
+  const handleDownloadAll = async () => {
+    if (allImages.length < 2) return
+    setDownloadingAll(true)
+    try {
+      for (let i = 0; i < allImages.length; i++) {
+        await downloadSingle(allImages[i], `-${i + 1}of${allImages.length}`)
+        // Small delay between downloads to avoid browser tab overwhelm
+        if (i < allImages.length - 1) await new Promise((r) => setTimeout(r, 300))
+      }
+    } finally {
+      setDownloadingAll(false)
+    }
+  }
+
+  // ── Badge label ─────────────────────────────────────────────────────────────
+  const badgeLabel = (data.badge || '').replace(/_/g, ' ')
+
   return (
     <Card className="overflow-hidden">
-      {/* ── Top bar: preview toggle + image counter ── */}
-      {hasImage && (
-        <div className="flex items-center justify-between px-3 pt-2 pb-1">
-          {hasMultiple ? (
-            <div className="flex items-center gap-1.5">
-              <button
-                onClick={() => setImgIndex((i) => Math.max(0, i - 1))}
-                disabled={imgIndex === 0}
-                className="flex h-6 w-6 items-center justify-center rounded-full border bg-background text-muted-foreground disabled:opacity-30 hover:bg-muted"
-              >
-                <ChevronLeft className="h-3.5 w-3.5" />
-              </button>
-              <span className="text-xs text-muted-foreground">{imgIndex + 1}/{allImages.length}</span>
-              <button
-                onClick={() => setImgIndex((i) => Math.min(allImages.length - 1, i + 1))}
-                disabled={imgIndex === allImages.length - 1}
-                className="flex h-6 w-6 items-center justify-center rounded-full border bg-background text-muted-foreground disabled:opacity-30 hover:bg-muted"
-              >
-                <ChevronRight className="h-3.5 w-3.5" />
-              </button>
-            </div>
-          ) : <div />}
+
+      {/* ── Top bar: angle badge + preview toggle ── */}
+      <div className="flex items-center justify-between px-3 pt-2.5 pb-1">
+        <div className="flex items-center gap-1.5">
+          {data.badge && (
+            <span className="rounded-full bg-orange-100 px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-orange-700">
+              {badgeLabel}
+            </span>
+          )}
+          {hasMultiple && (
+            <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] text-muted-foreground">
+              {allImages.length} gambar
+            </span>
+          )}
+        </div>
+        {hasImage && (
           <button
             onClick={() => setAdPreview((v) => !v)}
             className={`flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
@@ -116,35 +139,22 @@ export function AdCard({ data, index }: { data: AdCardData; index: number }) {
                 : 'border-muted bg-muted/40 text-muted-foreground hover:bg-muted hover:text-foreground'
             }`}
           >
-            {adPreview ? '✕ Tutup preview' : '👁 Preview iklan'}
+            {adPreview ? '✕ Tutup' : '👁 Preview'}
           </button>
-        </div>
-      )}
+        )}
+      </div>
 
       {/* ── Image area ── */}
       {adPreview && hasImage ? (
-        /* Preview mode — text composited on image */
+        /* Preview mode */
         <div
           ref={previewRef}
           className="relative aspect-square w-full overflow-hidden rounded-xl mx-2"
           style={{ width: 'calc(100% - 16px)' }}
         >
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={activeImageUrl!}
-            alt=""
-            className="h-full w-full object-cover"
-            crossOrigin="anonymous"
-          />
-          {/* Dark gradient bottom */}
+          <img src={activeImageUrl!} alt="" className="h-full w-full object-cover" crossOrigin="anonymous" />
           <div className="absolute inset-0 bg-gradient-to-b from-black/5 via-transparent to-black/75 pointer-events-none" />
-          {/* Angle badge top-left */}
-          {data.badge && (
-            <div className="absolute left-3 top-3 rounded-full bg-orange-500 px-3 py-1.5 text-xs font-bold uppercase tracking-wide text-white shadow">
-              {data.badge.replace(/_/g, ' ')}
-            </div>
-          )}
-          {/* Headline + subheadline + CTA bottom */}
           <div className="absolute bottom-0 left-0 right-0 p-4">
             {data.headline && (
               <p className="text-[22px] font-extrabold leading-tight text-white drop-shadow-[0_2px_4px_rgba(0,0,0,0.8)]">
@@ -166,7 +176,7 @@ export function AdCard({ data, index }: { data: AdCardData; index: number }) {
           </div>
         </div>
       ) : (
-        /* Normal mode — plain image */
+        /* Normal image mode */
         <div className="relative aspect-square w-full bg-muted">
           {hasImage ? (
             // eslint-disable-next-line @next/next/no-img-element
@@ -187,37 +197,56 @@ export function AdCard({ data, index }: { data: AdCardData; index: number }) {
               <p className="text-xs">Prompt only (no image)</p>
             </div>
           )}
-          {data.badge && !hasImage && (
-            <div className="absolute left-2 top-2">
-              <Badge>{data.badge}</Badge>
-            </div>
-          )}
-          {/* Thumbnail dots for multi-image */}
-          {hasMultiple && !adPreview && (
-            <div className="absolute bottom-2 left-0 right-0 flex justify-center gap-1">
-              {allImages.map((_, i) => (
-                <button
-                  key={i}
-                  onClick={() => setImgIndex(i)}
-                  className={`h-1.5 rounded-full transition-all ${
-                    i === imgIndex ? 'w-4 bg-white' : 'w-1.5 bg-white/50'
-                  }`}
-                />
-              ))}
-            </div>
-          )}
+        </div>
+      )}
+
+      {/* ── Thumbnail strip (multi-image only) ── */}
+      {hasMultiple && (
+        <div className="flex items-center gap-1.5 px-3 py-2 border-t bg-muted/20">
+          <button
+            onClick={() => setImgIndex((i) => Math.max(0, i - 1))}
+            disabled={imgIndex === 0}
+            className="flex h-6 w-6 shrink-0 items-center justify-center rounded border bg-background text-muted-foreground disabled:opacity-30 hover:bg-muted"
+          >
+            <ChevronLeft className="h-3.5 w-3.5" />
+          </button>
+
+          <div className="flex flex-1 gap-1.5 overflow-x-auto">
+            {allImages.map((url, i) => (
+              <button
+                key={i}
+                onClick={() => setImgIndex(i)}
+                className={`relative h-12 w-12 shrink-0 overflow-hidden rounded transition-all ${
+                  i === imgIndex
+                    ? 'ring-2 ring-primary ring-offset-1'
+                    : 'opacity-60 hover:opacity-90'
+                }`}
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={url} alt={`var ${i + 1}`} className="h-full w-full object-cover" />
+              </button>
+            ))}
+          </div>
+
+          <button
+            onClick={() => setImgIndex((i) => Math.min(allImages.length - 1, i + 1))}
+            disabled={imgIndex === allImages.length - 1}
+            className="flex h-6 w-6 shrink-0 items-center justify-center rounded border bg-background text-muted-foreground disabled:opacity-30 hover:bg-muted"
+          >
+            <ChevronRight className="h-3.5 w-3.5" />
+          </button>
         </div>
       )}
 
       {/* ── Card content ── */}
       <CardContent className="space-y-2 p-4">
-        {/* Text copy — hidden when preview ON (text already on image) */}
+        {/* Text copy — hidden when preview ON */}
         {!adPreview && (
           <>
-            {data.headline && <p className="font-semibold leading-snug">{data.headline}</p>}
+            {data.headline    && <p className="font-semibold leading-snug">{data.headline}</p>}
             {data.subheadline && <p className="text-sm text-muted-foreground">{data.subheadline}</p>}
-            {data.bodyText && <p className="text-sm">{data.bodyText}</p>}
-            {data.cta && (
+            {data.bodyText    && <p className="text-sm">{data.bodyText}</p>}
+            {data.cta         && (
               <div className="pt-1">
                 <Badge variant="outline">CTA: {data.cta}</Badge>
               </div>
@@ -243,27 +272,61 @@ export function AdCard({ data, index }: { data: AdCardData; index: number }) {
             <summary className="cursor-pointer text-xs text-muted-foreground hover:text-foreground">
               Lihat image prompt
             </summary>
-            <p className="mt-1 max-h-32 overflow-auto rounded bg-muted p-2 text-xs leading-relaxed">
-              {data.imagePrompt}
-            </p>
+            <div className="mt-1 rounded bg-muted p-2 text-xs leading-relaxed">
+              <div className="flex items-start justify-between gap-2">
+                <p className="max-h-28 overflow-auto flex-1">{data.imagePrompt}</p>
+                <button
+                  onClick={copyPrompt}
+                  title="Copy prompt"
+                  className="mt-0.5 shrink-0 rounded p-1 text-muted-foreground hover:bg-background hover:text-foreground"
+                >
+                  {promptCopied ? <Check className="h-3.5 w-3.5 text-emerald-600" /> : <ClipboardCopy className="h-3.5 w-3.5" />}
+                </button>
+              </div>
+            </div>
           </details>
         )}
 
-        <div className="flex gap-2 pt-2">
-          <Button size="sm" variant="outline" onClick={copyText} className="flex-1">
+        {/* ── Action buttons ── */}
+        <div className="flex flex-wrap gap-2 pt-2">
+          {/* Copy text */}
+          <Button size="sm" variant="outline" onClick={copyText} className="flex-1 min-w-[100px]">
             {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
-            <span>{copied ? 'Tersalin' : 'Copy text'}</span>
+            <span>{copied ? 'Tersalin' : 'Copy teks'}</span>
           </Button>
+
+          {/* Download active */}
           {activeImageUrl && (
             <Button
               size="sm"
               onClick={handleDownload}
-              disabled={downloading}
-              className="flex-1"
-              title={adPreview ? 'Download dengan overlay teks' : 'Download gambar asli'}
+              disabled={downloading || downloadingAll}
+              className="flex-1 min-w-[100px]"
+              title={adPreview ? 'Download dengan overlay teks' : 'Download gambar ini'}
             >
               <Download className="h-4 w-4" />
-              {downloading ? 'Saving…' : adPreview ? 'Download Ad' : hasMultiple ? `Download (${imgIndex + 1}/${allImages.length})` : 'Download'}
+              {downloading
+                ? 'Saving…'
+                : adPreview
+                  ? 'Download Ad'
+                  : hasMultiple
+                    ? `↓ Gambar ${imgIndex + 1}`
+                    : 'Download'}
+            </Button>
+          )}
+
+          {/* Download all — only shown when multiple images */}
+          {hasMultiple && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={handleDownloadAll}
+              disabled={downloadingAll || downloading}
+              className="w-full"
+              title="Download semua gambar untuk angle ini"
+            >
+              <Download className="h-4 w-4" />
+              {downloadingAll ? 'Downloading…' : `↓ Download semua (${allImages.length} gambar)`}
             </Button>
           )}
         </div>

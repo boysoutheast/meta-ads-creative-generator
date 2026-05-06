@@ -360,25 +360,44 @@ export default function ScalePage() {
           {analysisResp && <AnalysisCard analysis={analysisResp.analysis} />}
 
           {generating && (
-            <div className="grid gap-4 sm:grid-cols-2">
-              {Array.from({ length: 4 }).map((_, i) => (
-                <Card key={i}>
-                  <Skeleton className="aspect-square w-full" />
-                  <CardContent className="space-y-2 p-4">
-                    <Skeleton className="h-4 w-3/4" />
-                    <Skeleton className="h-3 w-full" />
-                    <Skeleton className="h-3 w-5/6" />
-                  </CardContent>
-                </Card>
-              ))}
+            <div className="space-y-3">
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                <span>
+                  Generating {selectedAngles.length} angle
+                  {imagesPerAngle > 1 ? ` × ${imagesPerAngle} gambar = ${selectedAngles.length * imagesPerAngle} gambar total` : ''}…
+                </span>
+              </div>
+              <div className="grid gap-4 sm:grid-cols-2">
+                {Array.from({ length: Math.min(selectedAngles.length || 4, 8) }).map((_, i) => (
+                  <Card key={i}>
+                    <Skeleton className="aspect-square w-full" />
+                    <CardContent className="space-y-2 p-4">
+                      <Skeleton className="h-4 w-3/4" />
+                      <Skeleton className="h-3 w-full" />
+                      <Skeleton className="h-3 w-5/6" />
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
             </div>
           )}
 
           {result && (
             <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <h2 className="text-lg font-semibold">{result.totalVariations} variasi siap</h2>
-                <div className="flex items-center gap-2">
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <div>
+                  <h2 className="text-lg font-semibold">
+                    {result.totalVariations} variasi siap
+                    {(() => {
+                      const totalImgs = result.variations.reduce((sum, v) => sum + (v.imageUrls?.length ?? (v.imageUrl ? 1 : 0)), 0)
+                      return totalImgs > result.totalVariations ? (
+                        <span className="ml-2 text-sm font-normal text-muted-foreground">· {totalImgs} gambar total</span>
+                      ) : null
+                    })()}
+                  </h2>
+                </div>
+                <div className="flex items-center gap-2 flex-wrap">
                   {productVisualDescription && (
                     <Badge variant="outline" className="text-xs text-emerald-600 border-emerald-300">
                       ✓ Visual injected
