@@ -15,11 +15,11 @@ interface Props {
   showQty?: boolean
 }
 
-export function AngleSelector({ angles, selected, onChange, quantities = {}, onQtyChange, showQty = false }: Props) {
+export function AngleSelector({ angles = [], selected, onChange, quantities = {}, onQtyChange, showQty = false }: Props) {
   const toggle = (key: string) => {
     onChange(selected.includes(key) ? selected.filter((s) => s !== key) : [...selected, key])
   }
-  const allSelected = selected.length === angles.length
+  const allSelected = angles.length > 0 && selected.length === angles.length
 
   return (
     <div className="space-y-3">

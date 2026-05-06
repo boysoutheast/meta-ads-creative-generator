@@ -106,7 +106,7 @@ export default function ScalePage() {
       const compressed = await compressImage(file)
       const resp = await analyzeWinningAd(compressed)
       setAnalysisResp(resp)
-      handleAngleChange(resp.availableAngles.map((a) => a.key))
+      handleAngleChange((resp.availableAngles ?? []).map((a) => a.key))
       if (resp.winningAdBase64) {
         setWinningAdBase64(resp.winningAdBase64)
         setWinningAdMime(resp.winningAdMime || 'image/jpeg')
@@ -316,7 +316,7 @@ export default function ScalePage() {
                     </p>
                   )}
                   <AngleSelector
-                    angles={analysisResp.availableAngles as ScalingAngle[]}
+                    angles={(analysisResp.availableAngles ?? []) as ScalingAngle[]}
                     selected={selectedAngles}
                     onChange={handleAngleChange}
                     quantities={angleQuantities}
