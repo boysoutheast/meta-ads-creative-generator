@@ -8,6 +8,7 @@ const {
   generateScalingAngles,
   generateVariationPrompts,
   batchGenerateImages,
+  buildCarouselSlidePrompt,
 } = require('../services/scalingService');
 const { analyzeVideoReference } = require('../services/videoAnalyzer');
 const { analyzeImage, uploadImageToApimart, generateImage, generateVideo, chatCompletion } = require('../services/apimart');
@@ -73,6 +74,7 @@ router.post('/generate-variations', async (req, res) => {
     productPrice = null,
     productPromoPrice = null,
     masterImagePrompt = null,
+    imagesPerAngle = 1,
   } = req.body;
 
   if (!analysis || !productName) {
@@ -121,7 +123,7 @@ router.post('/generate-variations', async (req, res) => {
 
   let finalVariations = variationsWithPrompts;
   if (generateImages) {
-    finalVariations = await batchGenerateImages(variationsWithPrompts, aspectRatio, referenceImageUrls);
+    finalVariations = await batchGenerateImages(variationsWithPrompts, aspectRatio, referenceImageUrls, imagesPerAngle);
   }
 
   res.json({
@@ -164,35 +166,36 @@ Produk: ${productName}
 ${productDescription ? `Deskripsi lengkap (WAJIB dipakai — sebutkan ingredient spesifik, kondisi target, klaim unik di tiap benefit slide):\n${productDescription}` : ''}${productVisualNote}
 
 Referensi dari winning ad:
-- Hook style: ${analysis.hook || analysis.hookMechanism || 'engaging hook'}
-- Visual style: ${analysis.visualStyle || 'professional'}
+- Hook style: ${analysis.hookMechanism || analysis.hook || 'engaging hook'}
+- Visual style: ${analysis.visualStyle || 'professional editorial'}
 - Color palette: ${(analysis.colorPalette || []).join(', ')}
 - Mood: ${analysis.mood || 'engaging'}
 - Emotion: ${analysis.primaryEmotion || 'desire'}
+- Composition type: ${analysis.compositionType || 'model_with_product'}
 
 Struktur WAJIB:
-- Slide 1: type "hook" — gunakan hook style yang sama dari winning ad, adaptasi untuk ${productName}. Jangan generik.
+- Slide 1: type "hook" — gunakan hook style yang sama dari winning ad, adaptasi untuk ${productName}. Jangan generik. Harus scroll-stopping.
 - Slide 2 sampai ${clampedSlideCount - 1}: type "benefit" — tiap slide 1 manfaat/USP SPESIFIK dari deskripsi produk (sebutkan ingredient, angka, kondisi target). Beda tiap slide.
-- Slide ${clampedSlideCount}: type "cta" — strong call to action
+- Slide ${clampedSlideCount}: type "cta" — strong call to action, buat orang ingin beli sekarang.
 
 Return JSON array dengan tepat ${clampedSlideCount} item, tanpa markdown:
 [
   {
     "slideNumber": 1,
     "type": "hook",
-    "headline": "teks utama (Indonesia, max 8 kata)",
-    "subtext": "teks pendukung (Indonesia, max 20 kata)",
-    "imagePrompt": "English prompt for AI image generator (80-120 words, NO text in image, replicate winning ad visual style)"
+    "headline": "teks utama (Indonesia, max 8 kata, scroll-stopping)",
+    "subtext": "teks pendukung (Indonesia, max 20 kata, spesifik)",
+    "cta": "teks CTA (Indonesia, max 5 kata) — hanya untuk slide type cta"
   }
 ]`;
 
   const response = await chatCompletion({
     model: config.models.chat,
     messages: [
-      { role: 'system', content: 'Kamu adalah Meta Ads carousel specialist. Return only valid JSON array.' },
+      { role: 'system', content: 'Kamu adalah Meta Ads carousel specialist. Return only valid JSON array, no markdown.' },
       { role: 'user', content: carouselPrompt },
     ],
-    maxTokens: 2500,
+    maxTokens: 2000,
     temperature: 0.8,
   });
 
@@ -204,6 +207,13 @@ Return JSON array dengan tepat ${clampedSlideCount} item, tanpa markdown:
   } catch (e) {
     return res.status(500).json({ error: 'Failed to generate carousel structure: ' + e.message });
   }
+
+  // Build detailed composition-aware image prompts for each slide
+  const prodVisualDesc = productVisualDescription || null;
+  slides = slides.map((slide) => ({
+    ...slide,
+    imagePrompt: buildCarouselSlidePrompt(slide, analysis, productName, prodVisualDesc),
+  }));
 
   if (generateImages) {
     const sizeMap = { '1:1': '1024x1024', '9:16': '1024x1536', '16:9': '1536x1024' };

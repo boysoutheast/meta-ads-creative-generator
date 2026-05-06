@@ -1,7 +1,7 @@
 'use client'
 import { useRef, useState } from 'react'
 import html2canvas from 'html2canvas'
-import { Download, Copy, Check, ImageIcon } from 'lucide-react'
+import { Download, Copy, Check, ImageIcon, ChevronLeft, ChevronRight } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -10,6 +10,7 @@ export interface AdCardData {
   title?: string
   badge?: string
   imageUrl?: string | null
+  imageUrls?: string[] | null
   videoUrl?: string | null
   videoJobId?: string | null
   headline?: string
@@ -25,9 +26,16 @@ export function AdCard({ data, index }: { data: AdCardData; index: number }) {
   const [copied, setCopied]       = useState(false)
   const [adPreview, setAdPreview] = useState(false)
   const [downloading, setDownloading] = useState(false)
+  const [imgIndex, setImgIndex]   = useState(0)
   const previewRef = useRef<HTMLDivElement>(null)
 
-  const hasImage = !!data.imageUrl
+  // Merge imageUrls array with legacy single imageUrl into one unified list
+  const allImages: string[] = data.imageUrls && data.imageUrls.length > 0
+    ? data.imageUrls
+    : data.imageUrl ? [data.imageUrl] : []
+  const hasImage = allImages.length > 0
+  const activeImageUrl = allImages[imgIndex] || null
+  const hasMultiple = allImages.length > 1
 
   const copyText = () => {
     const txt = [data.headline, data.subheadline, data.bodyText, data.cta && `CTA: ${data.cta}`]
@@ -39,7 +47,7 @@ export function AdCard({ data, index }: { data: AdCardData; index: number }) {
   }
 
   const handleDownload = async () => {
-    if (!data.imageUrl) return
+    if (!activeImageUrl) return
     setDownloading(true)
     try {
       if (adPreview && previewRef.current) {
@@ -50,28 +58,27 @@ export function AdCard({ data, index }: { data: AdCardData; index: number }) {
           backgroundColor: null,
         })
         const link = document.createElement('a')
-        link.download = `ad-preview-${data.badge || 'variation'}-${Date.now()}.jpg`
+        link.download = `ad-preview-${data.badge || 'variation'}-${imgIndex + 1}-${Date.now()}.jpg`
         link.href = canvas.toDataURL('image/jpeg', 0.95)
         link.click()
       } else {
-        // Plain image download
         try {
-          const res = await fetch(data.imageUrl, { mode: 'cors' })
+          const res = await fetch(activeImageUrl, { mode: 'cors' })
           const blob = await res.blob()
           const blobUrl = URL.createObjectURL(blob)
           const link = document.createElement('a')
           link.href = blobUrl
-          link.download = `ad-${data.badge || 'variation'}-${Date.now()}.jpg`
+          link.download = `ad-${data.badge || 'variation'}-${imgIndex + 1}-${Date.now()}.jpg`
           document.body.appendChild(link)
           link.click()
           document.body.removeChild(link)
           URL.revokeObjectURL(blobUrl)
         } catch {
-          window.open(data.imageUrl, '_blank')
+          window.open(activeImageUrl, '_blank')
         }
       }
     } catch {
-      if (data.imageUrl) window.open(data.imageUrl, '_blank')
+      if (activeImageUrl) window.open(activeImageUrl, '_blank')
     } finally {
       setDownloading(false)
     }
@@ -79,9 +86,28 @@ export function AdCard({ data, index }: { data: AdCardData; index: number }) {
 
   return (
     <Card className="overflow-hidden">
-      {/* ── Toggle pill — floats at top-right of image ── */}
+      {/* ── Top bar: preview toggle + image counter ── */}
       {hasImage && (
-        <div className="flex items-center justify-end px-3 pt-2 pb-1">
+        <div className="flex items-center justify-between px-3 pt-2 pb-1">
+          {hasMultiple ? (
+            <div className="flex items-center gap-1.5">
+              <button
+                onClick={() => setImgIndex((i) => Math.max(0, i - 1))}
+                disabled={imgIndex === 0}
+                className="flex h-6 w-6 items-center justify-center rounded-full border bg-background text-muted-foreground disabled:opacity-30 hover:bg-muted"
+              >
+                <ChevronLeft className="h-3.5 w-3.5" />
+              </button>
+              <span className="text-xs text-muted-foreground">{imgIndex + 1}/{allImages.length}</span>
+              <button
+                onClick={() => setImgIndex((i) => Math.min(allImages.length - 1, i + 1))}
+                disabled={imgIndex === allImages.length - 1}
+                className="flex h-6 w-6 items-center justify-center rounded-full border bg-background text-muted-foreground disabled:opacity-30 hover:bg-muted"
+              >
+                <ChevronRight className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          ) : <div />}
           <button
             onClick={() => setAdPreview((v) => !v)}
             className={`flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
@@ -105,7 +131,7 @@ export function AdCard({ data, index }: { data: AdCardData; index: number }) {
         >
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
-            src={data.imageUrl!}
+            src={activeImageUrl!}
             alt=""
             className="h-full w-full object-cover"
             crossOrigin="anonymous"
@@ -145,7 +171,7 @@ export function AdCard({ data, index }: { data: AdCardData; index: number }) {
           {hasImage ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img
-              src={data.imageUrl!}
+              src={activeImageUrl!}
               alt={data.headline || `variation-${index}`}
               className="h-full w-full object-cover"
             />
@@ -164,6 +190,20 @@ export function AdCard({ data, index }: { data: AdCardData; index: number }) {
           {data.badge && !hasImage && (
             <div className="absolute left-2 top-2">
               <Badge>{data.badge}</Badge>
+            </div>
+          )}
+          {/* Thumbnail dots for multi-image */}
+          {hasMultiple && !adPreview && (
+            <div className="absolute bottom-2 left-0 right-0 flex justify-center gap-1">
+              {allImages.map((_, i) => (
+                <button
+                  key={i}
+                  onClick={() => setImgIndex(i)}
+                  className={`h-1.5 rounded-full transition-all ${
+                    i === imgIndex ? 'w-4 bg-white' : 'w-1.5 bg-white/50'
+                  }`}
+                />
+              ))}
             </div>
           )}
         </div>
@@ -214,7 +254,7 @@ export function AdCard({ data, index }: { data: AdCardData; index: number }) {
             {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
             <span>{copied ? 'Tersalin' : 'Copy text'}</span>
           </Button>
-          {hasImage && (
+          {activeImageUrl && (
             <Button
               size="sm"
               onClick={handleDownload}
@@ -223,7 +263,7 @@ export function AdCard({ data, index }: { data: AdCardData; index: number }) {
               title={adPreview ? 'Download dengan overlay teks' : 'Download gambar asli'}
             >
               <Download className="h-4 w-4" />
-              {downloading ? 'Saving…' : adPreview ? 'Download Ad' : 'Download'}
+              {downloading ? 'Saving…' : adPreview ? 'Download Ad' : hasMultiple ? `Download (${imgIndex + 1}/${allImages.length})` : 'Download'}
             </Button>
           )}
         </div>

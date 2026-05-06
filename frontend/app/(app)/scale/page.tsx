@@ -57,6 +57,9 @@ export default function ScalePage() {
   const [winningAdMime, setWinningAdMime] = useState<string>('image/jpeg')
   const [masterImagePrompt, setMasterImagePrompt] = useState<string | null>(null)
 
+  // Per-angle image count
+  const [imagesPerAngle, setImagesPerAngle] = useState(1)
+
   // Carousel state
   const [showCarouselOffer, setShowCarouselOffer] = useState(false)
   const [showCarouselForm, setShowCarouselForm] = useState(false)
@@ -137,6 +140,7 @@ export default function ScalePage() {
         productPrice: selectedProduct.price ?? undefined,
         productPromoPrice: selectedProduct.promoPrice ?? undefined,
         masterImagePrompt: masterImagePrompt ?? undefined,
+        imagesPerAngle,
       })
 
       setResult(resp)
@@ -283,6 +287,31 @@ export default function ScalePage() {
                   <Switch id="genImg" checked={generateImages} onCheckedChange={setGenerateImages} />
                 </div>
 
+                {generateImages && (
+                  <div className="space-y-2">
+                    <Label>Gambar per angle</Label>
+                    <div className="flex gap-2">
+                      {[1, 2, 3].map((n) => (
+                        <Button
+                          key={n}
+                          type="button"
+                          size="sm"
+                          variant={imagesPerAngle === n ? 'default' : 'outline'}
+                          onClick={() => setImagesPerAngle(n)}
+                          className="flex-1"
+                        >
+                          {n}×
+                        </Button>
+                      ))}
+                    </div>
+                    {imagesPerAngle > 1 && (
+                      <p className="text-xs text-amber-600">
+                        {imagesPerAngle}× per angle — akan generate {selectedAngles.length * imagesPerAngle} gambar total.
+                      </p>
+                    )}
+                  </div>
+                )}
+
                 <div>
                   <Label className="mb-2 block">Pilih angle</Label>
                   <AngleSelector
@@ -370,6 +399,7 @@ export default function ScalePage() {
                       bodyText: v.bodyText,
                       cta: v.cta,
                       imageUrl: v.imageUrl ?? null,
+                      imageUrls: v.imageUrls ?? null,
                       imagePrompt: v.imagePrompt,
                       translatedConcept: v.translatedConcept ?? null,
                       error: v.imageError || v.promptError,

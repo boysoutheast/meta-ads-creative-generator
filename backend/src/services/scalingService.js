@@ -3,6 +3,7 @@ const config = require('../config');
 const fs = require('fs');
 
 const SCALING_ANGLES = {
+  // ── Original 8 ────────────────────────────────────────────────────────────
   price_anchor: {
     label: 'Price Anchor',
     hook: 'Fokus value & harga — perbandingan harga, ROI, atau "hanya Rp..."',
@@ -34,6 +35,55 @@ const SCALING_ANGLES = {
   authority: {
     label: 'Authority / Expert',
     hook: 'Posisi sebagai ahli — "Direkomendasikan oleh...", award, sertifikasi',
+  },
+  // ── New 12 ────────────────────────────────────────────────────────────────
+  ingredient_spotlight: {
+    label: 'Ingredient Spotlight',
+    hook: 'Sorot bahan aktif kunci — "mengandung X yang terbukti...", edukasi bahan',
+  },
+  result_speed: {
+    label: 'Result Speed',
+    hook: 'Hasil cepat terasa — "dalam 7 hari", "langsung terasa", kecepatan result nyata',
+  },
+  comparison: {
+    label: 'Comparison',
+    hook: 'Perbandingan langsung vs kompetitor / solusi lama / tanpa produk ini',
+  },
+  lifestyle_aspiration: {
+    label: 'Lifestyle Aspiration',
+    hook: 'Gaya hidup impian — identitas diri, "perempuan yang...", aspirasi hidup',
+  },
+  community_proof: {
+    label: 'Community Proof',
+    hook: 'Komunitas & peer — "jutaan orang sudah...", viral, trending, ramai dibicarakan',
+  },
+  gift_occasion: {
+    label: 'Gift / Occasion',
+    hook: 'Hadiah & momen spesial — lebaran, ulang tahun, hari ibu, anniversary',
+  },
+  expert_tip: {
+    label: 'Expert Tip',
+    hook: 'Tips dari ahli / profesional — dokter, skincare expert, nutritionist, influencer',
+  },
+  value_stack: {
+    label: 'Value Stack',
+    hook: 'Nilai bertumpuk — "dapat X + Y + Z dalam satu produk", bonus, bundling hemat',
+  },
+  pain_point_extreme: {
+    label: 'Pain Point Extreme',
+    hook: 'Nyeri/masalah paling ekstrim — konsekuensi buruk jika tidak segera bertindak',
+  },
+  seasonal: {
+    label: 'Seasonal / Trend',
+    hook: 'Momen relevan saat ini — lebaran, year-end, musim hujan, liburan, trending topic',
+  },
+  unboxing: {
+    label: 'Unboxing Experience',
+    hook: 'Pengalaman unboxing — kemasan premium, kejutan, first impression produk',
+  },
+  night_routine: {
+    label: 'Night / Morning Routine',
+    hook: 'Rutinitas self-care — "sebelum tidur...", "bangun pagi dengan...", ritual harian',
   },
 };
 
@@ -334,6 +384,116 @@ function buildMainScene(compositionType, emotional, setting, props, prodDesc, an
     `Setting: ${setting}. ` +
     `Props: ${props}. ` +
     `${angleContext}`;
+}
+
+// ─── buildCarouselSlidePrompt ─────────────────────────────────────────────────
+// Generates a detailed, composition-aware image prompt for each carousel slide.
+// Output quality mirrors buildAngleImagePrompt — not the old generic 80-120 word string.
+
+function buildCarouselSlidePrompt(slide, winningAnalysis, productName, productVisualDescription) {
+  const compositionType = winningAnalysis.compositionType || 'model_with_product';
+  const palette    = (winningAnalysis.colorPalette || ['#FADBD8', '#A93226', '#D5DBDB']).join(', ');
+  const lighting   = winningAnalysis.lighting   || 'warm natural';
+  const mood       = winningAnalysis.mood       || 'engaging';
+  const visualStyle = winningAnalysis.visualStyle || 'editorial photography';
+
+  const imgHeadline = truncateForImage(slide.headline || '', 6);
+  const imgSubtext  = truncateForImage(slide.subtext  || '', 6);
+
+  const prodFull = productVisualDescription
+    ? `${productName} — ${productVisualDescription}`
+    : `${productName} packaging`;
+  const prodDesc = `${prodFull}. IMPORTANT: Match this product's packaging appearance EXACTLY to the uploaded reference product photo — same shape, label colors, label text, and design.`;
+
+  const quality = `Photorealistic, high-end beauty editorial photography. Color palette: ${palette}. ${lighting} lighting. ${mood} mood. Square 1:1 format.`;
+  const refNote = `NOTE: If a reference product image is provided, match the product packaging EXACTLY — same shape, colors, label.`;
+  const textAccuracy = `CRITICAL — TEXT RENDERING: Render every word EXACTLY as written, letter by letter. No blur, no warped characters. Clean crisp legible typography.`;
+  const bpom = `"BPOM ✓" small badge in bottom right corner.`;
+
+  // Composition-aware main scene builder for carousel slides
+  const buildCarouselScene = (context = '') => {
+    if (compositionType === 'product_only') {
+      return `MAIN VISUAL: ${prodDesc} — displayed as the hero product. No human, no hand. ${context} Clean composition, product sharp and prominent.`;
+    }
+    if (compositionType === 'hand_holding') {
+      return `MAIN VISUAL: A realistic hand holding ${prodDesc}. ${context} No face or full body visible. Grip consistent with reference ad.`;
+    }
+    return `MAIN VISUAL: Indonesian woman, Southeast Asian features. ${context}`;
+  };
+
+  const type = slide.type || 'benefit';
+
+  // ── Hook slide ─────────────────────────────────────────────────────────────
+  if (type === 'hook') {
+    const hookMech = winningAnalysis.hookMechanism || winningAnalysis.hook || 'eye-catching composition';
+    const emotionalTruth = winningAnalysis.emotionalTruth || 'curiosity and desire';
+    const ns = winningAnalysis.narrativeStructure || {};
+    const hookContext = compositionType === 'model_with_product'
+      ? `Hook expression matching "${hookMech}" energy. Emotional truth: ${emotionalTruth}. Setting: ${ns.setup || 'relatable everyday Indonesian moment'}. Expression is powerful and scroll-stopping.`
+      : `Styled to evoke "${hookMech}" stopping energy. Background and lighting match the winning ad's mood: ${visualStyle}.`;
+    const hookScene = buildCarouselScene(hookContext);
+    return `Scroll-stopping carousel HOOK slide for Meta Ads. ${visualStyle} style.
+Background: soft cream-pink gradient (#FFF0F5 to #FFF8F5). Square 1:1 format.
+LAYOUT: 60% visual scene, 40% typography — OR full-bleed scene with text overlay (replicate winning ad layout style).
+TYPOGRAPHY RENDERED ON IMAGE (crisp, bold, no blur):
+- Large bold dark headline, centered, 2-3 lines, max 6 words: "${imgHeadline}"
+- Smaller supporting subtext: "${imgSubtext}"
+${hookScene}
+PRODUCT: ${prodDesc} — prominently displayed, large, sharply in focus. This is slide 1 — make the viewer STOP scrolling.
+VISUAL DIRECTION: Replicate the visual stopping power of this winning ad hook: "${hookMech}". Color palette: ${palette}. ${lighting} lighting.
+FLOATING ELEMENTS: Subtle sparkle or accent icons in palette colors.
+${textAccuracy}
+${bpom}
+${refNote}
+${quality}`;
+  }
+
+  // ── CTA slide ──────────────────────────────────────────────────────────────
+  if (type === 'cta') {
+    const ctaContext = compositionType === 'model_with_product'
+      ? `Happy, satisfied, confident expression — holding ${prodDesc}. This is the resolution moment — she got the result.`
+      : `${prodDesc} shown as the final hero. Bright, positive, achievement atmosphere.`;
+    const ctaScene = buildCarouselScene(ctaContext);
+    return `High-converting carousel CTA slide for Meta Ads. ${visualStyle} style.
+Background: soft cream (#FFFBF5) with warm gradient. Square 1:1 format.
+LAYOUT: Strong visual presence + prominent CTA button.
+TYPOGRAPHY RENDERED ON IMAGE (crisp, bold, perfectly legible):
+- Bold dark headline (1-2 lines, large, centered): "${imgHeadline}"
+- Supporting subtext: "${imgSubtext}"
+- LARGE prominent CTA button (dark pink #D4547A, white bold text, rounded pill, bottom center): "${slide.cta || 'Beli Sekarang'} →"
+- Green savings/availability badge (#1A7A6E pill, white text): "Dapatkan Sekarang"
+${ctaScene}
+PRODUCT: ${prodDesc} — hero position, large, sharply in focus. This is the FINAL SLIDE — drive action.
+FLOATING ELEMENTS: Green checkmark badges, gold star rating, urgency sparkles in palette colors.
+${textAccuracy}
+${bpom}
+${refNote}
+${quality}`;
+  }
+
+  // ── Benefit slide (default) ─────────────────────────────────────────────────
+  const benefitContext = compositionType === 'model_with_product'
+    ? `Demonstrating or experiencing the specific benefit: "${slide.subtext || 'visible product benefit'}". Expression is authentic and relatable — she feels the result.`
+    : `Positioned to visually communicate the benefit: "${slide.subtext || 'product benefit'}". Product is the evidence.`;
+  const benefitScene = buildCarouselScene(benefitContext);
+  // Extract 1-2 word benefit label from headline
+  const benefitLabel = truncateForImage(slide.headline || 'Manfaat', 2);
+  return `Persuasive carousel BENEFIT slide for Meta Ads. ${visualStyle} style.
+Background: soft cream (#FFF8F5). Square 1:1 format.
+LAYOUT: Split — left typography, right visual (OR top headline, center scene, bottom CTA).
+TYPOGRAPHY RENDERED ON IMAGE (crisp, bold, perfectly legible):
+- Teal rounded pill badge (#1A7A6E, white text, top): "${benefitLabel}"
+- Bold dark headline, centered, 1-2 lines: "${imgHeadline}"
+- Smaller supporting subtext below: "${imgSubtext}"
+- Dark pink (#D4547A) subtle CTA text or small pill button at bottom (optional for benefit slides)
+${benefitScene}
+PRODUCT: ${prodDesc} — clearly visible in scene, showing this specific benefit. This slide must feel like PROOF — show the outcome, not just the product.
+FLOATING ELEMENTS: Relevant benefit icons (leaf/sparkle/check/ingredient icon), small badge accent in palette colors.
+Visual direction: Color palette: ${palette}. ${lighting} lighting. Benefit-forward composition.
+${textAccuracy}
+${bpom}
+${refNote}
+${quality}`;
 }
 
 // ─── buildAngleLayer ─────────────────────────────────────────────────────────
@@ -695,7 +855,7 @@ async function generateVariationPrompts(winningAnalysis, angles, productName, pr
 // productImageUrl: if provided → flux-kontext-pro (img2img, product accuracy)
 // no productImageUrl → gpt-image-2 (text rendering, scene quality)
 
-async function batchGenerateImages(variations, aspectRatio = '1:1', referenceImageUrls = []) {
+async function batchGenerateImages(variations, aspectRatio = '1:1', referenceImageUrls = [], imagesPerAngle = 1) {
   const sizeMap = {
     '1:1': '1024x1024',
     '9:16': '1024x1536',
@@ -703,26 +863,40 @@ async function batchGenerateImages(variations, aspectRatio = '1:1', referenceIma
     '4:5': '1024x1024',
   };
   const size = sizeMap[aspectRatio] || '1024x1024';
+  const count = Math.min(Math.max(parseInt(imagesPerAngle) || 1, 1), 3);
 
   const filteredVariations = variations.filter((v) => v.imagePrompt);
+
+  // For each variation generate `count` images in parallel (all variations × all images concurrently)
   const results = await Promise.allSettled(
     filteredVariations.map((v) =>
-      generateImage({
-        prompt: v.imagePrompt,
-        size,
-        referenceImages: referenceImageUrls.length > 0 ? referenceImageUrls : undefined,
-      })
+      Promise.allSettled(
+        Array.from({ length: count }, () =>
+          generateImage({
+            prompt: v.imagePrompt,
+            size,
+            referenceImages: referenceImageUrls.length > 0 ? referenceImageUrls : undefined,
+          })
+        )
+      )
     )
   );
 
   let filteredIdx = 0;
   return variations.map((v) => {
-    if (!v.imagePrompt) return { ...v, imageUrl: null, imageError: 'No prompt generated' };
-    const result = results[filteredIdx++];
+    if (!v.imagePrompt) return { ...v, imageUrl: null, imageUrls: [], imageError: 'No prompt generated' };
+    const batchResult = results[filteredIdx++];
+    if (batchResult.status === 'rejected') {
+      return { ...v, imageUrl: null, imageUrls: [], imageError: batchResult.reason?.message };
+    }
+    const urls = batchResult.value
+      .map((r) => (r.status === 'fulfilled' ? r.value?.[0]?.url || null : null))
+      .filter(Boolean);
     return {
       ...v,
-      imageUrl: result.status === 'fulfilled' ? result.value[0]?.url : null,
-      imageError: result.status === 'rejected' ? result.reason?.message : null,
+      imageUrl: urls[0] || null,
+      imageUrls: urls,
+      imageError: urls.length === 0 ? 'All image generations failed' : null,
     };
   });
 }
@@ -806,4 +980,5 @@ module.exports = {
   generateVariationPrompts,
   batchGenerateImages,
   batchGenerateVideos,
+  buildCarouselSlidePrompt,
 };
