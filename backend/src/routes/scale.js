@@ -90,6 +90,7 @@ router.post('/generate-variations', async (req, res) => {
         imageBase64: productPhotoBase64,
         mimeType: productPhotoMime || 'image/jpeg',
         prompt: 'Describe this product visually in detail: shape, color, packaging, label text, texture, size. Be specific for AI image generation. Under 80 words.',
+        maxTokens: 300,
       });
     } catch (e) {
       console.warn('Product photo analysis failed (non-fatal):', e.message);
@@ -157,6 +158,7 @@ router.post('/generate-carousel', async (req, res) => {
         imageBase64: productPhotoBase64,
         mimeType: productPhotoMime || 'image/jpeg',
         prompt: 'Describe this product visually in detail: shape, color, packaging, label text, texture, size. Be specific for AI image generation. Under 80 words.',
+        maxTokens: 300,
       });
     } catch (e) {
       console.warn('Carousel product photo analysis failed (non-fatal):', e.message);

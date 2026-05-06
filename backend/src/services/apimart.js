@@ -33,7 +33,7 @@ async function chatCompletion({ model, messages, maxTokens = 1500, temperature =
   return response.data.choices[0].message.content;
 }
 
-async function analyzeImage({ imageBase64, mimeType = 'image/jpeg', prompt }) {
+async function analyzeImage({ imageBase64, mimeType = 'image/jpeg', prompt, maxTokens = 6000 }) {
   const messages = [
     {
       role: 'user',
@@ -43,7 +43,7 @@ async function analyzeImage({ imageBase64, mimeType = 'image/jpeg', prompt }) {
       ],
     },
   ];
-  return await chatCompletion({ model: config.models.vision, messages, maxTokens: 2000 });
+  return await chatCompletion({ model: config.models.vision, messages, maxTokens });
 }
 
 async function submitImageJob({ prompt, size = '1024x1024', model, n = 1 }) {
