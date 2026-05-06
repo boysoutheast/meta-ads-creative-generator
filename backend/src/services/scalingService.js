@@ -124,8 +124,8 @@ function detectPersona(productDescription = '', productName = '') {
 }
 
 // ─── analyzeWinningAd ────────────────────────────────────────────────────────
-// Extract 7 deep dimensions — not just surface labels.
-// This is the DNA extraction step that makes concept translation possible.
+// Full A-K design framework extraction — reverse-engineers the ad's entire
+// visual system into a reusable blueprint for concept translation.
 
 async function analyzeWinningAd(filePath, mimeType = 'image/jpeg') {
   const imageBuffer = fs.readFileSync(filePath);
@@ -133,54 +133,132 @@ async function analyzeWinningAd(filePath, mimeType = 'image/jpeg') {
   // Use actual file mime type — sending PNG as 'image/jpeg' causes model refusal
   const safeMime = mimeType && mimeType.startsWith('image/') ? mimeType : 'image/jpeg';
 
-  const analysisPrompt = `You are a forensic advertising analyst. Study this advertisement image with extreme precision and return a JSON object.
+  const analysisPrompt = `You are a senior creative director and forensic advertising analyst. Your task is to completely reverse-engineer this advertisement and extract its full design system into a reusable blueprint.
 
-CRITICAL RULE: Describe ONLY what you ACTUALLY SEE. Never assume what is "typical" for the product category. If there is no human model in the image, say so — do not invent one.
+CRITICAL RULE: Describe ONLY what you ACTUALLY SEE. Never assume or invent. If there is no human model, say so explicitly.
+
+Work through each section of this framework, then return everything as a single JSON object.
+
+━━━━ A. TUJUAN DESAIN ━━━━
+- What is the ad's primary function?
+- What is the ad angle (problem-solution / hard-selling / educational / trust-building / social-proof / FOMO / aspirational / curiosity-gap / before-after)?
+- What type of ad is this?
+
+━━━━ B. STRUKTUR LAYOUT ━━━━
+- Map the design grid: approximate % breakdown (left area X%, right area X%, top X%, bottom X%)
+- Where exactly is: headline / product / logo / badge / background object?
+- Describe the eye-reading flow — which element does the eye hit first, second, third, last?
+- What layout pattern is this? (split-left-right / centered-hero / top-bottom / grid / full-bleed)
+
+━━━━ C. HIERARCHY WORDING ━━━━
+- Write out every word visible in the image, word-for-word
+- Classify each text: small label / main headline / emphasized word / sub-text / trust text / CTA / product label
+- Which text is the most visually prominent and why?
+- What emphasis techniques are used? (enlarged, bold, circled, colored, underlined, isolated whitespace)
+
+━━━━ D. TIPOGRAFI ━━━━
+- Font character: bold / rounded / clean / modern / friendly / medical / serif / sans-serif
+- Headline font style estimate
+- Sub-text font style estimate
+- Uppercase or mixed case? Font weight? Line height impression?
+- Overall typographic impression (clinical / warm / energetic / premium / friendly)
+
+━━━━ E. SISTEM WARNA ━━━━
+- Primary color (with hex estimate)
+- Accent / highlight color (with hex)
+- Main text color (with hex)
+- Emphasis / CTA color (with hex)
+- Background color (with hex)
+- Function of each color in the ad's message
+
+━━━━ F. VISUAL PRODUK ━━━━
+- Product position in frame (exact: center / bottom-right / left / etc.)
+- Product size relative to canvas (small 10% / medium 30% / large 50%+ ?)
+- Product angle: upright / tilted / frontal / 3/4 view
+- Is product the primary focal point or secondary?
+- How is the product visually separated from background (shadow / glow / cutout / contrast)?
+- Any additional packaging shown?
+
+━━━━ G. ELEMEN TRUST / BADGE ━━━━
+- List every trust element visible (BPOM / halal / star rating / doctor endorsement / "X+ users" / award)
+- Position and approximate size of each
+- Visual style of each badge (pill / circle / stamp / icon)
+- Purpose / function of each trust element in this ad
+
+━━━━ H. BACKGROUND & ATMOSFER ━━━━
+- Describe background precisely: solid color / gradient / photo / blurred / textured / surface material
+- Is it clean / soft / premium / medical / natural / aspirational?
+- Any props, table surface, blur, shadow, or negative space?
+- What emotional atmosphere does the background create?
+
+━━━━ I. TEKNIK EMPHASIS ━━━━
+- What makes the headline immediately visible?
+- What is the single most dominant visual element and why?
+- List all emphasis techniques used: size contrast / color contrast / circle/ring overlay / glow / drop shadow / isolation / whitespace / diagonal layout
+
+━━━━ J. TEMPLATE FRAMEWORK REUSABLE ━━━━
+Build a reusable slot-based framework template:
+- Label top = [describe type, shape, color, position]
+- Headline line 1 = [describe weight, size, color, position]
+- Headline line 2 = [describe if exists]
+- Highlighted/emphasized word = [describe technique]
+- Product area = [position, size, angle]
+- Logo area = [position if visible]
+- Trust badge area = [position, count, style]
+- Background style = [color + texture description]
+- Dominant color = [hex]
+- Design mood = [single phrase]
+
+━━━━ K. PROMPT SIAP PAKAI ━━━━
+Write a 400-500 word generation prompt that recreates this exact ad layout for any product.
+Requirements:
+- Preserves placement, wording hierarchy, visual style, composition, and mood
+- Uses [HEADLINE], [SUBTEXT], [CTA], [PRODUCT] as placeholders
+- Includes exact colors (hex), exact positions, exact font weights
+- Includes all floating elements, badges, background details
+- STRICTLY follows compositionType: if no human → no human in prompt; if hand-only → hand only; if model → describe visible person
+- Reads like a blueprint for a creative team, not a vague description
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Now return ONLY this JSON (no markdown, no explanation):
 
 {
-  "detailedVisualAnalysis": "MINIMUM 5 paragraphs. Be forensically precise — describe what you literally see pixel by pixel:\\n\\nParagraph 1 — LAYOUT & HUMAN PRESENCE: Is there a full human model? Or only a hand/arm? Or just the product with no human at all? Describe the exact layout structure (centered hero / left-right split / top-bottom / grid), background color and texture.\\n\\nParagraph 2 — ALL TEXT VISIBLE: Quote every word you can read. Describe each text element: its exact or approximate position (top-left / center / bottom-right etc.), font weight (bold/regular), approximate size (small/medium/large/xl), and color. Include badge text, headline, subheadline, CTA, product label text, and any footnote.\\n\\nParagraph 3 — PRODUCT DETAIL: Describe the product packaging with extreme detail — shape (bottle/sachet/tube/jar), size impression, lid/cap style, label colors with hex estimates, brand name and text on label, any imagery on the label. Where exactly is it positioned in the frame?\\n\\nParagraph 4 — COLOR PALETTE & STYLE: List the 4-5 dominant colors with hex estimates. Describe the photography/rendering style (studio photo / lifestyle photo / CGI render / illustration / hand-drawn). Describe lighting direction and quality (soft diffused / harsh direct / warm / cool). Describe the overall mood.\\n\\nParagraph 5 — DECORATIVE ELEMENTS: List every floating element you see — certification badges (BPOM/halal/etc), icons, sparkles, leaves, arrows, star ratings, testimonial bubbles, decorative shapes. Describe each: what it is, its color, and its position.",
+  "adType": "problem-solution|hard-selling|educational|trust-building|social-proof|FOMO|aspirational|curiosity-gap|before-after",
+  "adAngle": "one sentence describing the ad's core angle and psychological mechanism",
 
-  "compositionType": "EXACTLY ONE: product_only (zero humans visible, not even a hand) | hand_holding (only a hand/arm visible holding the product, no face or body) | model_with_product (a full or partial person — face, torso, or body — is clearly visible)",
-
+  "compositionType": "EXACTLY ONE: product_only (zero humans visible, not even a hand) | hand_holding (only a hand/arm visible, no face or body) | model_with_product (a full or partial person is clearly visible)",
   "hasHumanModel": false,
+  "humanScenario": "If hasHumanModel true: describe who (gender, apparent age, what doing, where). If false: 'No human model — product-only or hand-holding composition.'",
 
-  "humanScenario": "If hasHumanModel is true: describe who is in the image, their age, what they are doing, where they are. If false: write 'No human model present — product-only or hand-holding composition.'",
+  "designFramework": "Full structured A–I analysis in plain text. Use section headers A through I. Minimum 600 words. Be technical and operational — write like a creative blueprint, not a vague description. Include specific hex estimates, percentages, and positioning for every element.",
 
-  "emotionalTruth": "What specific feeling does this image evoke — be precise based on what you see, not product category assumption",
+  "replicationBlueprint": "Section J framework rendered as a clean slot-based template:\\nLabel top = ...\\nHeadline line 1 = ...\\nHeadline line 2 = ...\\nHighlighted word = ...\\nProduct area = ...\\nLogo area = ...\\nTrust badge area = ...\\nBackground style = ...\\nDominant color = ...\\nDesign mood = ...",
 
-  "hookMechanism": "What element catches visual attention in the first 1-3 seconds and why",
+  "detailedVisualAnalysis": "5 tight paragraphs — forensically precise, only what you see:\\nPara 1 — Layout & human presence: layout pattern, human/hand/product-only, background color/texture.\\nPara 2 — All text word-for-word: every text element, position, weight, size, color.\\nPara 3 — Product detail: packaging shape, colors, label text, position in frame.\\nPara 4 — Color palette & style: dominant colors with hex, photography/render style, lighting direction.\\nPara 5 — Decorative elements: every badge, icon, sparkle, shape — name, color, position.",
 
+  "hookMechanism": "What element catches visual attention in the first 1-3 seconds and why — be specific about the visual technique",
+  "emotionalTruth": "What specific emotional state or desire does this image activate — precise, not generic",
   "narrativeStructure": {
-    "setup": "What situation or problem is shown or implied",
-    "tension": "What makes this feel urgent or important",
-    "resolution": "What solution or outcome is suggested"
+    "setup": "What problem, situation, or desire is established",
+    "tension": "What makes this feel urgent, painful, or important",
+    "resolution": "What solution or transformation is promised"
   },
+  "visualStory": "The specific objects, expressions, props, and setting that tell the story without words",
+  "copyPattern": "The complete wording hierarchy: quote all text found, classify each, and explain the emphasis technique used",
 
-  "visualStory": "Describe the specific objects, expressions, props, and setting that communicate the message",
+  "masterImagePrompt": "Section K — 400-500 word ready-to-use generation prompt. Must include: exact layout description, exact hex colors for every element, exact font weight/size/position for typography, exact product placement and angle, exact floating elements and badge positions, compositionType-strict scene description. Use [HEADLINE] [SUBTEXT] [CTA] [PRODUCT] as placeholders. No vague descriptions — every instruction must be actionable for an AI image generator.",
 
-  "copyPattern": "Describe the text/headline structure and tone visible, including any Indonesian text",
-
-  "replicationBlueprint": "List the core visual and messaging elements that make this ad effective and how they could be adapted for a different product — while preserving the same compositionType",
-
-  "visualStyle": "Describe the overall visual aesthetic — photography style, editing style, mood board description",
-
-  "colorPalette": ["#hex1", "#hex2", "#hex3"],
-
-  "lighting": "Describe lighting style and quality based on what you see",
-
-  "mood": "Describe the overall mood and atmosphere",
-
-  "composition": "Describe the layout and visual composition in detail",
-
+  "visualStyle": "Photography/rendering style, editing approach, and overall aesthetic",
+  "colorPalette": ["#hex1", "#hex2", "#hex3", "#hex4"],
+  "lighting": "Lighting direction, quality, and temperature from what you observe",
+  "mood": "Overall mood and atmosphere in 5-8 words",
+  "composition": "Layout and visual composition description",
   "dominantAngle": "Choose one: fomo, social_proof, tutorial, curiosity_gap, before_after, problem_agitate, authority, price_anchor",
-
-  "format": "Feed/Story/Reels",
-
+  "format": "Feed|Story|Reels",
   "primaryEmotion": "Single primary emotion evoked",
-
-  "suggestedCopyLanguage": "id",
-
-  "masterImagePrompt": "400-500 word image generation prompt to EXACTLY recreate this ad's visual layout for a different product. Base this strictly on compositionType you identified above.\\n\\nOVERALL LAYOUT: [Exact composition format + background hex from this image]\\n\\nTYPOGRAPHY RENDERED ON IMAGE:\\n- Top badge: [exact position, shape, background hex, text placeholder]\\n- Headline: [exact position, weight, hex, line count, alignment — use [HEADLINE]]\\n- Subtext: [position, hex — use [SUBTEXT]]\\n- CTA button: [shape, hex, position — use [CTA]]\\n\\nMAIN SCENE — follow compositionType strictly:\\nIF product_only: '[PRODUCT] placed [exact position from this image]. Describe surrounding elements (background surface, decorative props, lighting on product). NO human body or hand present.'\\nIF hand_holding: 'A realistic hand holding [PRODUCT] [describe exact grip, angle, background from this image]. No face. No full body. Lighting: [from image].'\\nIF model_with_product: '[Describe exact person visible: gender, apparent age, expression, action, pose]. Setting: [exact location from this image]. Props: [exact objects from image]. Holding/using [PRODUCT].'\\n\\nFLOATING ELEMENTS: [Forensic list of every decorative element from image — exact position, color, content. If certification badges visible, describe them.]\\n\\nCOLOR PALETTE: Primary [hex], Secondary [hex], Accent [hex], Background [hex]\\n\\nSTYLE: [Exact visual quality — studio photography / lifestyle / product render / illustration — describe the specific feel of this image]\\n\\nSTRICT RULE: Only describe elements present in the original image. Do NOT add humans if none exist. Do NOT add props not visible. Use [PRODUCT] as placeholder for the product description."
+  "strengths": ["Key strength 1", "Key strength 2", "Key strength 3"],
+  "suggestedCopyLanguage": "id"
 }
 
 Return only valid JSON, no markdown, no explanation.`;
@@ -190,7 +268,7 @@ Return only valid JSON, no markdown, no explanation.`;
   // Detect model refusal — retry with ultra-minimal prompt before giving up
   if (/^i('m| am) sorry|can't assist|cannot assist|i'm unable/i.test(analysisRaw.trim())) {
     console.warn('Vision model refused first attempt — retrying with minimal prompt');
-    const minimalPrompt = `Look at this image and return JSON describing: colors used, layout type, what is shown, mood, and main text visible. Format: {"colorPalette":["#hex"],"composition":"...","humanScenario":"...","mood":"...","hookMechanism":"...","visualStyle":"...","dominantAngle":"fomo","primaryEmotion":"...","lighting":"natural","narrativeStructure":{"setup":"...","tension":"...","resolution":"..."},"replicationBlueprint":"...","copyPattern":"...","visualStory":"...","format":"Feed","suggestedCopyLanguage":"id"}`;
+    const minimalPrompt = `Look at this image and return JSON describing its advertising design. Format: {"adType":"problem-solution","adAngle":"...","compositionType":"product_only","hasHumanModel":false,"humanScenario":"...","colorPalette":["#hex"],"composition":"...","humanScenario":"...","mood":"...","hookMechanism":"...","emotionalTruth":"...","visualStyle":"...","dominantAngle":"fomo","primaryEmotion":"...","lighting":"natural","narrativeStructure":{"setup":"...","tension":"...","resolution":"..."},"replicationBlueprint":"...","designFramework":"...","copyPattern":"...","visualStory":"...","detailedVisualAnalysis":"...","masterImagePrompt":"...","format":"Feed","strengths":[],"suggestedCopyLanguage":"id"}`;
     analysisRaw = await analyzeImage({ imageBase64, mimeType: safeMime, prompt: minimalPrompt });
   }
 

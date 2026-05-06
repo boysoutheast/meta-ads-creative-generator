@@ -43,13 +43,17 @@ export interface AngleVariation {
 }
 
 export interface WinningAdAnalysis {
+  // A-K framework fields (new)
+  adType?: string               // e.g. 'problem-solution', 'trust-building', 'FOMO'
+  adAngle?: string              // one-sentence psychological mechanism description
+  designFramework?: string      // Full A-I structured analysis (600+ words)
   // V2 deep dimensions (concept translation pipeline)
   humanScenario?: string
   emotionalTruth?: string
   hookMechanism?: string
   narrativeStructure?: { setup: string; tension: string; resolution: string }
   visualStory?: string
-  replicationBlueprint?: string
+  replicationBlueprint?: string // Section J slot-based framework template
   // Composition detection — drives whether generated images include a model
   compositionType?: 'product_only' | 'hand_holding' | 'model_with_product'
   hasHumanModel?: boolean
