@@ -756,7 +756,10 @@ If the reference photo shows a different product, IGNORE that product — show O
       .replace(/\[HEADLINE\]/g, imgHeadline)
       .replace(/\[SUBTEXT\]/g,  imgSub)
       .replace(/\[CTA\]/g,      imgCta)
-      .replace(/\[PRODUCT\]/g,  prodDesc);
+      .replace(/\[PRODUCT\]/g,  prodDesc)
+      .replace(/\[LOGO\]/g,     productName)
+      .replace(/\[BRAND\]/g,    productName)
+      .replace(/\[BRAND_NAME\]/g, productName);
 
     const angleLayer = buildAngleLayer(angle, sd, emotional, setting, props, productPricing, compositionType, persona);
     return `${productOverride}\n\n${base}\n\nANGLE-SPECIFIC LAYER (${(angle.angle || '').toUpperCase()}):\n${angleLayer}\n\n${textAccuracy}\n${bpom}\n${refNote}\n${quality}`;

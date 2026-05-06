@@ -1,6 +1,6 @@
 'use client'
 import { useEffect, useState } from 'react'
-import { History, Trash2, Layers, Wand2, ImageIcon } from 'lucide-react'
+import { History, Trash2, Layers, Wand2, ImageIcon, Download, Clock } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -8,6 +8,53 @@ import { CarouselViewer } from '@/components/ads/CarouselViewer'
 import { AdCard } from '@/components/ads/AdCard'
 import { loadHistory, deleteHistoryEntry, clearHistory, filterByKind } from '@/lib/history'
 import type { HistoryEntry, HistoryKind } from '@/lib/types'
+
+async function downloadUrl(url: string, filename: string) {
+  try {
+    const res = await fetch(url, { mode: 'cors' })
+    const blob = await res.blob()
+    const blobUrl = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = blobUrl
+    a.download = filename
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(blobUrl)
+  } catch {
+    window.open(url, '_blank')
+  }
+}
+
+function getImageUrls(entry: HistoryEntry): string[] {
+  const p = entry.payload
+  if (entry.kind === 'scale') {
+    return (p.variations || []).map((v: any) => v.imageUrl).filter(Boolean)
+  }
+  if (entry.kind === 'carousel') {
+    return (p.slides || []).map((s: any) => s.imageUrl).filter(Boolean)
+  }
+  if (entry.kind === 'create') {
+    return (p.results || []).map((r: any) => r.imageUrl).filter(Boolean)
+  }
+  return []
+}
+
+function timeAgo(ts: number): string {
+  const diff = Date.now() - ts
+  const h = Math.floor(diff / 3600000)
+  const m = Math.floor((diff % 3600000) / 60000)
+  if (h > 0) return `${h} jam lalu`
+  if (m > 0) return `${m} menit lalu`
+  return 'baru saja'
+}
+
+function expiresIn(ts: number): string {
+  const remaining = ts + 72 * 3600 * 1000 - Date.now()
+  if (remaining <= 0) return 'kedaluwarsa'
+  const h = Math.floor(remaining / 3600000)
+  return `kedaluwarsa dalam ${h}j`
+}
 
 export default function HistoryPage() {
   const [entries, setEntries] = useState<HistoryEntry[]>([])
@@ -35,7 +82,7 @@ export default function HistoryPage() {
             <History className="h-5 w-5 text-primary" />
             <h1 className="text-2xl font-bold tracking-tight">History</h1>
           </div>
-          <p className="text-muted-foreground">Disimpan di browser kamu (max 50 item).</p>
+          <p className="text-muted-foreground">Disimpan di browser kamu · auto-hapus setelah 72 jam.</p>
         </div>
         {entries.length > 0 && (
           <Button
@@ -78,46 +125,92 @@ export default function HistoryPage() {
         </div>
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {filtered.map((e) => (
-            <Card
-              key={e.id}
-              className="cursor-pointer overflow-hidden transition-all hover:border-primary"
-              onClick={() => setActive(e)}
-            >
-              <div className="relative aspect-video bg-muted">
-                {e.thumbnailUrl ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={e.thumbnailUrl} alt={e.productName} className="h-full w-full object-cover" />
-                ) : (
-                  <div className="flex h-full w-full items-center justify-center text-muted-foreground">
-                    <ImageIcon className="h-8 w-8" />
+          {filtered.map((e) => {
+            const imgUrls = getImageUrls(e)
+            const imgCount = imgUrls.length
+            return (
+              <Card
+                key={e.id}
+                className="cursor-pointer overflow-hidden transition-all hover:border-primary"
+                onClick={() => setActive(e)}
+              >
+                <div className="relative aspect-video bg-muted">
+                  {e.thumbnailUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={e.thumbnailUrl} alt={e.productName} className="h-full w-full object-cover" />
+                  ) : (
+                    <div className="flex h-full w-full flex-col items-center justify-center gap-1 text-muted-foreground">
+                      <ImageIcon className="h-8 w-8" />
+                      {imgCount > 0 && <p className="text-xs">{imgCount} gambar</p>}
+                    </div>
+                  )}
+                  <div className="absolute left-2 top-2">
+                    <Badge variant={e.kind === 'scale' ? 'default' : 'secondary'}>
+                      {e.kind === 'scale' && <Layers className="mr-1 h-3 w-3" />}
+                      {(e.kind === 'create' || e.kind === 'carousel') && <Wand2 className="mr-1 h-3 w-3" />}
+                      {e.kind}
+                    </Badge>
                   </div>
-                )}
-                <div className="absolute left-2 top-2">
-                  <Badge variant={e.kind === 'scale' ? 'default' : 'secondary'}>
-                    {e.kind === 'scale' && <Layers className="mr-1 h-3 w-3" />}
-                    {(e.kind === 'create' || e.kind === 'carousel') && <Wand2 className="mr-1 h-3 w-3" />}
-                    {e.kind}
-                  </Badge>
+                  {imgCount > 1 && (
+                    <div className="absolute right-2 top-2">
+                      <Badge variant="outline" className="bg-black/50 text-white border-none text-xs">
+                        {imgCount} img
+                      </Badge>
+                    </div>
+                  )}
                 </div>
-              </div>
-              <CardContent className="p-3">
-                <p className="truncate text-sm font-medium">{e.productName}</p>
-                <p className="text-xs text-muted-foreground">{new Date(e.createdAt).toLocaleString('id-ID')}</p>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  className="mt-2 h-7 px-2 text-xs text-destructive hover:bg-destructive/10 hover:text-destructive"
-                  onClick={(ev) => {
-                    ev.stopPropagation()
-                    if (confirm('Hapus item ini?')) remove(e.id)
-                  }}
-                >
-                  <Trash2 className="h-3 w-3" /> Hapus
-                </Button>
-              </CardContent>
-            </Card>
-          ))}
+                <CardContent className="p-3">
+                  <p className="truncate text-sm font-medium">{e.productName}</p>
+                  <div className="mt-0.5 flex items-center gap-1.5 text-xs text-muted-foreground">
+                    <Clock className="h-3 w-3" />
+                    <span>{timeAgo(e.createdAt)}</span>
+                    <span>·</span>
+                    <span className="text-amber-600">{expiresIn(e.createdAt)}</span>
+                  </div>
+                  <div className="mt-2 flex items-center gap-1">
+                    {imgCount === 1 && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-7 px-2 text-xs"
+                        onClick={(ev) => {
+                          ev.stopPropagation()
+                          const slug = (e.productName || 'ad').toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '').slice(0, 30)
+                          downloadUrl(imgUrls[0], `${slug}-${e.kind}.jpg`)
+                        }}
+                      >
+                        <Download className="h-3 w-3" /> Download
+                      </Button>
+                    )}
+                    {imgCount > 1 && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-7 px-2 text-xs"
+                        onClick={(ev) => {
+                          ev.stopPropagation()
+                          setActive(e)
+                        }}
+                      >
+                        <Download className="h-3 w-3" /> {imgCount} gambar
+                      </Button>
+                    )}
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="ml-auto h-7 px-2 text-xs text-destructive hover:bg-destructive/10 hover:text-destructive"
+                      onClick={(ev) => {
+                        ev.stopPropagation()
+                        if (confirm('Hapus item ini?')) remove(e.id)
+                      }}
+                    >
+                      <Trash2 className="h-3 w-3" /> Hapus
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            )
+          })}
         </div>
       )}
 
