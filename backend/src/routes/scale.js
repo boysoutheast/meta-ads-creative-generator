@@ -239,7 +239,7 @@ router.post('/generate-variations', async (req, res) => {
   const angles = await generateScalingAngles(
     analysis, productName, selectedAngles, productVisualDescription, productDescription, masterImagePrompt
   );
-  if (!angles.length) return res.status(500).json({ error: 'Failed to generate scaling angles' });
+  if (!angles.length) return res.status(422).json({ error: 'Gagal generate scaling angles — coba lagi atau kurangi jumlah angle.' });
 
   const variationsWithPrompts = await generateVariationPrompts(analysis, angles, productName, productVisualDescription, { productPrice, productPromoPrice }, masterImagePrompt, productDescription);
 

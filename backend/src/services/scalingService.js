@@ -299,20 +299,23 @@ Return only valid JSON, no markdown, no explanation.`;
 // CONCEPT TRANSLATION — not template application.
 // Takes the winning ad's hook/scenario/emotional truth and translates it
 // specifically to the user's product context.
-// masterImagePrompt: the long structured prompt generated at analyze-time —
-// passed in as context so sceneDetails align with the actual ad layout.
+//
+// Batching: each LLM call handles at most BATCH_SIZE angles.
+// 20 angles at ~500 tokens/angle = ~10k tokens — well above maxTokens:6000.
+// Splitting into batches of 5 keeps each response under ~3k tokens.
+// Batches run in parallel so total latency ~= one single batch call.
 
-async function generateScalingAngles(
+const ANGLE_BATCH_SIZE = 5;
+
+async function _callAnglesForBatch(
+  batchAngles,
   winningAnalysis,
   productName,
-  selectedAngles = [],
-  productVisualDescription = null,
-  productDescription = null,
-  masterImagePrompt = null,
+  productVisualDescription,
+  productDescription,
+  masterImagePrompt,
 ) {
-  const anglesToGenerate = selectedAngles.length > 0
-    ? selectedAngles
-    : Object.keys(SCALING_ANGLES);
+  // (all prompt-building logic moved here — driven by batchAngles list)
 
   // ── Format winning ad DNA as human-readable "contoh" block, not raw JSON ──
   const ns = winningAnalysis.narrativeStructure || {};
@@ -399,7 +402,7 @@ ${rule3}
 
 ${productBlock}
 ${masterBlock ? '\n' + masterBlock + '\n' : ''}
-ANGLE YANG DIMINTA: ${anglesToGenerate.join(', ')}
+ANGLE YANG DIMINTA: ${batchAngles.join(', ')}
 
 ━━━━ INSTRUKSI TRANSLATE ━━━━
 
@@ -437,7 +440,7 @@ Untuk tiap angle, return objek JSON dengan field BERIKUT (isi sedetail mungkin, 
   }
 }
 
-Return array JSON valid dengan TEPAT ${anglesToGenerate.length} item. Tanpa markdown, tanpa komentar, langsung array.`;
+Return array JSON valid dengan TEPAT ${batchAngles.length} item. Tanpa markdown, tanpa komentar, langsung array.`;
 
   const response = await chatCompletion({
     model: config.models.scalingChat,
@@ -453,10 +456,55 @@ Return array JSON valid dengan TEPAT ${anglesToGenerate.length} item. Tanpa mark
     const jsonMatch = response.match(/\[[\s\S]*\]/);
     if (jsonMatch) return JSON.parse(jsonMatch[0]);
   } catch (e) {
-    console.warn('Could not parse scaling angles as JSON:', e.message);
+    console.warn(`[_callAnglesForBatch] JSON parse failed for batch [${batchAngles.join(',')}]:`, e.message);
   }
 
   return [];
+}
+
+// ─── generateScalingAngles (public) ──────────────────────────────────────────
+// Splits anglesToGenerate into batches of ANGLE_BATCH_SIZE (5), runs each batch
+// as a separate LLM call in parallel, then flattens the results.
+// This prevents token-limit truncation when generating all 20 angles at once
+// (20 × ~500 tokens/angle ≈ 10k tokens > maxTokens:6000).
+
+async function generateScalingAngles(
+  winningAnalysis,
+  productName,
+  selectedAngles = [],
+  productVisualDescription = null,
+  productDescription = null,
+  masterImagePrompt = null,
+) {
+  const anglesToGenerate = selectedAngles.length > 0
+    ? selectedAngles
+    : Object.keys(SCALING_ANGLES);
+
+  // Build batches
+  const batches = [];
+  for (let i = 0; i < anglesToGenerate.length; i += ANGLE_BATCH_SIZE) {
+    batches.push(anglesToGenerate.slice(i, i + ANGLE_BATCH_SIZE));
+  }
+
+  console.log(`[generateScalingAngles] ${anglesToGenerate.length} angles → ${batches.length} batch(es) of ≤${ANGLE_BATCH_SIZE}`);
+
+  // Run all batches in parallel — each is an independent LLM call
+  const batchResults = await Promise.allSettled(
+    batches.map((batch) =>
+      _callAnglesForBatch(batch, winningAnalysis, productName, productVisualDescription, productDescription, masterImagePrompt)
+    )
+  );
+
+  const angles = batchResults.flatMap((r, idx) => {
+    if (r.status === 'rejected') {
+      console.warn(`[generateScalingAngles] batch ${idx} failed:`, r.reason?.message);
+      return [];
+    }
+    return r.value || [];
+  });
+
+  console.log(`[generateScalingAngles] got ${angles.length} / ${anglesToGenerate.length} angles`);
+  return angles;
 }
 
 // ─── truncateForImage ─────────────────────────────────────────────────────────
