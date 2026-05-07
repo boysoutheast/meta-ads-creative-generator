@@ -66,7 +66,7 @@ router.post('/generate-variations-stream', async (req, res) => {
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
-  res.setHeader('X-Accel-Buffering', 'no'); // Disable nginx proxy buffering (Railway)
+  res.setHeader('X-Accel-Buffering', 'no'); // Disable nginx/Railway proxy buffering
   res.flushHeaders(); // Send headers immediately so the client can start reading
 
   const send = (data) => {
@@ -74,6 +74,16 @@ router.post('/generate-variations-stream', async (req, res) => {
     res.write(`data: ${JSON.stringify(data)}\n\n`);
     if (typeof res.flush === 'function') res.flush();
   };
+
+  // Keepalive heartbeat — Railway proxy kills idle SSE connections after ~3 min.
+  // Send a comment line every 20s so the connection stays alive through long LLM calls.
+  const keepalive = setInterval(() => {
+    if (!res.writableEnded) {
+      res.write(': ping\n\n');
+      if (typeof res.flush === 'function') res.flush();
+    }
+  }, 20000);
+  res.on('close', () => clearInterval(keepalive));
 
   const {
     analysis,
