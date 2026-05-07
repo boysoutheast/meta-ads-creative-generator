@@ -126,9 +126,9 @@ router.post('/generate-variations-stream', async (req, res) => {
     }
 
     // ── Phase 3: generate angle concepts + copy ───────────────────────────────
-    send({ type: 'status', message: `Generating copy untuk ${selectedAngles.length || 20} angle…` });
+    const onStatus = (msg) => send({ type: 'status', message: msg });
     const angles = await generateScalingAngles(
-      analysis, productName, selectedAngles, productVisualDescription, productDescription, masterImagePrompt
+      analysis, productName, selectedAngles, productVisualDescription, productDescription, masterImagePrompt, onStatus
     );
     if (!angles.length) {
       send({ type: 'error', message: 'Gagal generate scaling angles' });
@@ -137,7 +137,7 @@ router.post('/generate-variations-stream', async (req, res) => {
 
     const variationsWithPrompts = await generateVariationPrompts(
       analysis, angles, productName, productVisualDescription,
-      { productPrice, productPromoPrice }, masterImagePrompt, productDescription
+      { productPrice, productPromoPrice }, masterImagePrompt, productDescription, onStatus
     );
 
     // ── Phase 4: image generation with live progress ──────────────────────────
@@ -167,7 +167,8 @@ router.post('/generate-variations-stream', async (req, res) => {
       variationsWithPrompts, aspectRatio, referenceImageUrls, imagesPerAngle, angleQuantities,
       (completed, total, angle, headline) => {
         send({ type: 'progress', completed, total, angle, headline });
-      }
+      },
+      onStatus
     );
 
     send({

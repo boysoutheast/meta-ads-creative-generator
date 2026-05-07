@@ -475,6 +475,7 @@ async function generateScalingAngles(
   productVisualDescription = null,
   productDescription = null,
   masterImagePrompt = null,
+  onStatus = null,
 ) {
   const anglesToGenerate = selectedAngles.length > 0
     ? selectedAngles
@@ -488,11 +489,15 @@ async function generateScalingAngles(
 
   console.log(`[generateScalingAngles] ${anglesToGenerate.length} angles → ${batches.length} batch(es) of ≤${ANGLE_BATCH_SIZE}`);
 
+  onStatus?.(`Menyusun konsep untuk ${anglesToGenerate.length} angle (${batches.length} batch)…`);
+
   // Run all batches in parallel — each is an independent LLM call
   const batchResults = await Promise.allSettled(
-    batches.map((batch) =>
-      _callAnglesForBatch(batch, winningAnalysis, productName, productVisualDescription, productDescription, masterImagePrompt)
-    )
+    batches.map((batch, idx) => {
+      const labels = batch.map((k) => SCALING_ANGLES[k]?.label || k).join(', ');
+      onStatus?.(`Batch ${idx + 1}/${batches.length}: ${labels}`);
+      return _callAnglesForBatch(batch, winningAnalysis, productName, productVisualDescription, productDescription, masterImagePrompt);
+    })
   );
 
   const angles = batchResults.flatMap((r, idx) => {
@@ -1027,11 +1032,15 @@ ${quality}`;
 // masterImagePrompt: when provided (from analyze step), used as base; angle-specific
 // layers are appended on top rather than using the hardcoded template switch.
 
-async function generateVariationPrompts(winningAnalysis, angles, productName, productVisualDescription = null, productPricing = {}, masterImagePrompt = null, productDescription = null) {
-  return angles.map((angle) => {
+async function generateVariationPrompts(winningAnalysis, angles, productName, productVisualDescription = null, productPricing = {}, masterImagePrompt = null, productDescription = null, onStatus = null) {
+  const result = [];
+  for (const angle of angles) {
+    const label = angle.label || (angle.angle || '').replace(/_/g, ' ');
+    onStatus?.(`Menyusun prompt: ${label}`);
     const imagePrompt = buildAngleImagePrompt(angle, winningAnalysis, productName, productVisualDescription, productPricing, masterImagePrompt, productDescription);
-    return { ...angle, imagePrompt };
-  });
+    result.push({ ...angle, imagePrompt });
+  }
+  return result;
 }
 
 // ─── batchGenerateImages ──────────────────────────────────────────────────────
@@ -1054,7 +1063,7 @@ function makeSemaphore(limit) {
   });
 }
 
-async function batchGenerateImages(variations, aspectRatio = '1:1', referenceImageUrls = [], imagesPerAngle = 1, angleQuantities = {}, onProgress = null) {
+async function batchGenerateImages(variations, aspectRatio = '1:1', referenceImageUrls = [], imagesPerAngle = 1, angleQuantities = {}, onProgress = null, onStatus = null) {
   const sizeMap = {
     '1:1': '1024x1024',
     '9:16': '1024x1536',
@@ -1090,12 +1099,15 @@ async function batchGenerateImages(variations, aspectRatio = '1:1', referenceIma
       return Promise.allSettled(
         Array.from({ length: count }, () =>
           run(async () => {
+            const label = v.label || (v.angle || '').replace(/_/g, ' ');
+            onStatus?.(`Mengirim gambar: ${label}`);
             const result = await generateImage({
               prompt: v.imagePrompt,
               size,
               referenceImages: referenceImageUrls.length > 0 ? referenceImageUrls : undefined,
             });
             completed++;
+            onStatus?.(`Selesai: ${label} ✓`);
             if (onProgress) onProgress(completed, totalImages, v.angle, v.headline || '');
             return result;
           })

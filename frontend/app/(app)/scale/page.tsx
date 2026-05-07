@@ -489,15 +489,10 @@ export default function ScalePage() {
               <div className="rounded-xl border bg-card p-5 space-y-4">
                 {genProgress ? (
                   <>
-                    {/* Fraction + percentage */}
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2 text-sm font-medium">
-                        <Loader2 className="h-4 w-4 animate-spin text-primary" />
-                        <span>Generating gambar…</span>
-                      </div>
-                      <span className="text-sm font-semibold tabular-nums">
-                        {genProgress.completed} / {genProgress.total}
-                      </span>
+                    {/* Status text — shows what's happening right now */}
+                    <div className="flex items-center gap-2 text-sm font-medium">
+                      <Loader2 className="h-4 w-4 animate-spin text-primary shrink-0" />
+                      <span className="truncate">{genStatus || 'Generating gambar…'}</span>
                     </div>
                     {/* Progress bar */}
                     <div className="h-2.5 w-full overflow-hidden rounded-full bg-muted">
@@ -506,12 +501,10 @@ export default function ScalePage() {
                         style={{ width: `${genProgress.total > 0 ? Math.round(genProgress.completed / genProgress.total * 100) : 0}%` }}
                       />
                     </div>
-                    {/* Current angle */}
+                    {/* Count + percentage */}
                     <div className="flex items-center justify-between text-xs text-muted-foreground">
-                      {genProgress.angle ? (
-                        <span>Angle: <span className="font-medium text-foreground">{genProgress.angle.replace(/_/g, ' ')}</span></span>
-                      ) : <span>Memulai…</span>}
-                      <span>{genProgress.total > 0 ? Math.round(genProgress.completed / genProgress.total * 100) : 0}%</span>
+                      <span>{genProgress.completed} / {genProgress.total} gambar selesai</span>
+                      <span className="font-semibold tabular-nums">{genProgress.total > 0 ? Math.round(genProgress.completed / genProgress.total * 100) : 0}%</span>
                     </div>
                   </>
                 ) : (
