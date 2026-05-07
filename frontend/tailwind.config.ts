@@ -66,11 +66,17 @@ const config: Config = {
           '0%': { backgroundPosition: '-1000px 0' },
           '100%': { backgroundPosition: '1000px 0' },
         },
+        indeterminate: {
+          '0%': { transform: 'translateX(-100%)' },
+          '50%': { transform: 'translateX(150%)' },
+          '100%': { transform: 'translateX(400%)' },
+        },
       },
       animation: {
         'accordion-down': 'accordion-down 0.2s ease-out',
         'accordion-up': 'accordion-up 0.2s ease-out',
         shimmer: 'shimmer 2s infinite linear',
+        indeterminate: 'indeterminate 1.5s ease-in-out infinite',
       },
     },
   },

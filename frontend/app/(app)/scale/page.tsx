@@ -515,11 +515,18 @@ export default function ScalePage() {
                     </div>
                   </>
                 ) : (
-                  /* Pre-image phase — show status text */
-                  <div className="flex items-center gap-3 text-sm text-muted-foreground">
-                    <Loader2 className="h-4 w-4 animate-spin text-primary shrink-0" />
-                    <span>{genStatus || `Generating ${selectedAngles.length} angle…`}</span>
-                  </div>
+                  /* Pre-image phase — indeterminate bar + status text */
+                  <>
+                    <div className="flex items-center gap-2 text-sm font-medium">
+                      <Loader2 className="h-4 w-4 animate-spin text-primary shrink-0" />
+                      <span>{genStatus || `Generating ${selectedAngles.length} angle…`}</span>
+                    </div>
+                    {/* Indeterminate animated bar */}
+                    <div className="h-2.5 w-full overflow-hidden rounded-full bg-muted">
+                      <div className="h-full w-1/3 rounded-full bg-primary/70 animate-indeterminate" />
+                    </div>
+                    <p className="text-xs text-muted-foreground">Menyiapkan copy & prompt untuk semua angle…</p>
+                  </>
                 )}
               </div>
 
