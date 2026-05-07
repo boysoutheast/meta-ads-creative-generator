@@ -1083,18 +1083,36 @@ async function batchGenerateImages(variations, aspectRatio = '1:1', referenceIma
 
   onStatus?.(`Mengirim ${totalImages} job ke apimart…`);
 
-  // ── Phase 1: Submit ALL jobs simultaneously — just HTTP POST, very fast ──
+  // ── Phase 1: Submit all jobs — max 10 concurrent, retry up to 3× on failure ──
+  const SUBMIT_CONCURRENCY = 10;
+  const submitRun = makeSemaphore(SUBMIT_CONCURRENCY);
+  const MAX_RETRIES = 3;
+
   const submissions = await Promise.allSettled(
-    jobs.map(async ({ v }) => {
-      const label = v.label || (v.angle || '').replace(/_/g, ' ');
-      onStatus?.(`Submit: ${label}`);
-      const payload = { model: config.models.image, prompt: v.imagePrompt, n: 1, size };
-      if (referenceImageUrls.length > 0) payload.images = referenceImageUrls;
-      return submitImageJobPayload(payload);
-    })
+    jobs.map(({ v }) =>
+      submitRun(async () => {
+        const label = v.label || (v.angle || '').replace(/_/g, ' ');
+        onStatus?.(`Submit: ${label}`);
+        const payload = { model: config.models.image, prompt: v.imagePrompt, n: 1, size };
+        if (referenceImageUrls.length > 0) payload.images = referenceImageUrls;
+        let lastErr;
+        for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+          try {
+            return await submitImageJobPayload(payload);
+          } catch (err) {
+            lastErr = err;
+            const retryable = !err?.response?.status || err?.response?.status >= 429;
+            if (!retryable || attempt === MAX_RETRIES - 1) break;
+            await new Promise((r) => setTimeout(r, 800 * (attempt + 1))); // 0.8s, 1.6s backoff
+          }
+        }
+        throw lastErr;
+      })
+    )
   );
 
-  onStatus?.(`Semua ${totalImages} job terkirim — menunggu hasil…`);
+  const submitFailed = submissions.filter((s) => s.status === 'rejected').length;
+  onStatus?.(`${totalImages - submitFailed}/${totalImages} job terkirim — menunggu hasil…`);
 
   // ── Phase 2: Poll ALL jobs simultaneously — total time = max(individual) ─
   let completed = 0;
@@ -1123,30 +1141,39 @@ async function batchGenerateImages(variations, aspectRatio = '1:1', referenceIma
 
       onStatus?.(`Menunggu: ${label}…`);
       const start = Date.now();
+      let pollErrors = 0;
 
       while (Date.now() - start < POLL_TIMEOUT) {
         await new Promise((r) => setTimeout(r, POLL_INTERVAL));
         let task;
-        try { task = await getTask(taskId); } catch { continue; } // retry on transient getTask error
+        try {
+          task = await getTask(taskId);
+          pollErrors = 0; // reset on success
+        } catch (e) {
+          pollErrors++;
+          if (pollErrors >= 6) throw new Error(`getTask gagal ${pollErrors}× berturut: ${e.message} (${label})`);
+          continue; // transient error — retry
+        }
         const status = (task.status || '').toLowerCase();
 
-        if (['completed', 'succeed', 'success'].includes(status)) {
+        if (['completed', 'succeed', 'success', 'done'].includes(status)) {
           const images = task.result?.images || task.images || task.result?.data || task.output?.images || [];
           let url;
           if (images.length) url = Array.isArray(images[0].url) ? images[0].url[0] : (images[0].url || images[0]);
           else url = task.result?.url || task.url || task.output?.url;
-          if (!url) throw new Error('Completed but no URL: ' + JSON.stringify(task).slice(0, 200));
+          if (!url) throw new Error('Selesai tapi URL tidak ditemukan: ' + JSON.stringify(task).slice(0, 200));
           completed++;
           onStatus?.(`Selesai: ${label} ✓`);
           onProgress?.(completed, totalImages, v.angle, v.headline || '');
           return url;
         }
         if (['failed', 'error', 'cancelled'].includes(status)) {
-          throw new Error(`Task failed (${label}): ${JSON.stringify(task).slice(0, 200)}`);
+          const errMsg = task.result?.error || task.error || task.message || JSON.stringify(task).slice(0, 150);
+          throw new Error(`Generate gagal (${label}): ${errMsg}`);
         }
-        // pending/processing/queued — keep polling
+        // pending / processing / queued / submitted — keep polling
       }
-      throw new Error(`Timeout setelah ${POLL_TIMEOUT / 1000}s — ${label}`);
+      throw new Error(`Timeout ${POLL_TIMEOUT / 1000}s — ${label}`);
     })
   );
 
