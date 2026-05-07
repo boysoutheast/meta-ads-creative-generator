@@ -1,4 +1,4 @@
-const { analyzeImage, chatCompletion, generateImage, generateVideo, getTask, uploadImageToApimart } = require('./apimart');
+const { analyzeImage, chatCompletion, generateImage, generateVideo, getTask, uploadImageToApimart, submitImageJobPayload, GPT_IMAGE_SIZE_MAP } = require('./apimart');
 const config = require('../config');
 const fs = require('fs');
 
@@ -1064,73 +1064,108 @@ function makeSemaphore(limit) {
 }
 
 async function batchGenerateImages(variations, aspectRatio = '1:1', referenceImageUrls = [], imagesPerAngle = 1, angleQuantities = {}, onProgress = null, onStatus = null) {
-  const sizeMap = {
-    '1:1': '1024x1024',
-    '9:16': '1024x1536',
-    '16:9': '1536x1024',
-    '4:5': '1024x1024',
-  };
-  const size = sizeMap[aspectRatio] || '1024x1024';
+  const sizeMap = { '1:1': '1024x1024', '9:16': '1024x1536', '16:9': '1536x1024', '4:5': '1024x1024' };
+  const rawSize = sizeMap[aspectRatio] || '1024x1024';
+  const size = GPT_IMAGE_SIZE_MAP[rawSize] || rawSize;
   const globalCount = Math.min(Math.max(parseInt(imagesPerAngle) || 1, 1), 5);
 
   const filteredVariations = variations.filter((v) => v.imagePrompt);
 
-  // Pre-calculate total images so progress reporting can show X/Y immediately
-  const totalImages = filteredVariations.reduce((sum, v) => {
+  // ── Build flat job list: one entry per image to generate ──────────────────
+  const jobs = [];
+  for (const v of filteredVariations) {
     const count = (angleQuantities && angleQuantities[v.angle])
       ? Math.min(Math.max(parseInt(angleQuantities[v.angle]) || 1, 1), 5)
       : globalCount;
-    return sum + count;
-  }, 0);
+    for (let i = 0; i < count; i++) jobs.push({ v, imgIdx: i });
+  }
+  const totalImages = jobs.length;
 
-  let completed = 0;
+  onStatus?.(`Mengirim ${totalImages} job ke apimart…`);
 
-  // Limit concurrent image API calls to 5 — prevents overwhelming the queue
-  // and avoids Express/Railway request timeouts when running 20 angles at once.
-  const CONCURRENCY = 5;
-  const run = makeSemaphore(CONCURRENCY);
-
-  const results = await Promise.allSettled(
-    filteredVariations.map((v) => {
-      const count = (angleQuantities && angleQuantities[v.angle])
-        ? Math.min(Math.max(parseInt(angleQuantities[v.angle]) || 1, 1), 5)
-        : globalCount;
-      // Each angle's N images also go through the semaphore individually
-      return Promise.allSettled(
-        Array.from({ length: count }, () =>
-          run(async () => {
-            const label = v.label || (v.angle || '').replace(/_/g, ' ');
-            onStatus?.(`Mengirim gambar: ${label}`);
-            const result = await generateImage({
-              prompt: v.imagePrompt,
-              size,
-              referenceImages: referenceImageUrls.length > 0 ? referenceImageUrls : undefined,
-            });
-            completed++;
-            onStatus?.(`Selesai: ${label} ✓`);
-            if (onProgress) onProgress(completed, totalImages, v.angle, v.headline || '');
-            return result;
-          })
-        )
-      );
+  // ── Phase 1: Submit ALL jobs simultaneously — just HTTP POST, very fast ──
+  const submissions = await Promise.allSettled(
+    jobs.map(async ({ v }) => {
+      const label = v.label || (v.angle || '').replace(/_/g, ' ');
+      onStatus?.(`Submit: ${label}`);
+      const payload = { model: config.models.image, prompt: v.imagePrompt, n: 1, size };
+      if (referenceImageUrls.length > 0) payload.images = referenceImageUrls;
+      return submitImageJobPayload(payload);
     })
   );
 
-  let filteredIdx = 0;
+  onStatus?.(`Semua ${totalImages} job terkirim — menunggu hasil…`);
+
+  // ── Phase 2: Poll ALL jobs simultaneously — total time = max(individual) ─
+  let completed = 0;
+  const POLL_INTERVAL = 5000;
+  const POLL_TIMEOUT  = 300000; // 5 min per image
+
+  const pollResults = await Promise.allSettled(
+    submissions.map(async (sub, idx) => {
+      const { v } = jobs[idx];
+      const label = v.label || (v.angle || '').replace(/_/g, ' ');
+
+      if (sub.status === 'rejected') throw sub.reason;
+      const submitted = sub.value;
+
+      // Sync response — URL already in submission
+      if (submitted.url) {
+        const url = Array.isArray(submitted.url) ? submitted.url[0] : submitted.url;
+        completed++;
+        onStatus?.(`Selesai: ${label} ✓`);
+        onProgress?.(completed, totalImages, v.angle, v.headline || '');
+        return url;
+      }
+
+      const taskId = submitted.task_id || submitted.taskId || submitted.id;
+      if (!taskId) throw new Error('No task_id: ' + JSON.stringify(submitted).slice(0, 200));
+
+      onStatus?.(`Menunggu: ${label}…`);
+      const start = Date.now();
+
+      while (Date.now() - start < POLL_TIMEOUT) {
+        await new Promise((r) => setTimeout(r, POLL_INTERVAL));
+        let task;
+        try { task = await getTask(taskId); } catch { continue; } // retry on transient getTask error
+        const status = (task.status || '').toLowerCase();
+
+        if (['completed', 'succeed', 'success'].includes(status)) {
+          const images = task.result?.images || task.images || task.result?.data || task.output?.images || [];
+          let url;
+          if (images.length) url = Array.isArray(images[0].url) ? images[0].url[0] : (images[0].url || images[0]);
+          else url = task.result?.url || task.url || task.output?.url;
+          if (!url) throw new Error('Completed but no URL: ' + JSON.stringify(task).slice(0, 200));
+          completed++;
+          onStatus?.(`Selesai: ${label} ✓`);
+          onProgress?.(completed, totalImages, v.angle, v.headline || '');
+          return url;
+        }
+        if (['failed', 'error', 'cancelled'].includes(status)) {
+          throw new Error(`Task failed (${label}): ${JSON.stringify(task).slice(0, 200)}`);
+        }
+        // pending/processing/queued — keep polling
+      }
+      throw new Error(`Timeout setelah ${POLL_TIMEOUT / 1000}s — ${label}`);
+    })
+  );
+
+  // ── Phase 3: Map flat poll results back to per-variation structure ────────
+  let jobIdx = 0;
   return variations.map((v) => {
     if (!v.imagePrompt) return { ...v, imageUrl: null, imageUrls: [], imageError: 'No prompt generated' };
-    const batchResult = results[filteredIdx++];
-    if (batchResult.status === 'rejected') {
-      return { ...v, imageUrl: null, imageUrls: [], imageError: batchResult.reason?.message };
-    }
-    const urls = batchResult.value
-      .map((r) => (r.status === 'fulfilled' ? r.value?.[0]?.url || null : null))
-      .filter(Boolean);
+    const count = (angleQuantities && angleQuantities[v.angle])
+      ? Math.min(Math.max(parseInt(angleQuantities[v.angle]) || 1, 1), 5)
+      : globalCount;
+    const varResults = pollResults.slice(jobIdx, jobIdx + count);
+    jobIdx += count;
+    const urls = varResults.filter((r) => r.status === 'fulfilled' && r.value).map((r) => r.value);
+    const firstErr = varResults.find((r) => r.status === 'rejected')?.reason?.message;
     return {
       ...v,
       imageUrl: urls[0] || null,
       imageUrls: urls,
-      imageError: urls.length === 0 ? 'All image generations failed' : null,
+      imageError: urls.length === 0 ? (firstErr || 'All image generations failed') : null,
     };
   });
 }

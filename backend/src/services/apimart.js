@@ -280,6 +280,7 @@ module.exports = {
   chatCompletion,
   analyzeImage,
   submitImageJob,
+  submitImageJobPayload,
   uploadImageToApimart,
   generateImage,
   getTask,
@@ -287,4 +288,5 @@ module.exports = {
   generateVideoFromReference,
   pollVideoTask,
   checkVideoStatus,
+  GPT_IMAGE_SIZE_MAP,
 };
