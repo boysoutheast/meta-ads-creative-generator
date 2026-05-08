@@ -129,6 +129,77 @@ export async function generateScalingVariationsStream(
   }
 }
 
+// ─── AI Reels (GeminiGen Grok) ───────────────────────────────────────────────
+
+export type ReelsClip = {
+  uuid: string
+  videoUrl: string | null
+  thumbnailUrl: string | null
+}
+
+export type ReelsSSEEvent =
+  | { type: 'start'; totalClips: number; targetDuration: number }
+  | { type: 'clip_start'; clipIndex: number; totalClips: number }
+  | { type: 'clip_progress'; clipIndex: number; pct: number; totalClips: number }
+  | { type: 'clip_done'; clipIndex: number; clip: ReelsClip; totalClips: number }
+  | { type: 'done'; clips: ReelsClip[] }
+  | { type: 'error'; message: string }
+
+export async function generateReelsStream(
+  payload: { prompt: string; targetDuration: number; mode?: string },
+  onEvent: (event: ReelsSSEEvent) => void,
+): Promise<ReelsClip[]> {
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(), 30 * 60_000) // 30 min max
+
+  try {
+    const response = await fetch(`${API_URL}/reels/generate-stream`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    })
+
+    if (!response.ok) {
+      const text = await response.text().catch(() => '')
+      throw new Error(`HTTP ${response.status}: ${text}`)
+    }
+
+    const reader = response.body!.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+    let finalClips: ReelsClip[] = []
+
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+
+      const parts = buffer.split('\n\n')
+      buffer = parts.pop() ?? ''
+
+      for (const part of parts) {
+        for (const line of part.split('\n')) {
+          if (!line.startsWith('data: ')) continue
+          try {
+            const evt = JSON.parse(line.slice(6)) as ReelsSSEEvent
+            onEvent(evt)
+            if (evt.type === 'done') finalClips = evt.clips
+            if (evt.type === 'error') throw new Error(evt.message)
+          } catch (parseErr) {
+            if ((parseErr as Error).message && !(parseErr as Error).message.includes('JSON'))
+              throw parseErr
+          }
+        }
+      }
+    }
+
+    return finalClips
+  } finally {
+    clearTimeout(timeoutId)
+  }
+}
+
 export async function generateScalingVariations(payload: {
   analysis: any
   productName: string

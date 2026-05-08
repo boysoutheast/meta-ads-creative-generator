@@ -3,17 +3,14 @@ import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import {
   LayoutDashboard,
-  Image as ImageIcon,
   Library,
-  Wand2,
   Sparkles,
   LogOut,
   User as UserIcon,
   History,
   Package,
   Layers,
-  Video,
-  Scissors,
+  Film,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/lib/auth'
@@ -31,11 +28,8 @@ const navGroups = [
   {
     label: 'Generate',
     items: [
-      { href: '/generate/single-image', label: 'Single Image', icon: ImageIcon },
       { href: '/scale', label: 'Scale Winning Image', icon: Layers },
-      { href: '/scale-video', label: 'Scale Winning Video', icon: Video },
-      { href: '/remake', label: 'Video Remake', icon: Scissors },
-      { href: '/create', label: 'Create w/ Reference', icon: Sparkles },
+      { href: '/reels', label: 'Create AI Reels', icon: Film },
     ],
   },
   {

@@ -15,6 +15,9 @@ const analyzeRoutes = require('./routes/analyze');
 const scaleRoutes = require('./routes/scale');
 const createRoutes = require('./routes/create');
 
+// AI Reels (GeminiGen Grok)
+const reelsRoutes = require('./routes/reels');
+
 // Phase 1 new routes
 const healthRoutes = require('./routes/health');
 const authRoutes = require('./routes/auth');
@@ -59,6 +62,9 @@ app.get('/api/tasks/:id', requireAuth, async (req, res) => {
   const task = await getTask(req.params.id);
   res.json(task);
 });
+
+// AI Reels
+app.use('/api/reels', reelsRoutes);
 
 // Existing v1 routes
 app.use('/api/generate', generateRoutes);
