@@ -78,12 +78,11 @@ const {
   createSession, saveSession, getSession, auditLog, cleanupOldSessions,
 } = require('../services/sessionStore');
 const { buildStoryboard, refreshFromIndex } = require('../services/storyboardBuilder');
-const { generateFirstClip, pollUntilComplete } = require('../services/geminiGenService');
-const { generateSceneImages, generateSingleSceneImage } = require('../services/sceneImageService');
+const { generateSceneImages } = require('../services/sceneImageService');
 const {
-  downloadClips, verifyClips, mergeClips, verifyMerged, cleanupClips, cleanupAll,
-  sweepExpiredMerged,
+  cleanupAll, sweepExpiredMerged,
 } = require('../services/reelsMerger');
+const { runGeneration } = require('../services/reelsGenerator');
 
 // Run session cleanup + merged-file sweep on startup
 cleanupOldSessions().catch(() => {});
@@ -93,7 +92,6 @@ sweepExpiredMerged();
 setInterval(() => sweepExpiredMerged(), 6 * 60 * 60 * 1000);
 
 const VALID_DURATIONS = [10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120];
-const MAX_CLIP_ATTEMPTS = 3;
 
 // ── SSE helper ────────────────────────────────────────────────────────────────
 
@@ -313,196 +311,23 @@ router.post('/generate-stream', async (req, res) => {
   const cleanup = () => clearInterval(ping);
 
   try {
-    const { totalClips, storyboard, mode } = session;
+    // Delegate the full generation + merge pipeline to reelsGenerator
+    const mergedInfo = await runGeneration(
+      session,
+      (data) => sse(res, data),   // SSE sender
+      saveSession,
+    );
 
-    session.status = 'generating';
-    auditLog(session, 'info', 'GENERATION_START', { totalClips });
-    await saveSession(session);
-
-    sse(res, { type: 'start', totalClips, sessionId });
-
-    // ── generate each clip (resume-aware) ────────────────────────────────────
-    for (let i = 0; i < totalClips; i++) {
-      const existingClip = session.clips.find(c => c.index === i && c.status === 'done');
-
-      if (existingClip) {
-        // Already done — skip (resume mode)
-        sse(res, { type: 'clip_skip', clipIndex: i, totalClips, uuid: existingClip.uuid });
-        auditLog(session, 'info', `CLIP_${i + 1}_SKIPPED_RESUME`, { uuid: existingClip.uuid });
-        continue;
-      }
-
-      sse(res, { type: 'clip_start', clipIndex: i, totalClips });
-
-      // Find or init clip record
-      let clipRecord = session.clips.find(c => c.index === i);
-      if (!clipRecord) {
-        clipRecord = { index: i, status: 'pending', uuid: null, videoUrl: null, sha256: null, attempts: 0, error: null };
-        session.clips.push(clipRecord);
-      }
-
-      const grokPrompt = storyboard[i]?.grokPrompt;
-      if (!grokPrompt) {
-        const err = `Storyboard missing grokPrompt for clip ${i + 1}`;
-        sse(res, { type: 'error', message: err });
-        auditLog(session, 'error', `CLIP_${i + 1}_NO_PROMPT`, { error: err });
-        session.status = 'error';
-        await saveSession(session);
-        cleanup();
-        return res.end();
-      }
-
-      let clipDone = false;
-
-      // All clips are independently generated (no extend chain)
-      // image_urls[] = [sceneImageUrl, ...userRefImageUrls] for visual reference
-      const clipMeta = storyboard[i];
-
-      // Collect image URLs: scene image first, then user-uploaded ref images for this clip
-      const imageUrls = [];
-      const sceneImageUrl = clipMeta?.sceneImageUrl;
-      if (sceneImageUrl) imageUrls.push(sceneImageUrl);
-
-      // User-uploaded reference images (character/product) — kept in session.referenceImageUrls
-      // Include all user refs for every clip (AI decides relevance via @imageN in grokPrompt)
-      (session.referenceImageUrls || []).forEach(r => {
-        if (r.url) imageUrls.push(r.url);
+    // null means runGeneration already sent an error SSE and session is saved
+    if (mergedInfo) {
+      sse(res, {
+        type: 'ready',
+        sessionId,
+        mergedHash: mergedInfo.sha256,
+        sizeBytes: mergedInfo.sizeBytes,
+        downloadUrl: `/api/reels/download/${sessionId}`,
       });
-
-      for (let attempt = 1; attempt <= MAX_CLIP_ATTEMPTS; attempt++) {
-        clipRecord.attempts = attempt;
-        auditLog(session, 'info', `CLIP_${i + 1}_ATTEMPT_${attempt}`, {
-          prompt: grokPrompt.slice(0, 80),
-          imageUrls,
-        });
-
-        try {
-          // Every clip is a fresh generate with its scene image as visual reference
-          let result;
-          result = await generateFirstClip({ prompt: grokPrompt, mode, imageUrls });
-
-          clipRecord.uuid = result.uuid;
-          clipRecord.status = 'polling';
-          await saveSession(session);
-
-          // Poll with progress
-          const clip = await pollUntilComplete(result.uuid, (pct) => {
-            sse(res, { type: 'clip_progress', clipIndex: i, pct, totalClips });
-          });
-
-          clipRecord.status = 'done';
-          clipRecord.videoUrl = clip.videoUrl;
-          clipRecord.thumbnailUrl = clip.thumbnailUrl;
-          clipRecord.completedAt = new Date().toISOString();
-
-          auditLog(session, 'info', `CLIP_${i + 1}_DONE`, {
-            uuid: result.uuid,
-            videoUrl: clip.videoUrl,
-            attempt,
-          });
-          await saveSession(session);
-
-          sse(res, {
-            type: 'clip_done',
-            clipIndex: i,
-            totalClips,
-            clip: { uuid: clip.uuid, videoUrl: clip.videoUrl, thumbnailUrl: clip.thumbnailUrl },
-          });
-
-          clipDone = true;
-          break;
-
-        } catch (err) {
-          clipRecord.error = err.message;
-          auditLog(session, 'error', `CLIP_${i + 1}_ATTEMPT_${attempt}_FAIL`, { error: err.message });
-          await saveSession(session);
-
-          if (attempt < MAX_CLIP_ATTEMPTS) {
-            sse(res, { type: 'clip_retry', clipIndex: i, attempt, error: err.message });
-            await sleep(3000 * attempt); // backoff
-          }
-        }
-      }
-
-      if (!clipDone) {
-        clipRecord.status = 'error';
-        session.status = 'partial';
-        auditLog(session, 'error', `CLIP_${i + 1}_FAILED_ALL_ATTEMPTS`, { clipIndex: i });
-        await saveSession(session);
-
-        sse(res, {
-          type: 'error',
-          message: `Clip ${i + 1} failed after ${MAX_CLIP_ATTEMPTS} attempts. Session saved — you can resume.`,
-          resumable: true,
-          failedAtClip: i,
-          sessionId,
-        });
-        cleanup();
-        return res.end();
-      }
     }
-
-    // ── all clips done — merge ─────────────────────────────────────────────────
-    session.status = 'merging';
-    auditLog(session, 'info', 'MERGE_START', { clipCount: totalClips });
-    await saveSession(session);
-
-    sse(res, { type: 'merge_start', totalClips });
-
-    // Download clips
-    sse(res, { type: 'merge_progress', phase: 'downloading', progress: 0 });
-    auditLog(session, 'info', 'MERGE_DOWNLOADING', {});
-
-    // Sort by index to guarantee clip-0.mp4, clip-1.mp4 … order matches merge sequence
-    const doneClips = session.clips
-      .filter(c => c.status === 'done')
-      .sort((a, b) => a.index - b.index);
-    await downloadClips(sessionId, doneClips, ({ clipIndex, total }) => {
-      sse(res, { type: 'merge_progress', phase: 'downloading', clipIndex, total });
-    });
-
-    // Verify downloads
-    auditLog(session, 'info', 'MERGE_VERIFYING_CLIPS', {});
-    const verified = await verifyClips(sessionId, totalClips);
-    verified.forEach(v => {
-      auditLog(session, 'info', `CLIP_${v.index + 1}_VERIFIED`, { sha256: v.sha256, sizeBytes: v.sizeBytes });
-    });
-
-    // FFmpeg merge
-    sse(res, { type: 'merge_progress', phase: 'merging', progress: 0 });
-    auditLog(session, 'info', 'FFMPEG_START', {});
-
-    await mergeClips(sessionId, totalClips, ({ phase, progress }) => {
-      sse(res, { type: 'merge_progress', phase, progress: Math.round(progress) });
-    });
-
-    // Verify merged
-    const mergedInfo = await verifyMerged(sessionId);
-    session.mergedPath = mergedInfo.path;
-    session.mergedHash = mergedInfo.sha256;
-    session.sizeBytes = mergedInfo.sizeBytes;
-    session.status = 'done';
-    session.downloadReady = true;
-
-    auditLog(session, 'info', 'MERGE_DONE', {
-      mergedPath: mergedInfo.path,
-      mergedHash: mergedInfo.sha256,
-      sizeBytes: mergedInfo.sizeBytes,
-    });
-
-    // Cleanup individual clip files (merged is kept until download)
-    cleanupClips(sessionId, totalClips);
-    auditLog(session, 'info', 'CLIPS_CLEANED', { count: totalClips });
-
-    await saveSession(session);
-
-    sse(res, {
-      type: 'ready',
-      sessionId,
-      mergedHash: mergedInfo.sha256,
-      sizeBytes: mergedInfo.sizeBytes,
-      downloadUrl: `/api/reels/download/${sessionId}`,
-    });
 
   } catch (err) {
     console.error('[reels/generate-stream]', err.message);
@@ -613,11 +438,5 @@ router.get('/audit/:sessionId', async (req, res) => {
     audit: session.audit,
   });
 });
-
-// ── helpers ───────────────────────────────────────────────────────────────────
-
-function sleep(ms) {
-  return new Promise(r => setTimeout(r, ms));
-}
 
 module.exports = router;
