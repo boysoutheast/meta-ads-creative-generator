@@ -1,10 +1,10 @@
 'use client'
 
-import React, { useState, useEffect } from 'react'
+import React, { useState, useRef } from 'react'
 import {
   Film, Sparkles, AlertCircle, Loader2,
   RefreshCw, ChevronRight, Wand2, Eye, EyeOff, Camera,
-  Lightbulb, Clapperboard, MapPin,
+  Lightbulb, Clapperboard, MapPin, ImagePlus, X, Info,
 } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
@@ -15,10 +15,13 @@ import {
 } from '@/components/ui/select'
 import { Badge } from '@/components/ui/badge'
 import {
-  buildStoryboard, refreshClips,
-  type PublicClip, type TechnicalConfig,
+  buildStoryboard, refreshClips, generateSceneImages,
+  type PublicClip, type TechnicalConfig, type ReferenceImageInput,
 } from '@/lib/api'
 import { pushStoredSession } from '@/lib/reels-sessions'
+
+// Max reference images — matches backend MAX_REFERENCE_IMAGES constant
+const MAX_REF_IMAGES = 3
 
 // ─── constants ───────────────────────────────────────────────────────────────
 
@@ -37,7 +40,24 @@ const MODE_OPTIONS = [
 
 type Step = 'input' | 'storyboard'
 
+type RefImage = {
+  id: string
+  label: string
+  dataUrl: string
+  preview: string   // same as dataUrl for img src
+  sizeKB: number
+}
+
 // ─── helpers ─────────────────────────────────────────────────────────────────
+
+function readFileAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(reader.result as string)
+    reader.onerror = reject
+    reader.readAsDataURL(file)
+  })
+}
 
 // ─── root component ───────────────────────────────────────────────────────────
 
@@ -51,14 +71,66 @@ export default function ReelsPage() {
   const [mode, setMode] = useState('normal')
   const [building, setBuilding] = useState(false)
 
+  // reference images
+  const [refImages, setRefImages] = useState<RefImage[]>([])
+  const [refImageError, setRefImageError] = useState<string | null>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
   // storyboard
   const [sessionId, setSessionId] = useState<string | null>(null)
   const [storyboard, setStoryboard] = useState<PublicClip[]>([])
+  const [sessionRefLabels, setSessionRefLabels] = useState<{ tag: string; label: string }[]>([])
+  const [generatingScenes, setGeneratingScenes] = useState(false)
   const [refreshingFrom, setRefreshingFrom] = useState<number | null>(null)
   const [hints, setHints] = useState<Record<number, string>>({})
 
   // error
   const [error, setError] = useState<string | null>(null)
+
+  // ── Reference image upload ────────────────────────────────────────────────
+
+  async function handleRefImageFiles(files: FileList | null) {
+    if (!files || files.length === 0) return
+    setRefImageError(null)
+
+    const remaining = MAX_REF_IMAGES - refImages.length
+    if (remaining <= 0) {
+      setRefImageError(`Maximum ${MAX_REF_IMAGES} reference images allowed`)
+      return
+    }
+
+    const toProcess = Array.from(files).slice(0, remaining)
+    const results: RefImage[] = []
+
+    for (const file of toProcess) {
+      // Validate type
+      if (!file.type.startsWith('image/')) {
+        setRefImageError(`"${file.name}" is not an image file`)
+        return
+      }
+      // Validate size (5 MB)
+      if (file.size > 5 * 1024 * 1024) {
+        setRefImageError(`"${file.name}" exceeds 5 MB limit`)
+        return
+      }
+      const dataUrl = await readFileAsDataUrl(file)
+      results.push({
+        id: `${Date.now()}-${Math.random()}`,
+        label: file.name.replace(/\.[^.]+$/, '').slice(0, 30),
+        dataUrl,
+        preview: dataUrl,
+        sizeKB: Math.round(file.size / 1024),
+      })
+    }
+
+    setRefImages(prev => [...prev, ...results].slice(0, MAX_REF_IMAGES))
+    if (fileInputRef.current) fileInputRef.current.value = ''
+  }
+
+  function removeRefImage(id: string) {
+    setRefImages(prev => prev.filter(r => r.id !== id))
+    setRefImageError(null)
+  }
 
   // ── Step 1: build storyboard ───────────────────────────────────────────────
 
@@ -67,15 +139,53 @@ export default function ReelsPage() {
     setBuilding(true)
     setError(null)
     try {
-      const data = await buildStoryboard({ prompt: prompt.trim(), mode, duration })
+      const referenceImages: ReferenceImageInput[] = refImages.map(r => ({
+        label: r.label,
+        dataUrl: r.dataUrl,
+      }))
+      const data = await buildStoryboard({ prompt: prompt.trim(), mode, duration, referenceImages })
       setSessionId(data.sessionId)
       setStoryboard(data.storyboard)
+      setSessionRefLabels(data.referenceImageUrls || [])
       setHints({})
       setStep('storyboard')
+      setBuilding(false)
+
+      // Auto-generate scene preview images right after storyboard text is ready
+      handleGenerateSceneImages(data.sessionId, data.storyboard)
     } catch (err: any) {
       setError(err.message || 'Failed to build storyboard')
-    } finally {
       setBuilding(false)
+    }
+  }
+
+  // ── Scene image generation ─────────────────────────────────────────────────
+
+  async function handleGenerateSceneImages(sid: string, currentStoryboard: PublicClip[], fromIndex?: number) {
+    setGeneratingScenes(true)
+    try {
+      // Mark all clips from fromIndex as loading (sceneImageUrl = undefined-in-progress)
+      const startIdx = fromIndex ?? 0
+      setStoryboard(prev => prev.map((c, i) =>
+        i >= startIdx ? { ...c, sceneImageUrl: null } : c
+      ))
+
+      const data = await generateSceneImages({ sessionId: sid, fromIndex })
+
+      // Merge scene images into storyboard
+      setStoryboard(prev => {
+        const next = [...prev]
+        data.sceneImages.forEach(({ clipNumber, sceneImageUrl }) => {
+          const idx = next.findIndex(c => c.clipNumber === clipNumber)
+          if (idx !== -1) next[idx] = { ...next[idx], sceneImageUrl: sceneImageUrl ?? null }
+        })
+        return next
+      })
+    } catch (err: any) {
+      // Non-blocking — don't show error, just leave images as null
+      console.warn('Scene image generation failed:', err.message)
+    } finally {
+      setGeneratingScenes(false)
     }
   }
 
@@ -97,9 +207,12 @@ export default function ReelsPage() {
         data.storyboard.forEach((_, i) => { if (i >= fromIndex) delete next[i] })
         return next
       })
+      setRefreshingFrom(null)
+
+      // Regenerate scene images for refreshed clips
+      handleGenerateSceneImages(sessionId, data.storyboard, fromIndex)
     } catch (err: any) {
       setError(err.message || 'Refresh failed')
-    } finally {
       setRefreshingFrom(null)
     }
   }
@@ -199,8 +312,84 @@ export default function ReelsPage() {
               </div>
             </div>
 
+            {/* ── Reference Images ─────────────────────────────────────── */}
+            <div className="space-y-2">
+              <div className="flex items-center gap-2">
+                <Label>Reference Images</Label>
+                <span className="text-xs text-muted-foreground">
+                  optional · max {MAX_REF_IMAGES} · 5 MB each
+                </span>
+              </div>
+              <p className="text-xs text-muted-foreground leading-relaxed">
+                Upload character designs, product photos, or style references.
+                AI will use <span className="font-mono text-foreground/70">@image1</span>, <span className="font-mono text-foreground/70">@image2</span>, <span className="font-mono text-foreground/70">@image3</span> tags in clip prompts to maintain visual consistency.
+              </p>
+
+              {/* Uploaded images grid */}
+              {refImages.length > 0 && (
+                <div className="flex flex-wrap gap-2">
+                  {refImages.map((img, i) => (
+                    <div key={img.id} className="relative group w-24">
+                      <div className="relative overflow-hidden rounded-lg border border-border/60 bg-muted/30">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={img.preview} alt={img.label} className="h-20 w-24 object-cover" />
+                        <div className="absolute bottom-0 left-0 right-0 bg-black/60 px-1.5 py-0.5">
+                          <p className="text-[9px] text-white font-mono font-semibold">@image{i + 1}</p>
+                        </div>
+                        <button
+                          onClick={() => removeRefImage(img.id)}
+                          className="absolute top-1 right-1 flex h-5 w-5 items-center justify-center rounded-full bg-black/60 text-white opacity-0 group-hover:opacity-100 transition-opacity"
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      </div>
+                      <input
+                        value={img.label}
+                        onChange={e => setRefImages(prev =>
+                          prev.map(r => r.id === img.id ? { ...r, label: e.target.value } : r)
+                        )}
+                        className="mt-1 w-full rounded border bg-background px-1.5 py-0.5 text-[11px] focus:outline-none focus:ring-1 focus:ring-ring"
+                        placeholder={`Label @image${i + 1}`}
+                        maxLength={30}
+                      />
+                      <p className="text-[10px] text-muted-foreground text-right">{img.sizeKB}KB</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {refImages.length < MAX_REF_IMAGES && (
+                <div>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/*"
+                    multiple
+                    className="hidden"
+                    onChange={e => handleRefImageFiles(e.target.files)}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={building}
+                    className="flex items-center gap-2 rounded-md border border-dashed border-border/60 px-3 py-2 text-sm text-muted-foreground hover:border-primary/40 hover:text-foreground transition-colors disabled:opacity-50"
+                  >
+                    <ImagePlus className="h-4 w-4" />
+                    Add reference image ({refImages.length}/{MAX_REF_IMAGES})
+                  </button>
+                </div>
+              )}
+
+              {refImageError && (
+                <p className="text-xs text-destructive flex items-center gap-1">
+                  <AlertCircle className="h-3 w-3" />{refImageError}
+                </p>
+              )}
+            </div>
+
             <div className="rounded-md bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
               AI will generate {Math.ceil(duration / 10)} clips × 10s · Grok 720p Portrait · Mode: {mode}
+              {refImages.length > 0 && ` · ${refImages.length} reference image${refImages.length > 1 ? 's' : ''}`}
             </div>
 
             <Button
@@ -229,7 +418,7 @@ export default function ReelsPage() {
                 Review each clip. Refresh from any clip to regenerate it and everything below.
               </p>
             </div>
-            <Button variant="ghost" size="sm" onClick={() => { setStep('input'); setError(null) }}>
+            <Button variant="ghost" size="sm" onClick={() => { setStep('input'); setError(null); setSessionRefLabels([]) }}>
               ← Edit Brief
             </Button>
           </div>
@@ -240,6 +429,19 @@ export default function ReelsPage() {
             {' · '}<span className="font-medium text-foreground">Mode:</span> {mode}
             {' · '}<span className="font-medium text-foreground">{storyboard.length} clips · {storyboard.length * 10}s</span>
           </div>
+
+          {/* Reference image legend — only shown if session has refs */}
+          {sessionRefLabels.length > 0 && (
+            <div className="flex flex-wrap items-center gap-2 rounded-md bg-muted/30 border border-border/40 px-3 py-2">
+              <Info className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+              <span className="text-xs text-muted-foreground">Reference images:</span>
+              {sessionRefLabels.map(r => (
+                <span key={r.tag} className="inline-flex items-center gap-1 rounded-full border border-primary/30 bg-primary/5 px-2 py-0.5 text-[11px] text-primary/80 font-mono">
+                  {r.tag} <span className="font-sans font-normal text-foreground/60">= {r.label}</span>
+                </span>
+              ))}
+            </div>
+          )}
 
           {/* Clip cards */}
           <div className="space-y-3">
@@ -254,6 +456,7 @@ export default function ReelsPage() {
                 onRefresh={() => handleRefresh(idx)}
                 isRefreshing={refreshingFrom === idx}
                 isStale={refreshingFrom !== null && idx > refreshingFrom}
+                refLabels={sessionRefLabels}
               />
             ))}
           </div>
@@ -316,7 +519,7 @@ const TECH_BADGES: { key: keyof TechnicalConfig; icon: React.ReactNode; label: s
 ]
 
 function StoryboardClipCard({
-  clip, idx, totalClips, hint, onHintChange, onRefresh, isRefreshing, isStale,
+  clip, idx, totalClips, hint, onHintChange, onRefresh, isRefreshing, isStale, refLabels = [],
 }: {
   clip: PublicClip
   idx: number
@@ -326,6 +529,7 @@ function StoryboardClipCard({
   onRefresh: () => void
   isRefreshing: boolean
   isStale: boolean
+  refLabels?: { tag: string; label: string }[]
 }) {
   const [showHint, setShowHint] = useState(false)
   const [showPrompt, setShowPrompt] = useState(false)
@@ -336,15 +540,31 @@ function StoryboardClipCard({
     <Card className={`transition-opacity ${isStale && !isRefreshing ? 'opacity-50' : ''}`}>
       <CardContent className="p-4">
         <div className="flex items-start gap-3">
-          {/* Clip number */}
-          <div className="mt-0.5 shrink-0">
-            {isRefreshing ? (
-              <Loader2 className="h-5 w-5 animate-spin text-primary" />
-            ) : (
-              <Badge variant="secondary" className="text-xs tabular-nums">
-                {String(idx + 1).padStart(2, '0')}
-              </Badge>
-            )}
+
+          {/* Scene preview image — 9:16 portrait thumbnail */}
+          <div className="shrink-0 w-16 self-stretch">
+            <div className="relative w-16 rounded-md overflow-hidden border border-border/50 bg-muted/30" style={{ minHeight: '90px' }}>
+              {clip.sceneImageUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={clip.sceneImageUrl}
+                  alt={`Scene ${idx + 1}`}
+                  className="w-full h-full object-cover"
+                  style={{ minHeight: '90px' }}
+                />
+              ) : (
+                <div className="flex flex-col items-center justify-center w-full h-full gap-1 py-6">
+                  <Loader2 className="h-4 w-4 animate-spin text-muted-foreground/50" />
+                  <span className="text-[9px] text-muted-foreground/50 text-center">scene</span>
+                </div>
+              )}
+              {/* Clip number overlay */}
+              <div className="absolute bottom-0 left-0 right-0 bg-black/60 px-1 py-0.5 text-center">
+                <span className="text-[9px] text-white font-mono font-semibold">
+                  {isRefreshing ? '…' : `#${String(idx + 1).padStart(2, '0')}`}
+                </span>
+              </div>
+            </div>
           </div>
 
           {/* Content */}

@@ -78,10 +78,11 @@ function sleep(ms) {
 // ─── public API ─────────────────────────────────────────────────────────────
 
 /**
- * Generate the FIRST clip from a text prompt.
+ * Generate a FRESH clip from a text prompt, optionally with reference images.
+ * imageUrls — array of public CDN URLs; maps to GeminiGen image_urls[] param
  * Returns { uuid } immediately (async job).
  */
-async function generateFirstClip({ prompt, mode }) {
+async function generateFirstClip({ prompt, mode, imageUrls = [] }) {
   const form = new FormData();
   form.append('prompt', prompt);
   form.append('model', 'grok-video');
@@ -89,6 +90,8 @@ async function generateFirstClip({ prompt, mode }) {
   form.append('resolution', '720p');
   form.append('duration', '10');
   if (mode) form.append('mode', mode);
+  // Reference images — GeminiGen matches @image1, @image2 etc. in prompt text
+  imageUrls.forEach(url => form.append('image_urls[]', url));
 
   const { data } = await axios.post(`${BASE_URL}/uapi/v1/video-gen/grok`, form, {
     headers: { ...apiHeaders(), ...form.getHeaders() },

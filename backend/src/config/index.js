@@ -35,6 +35,8 @@ module.exports = {
     chat: process.env.CHAT_MODEL || 'gpt-4o',
     // Separate model for scaling prompt/copy generation — use Sonnet for better quality
     scalingChat: process.env.SCALING_CHAT_MODEL || process.env.CHAT_MODEL || 'gpt-4o',
+    // Scene preview image generation for storyboard cards (Gemini Image 2.0)
+    sceneImage: process.env.SCENE_IMAGE_MODEL || 'gemini-2.0-flash-preview-image-generation',
   },
 
   // Public-facing backend URL — used to construct static file URLs for video clips

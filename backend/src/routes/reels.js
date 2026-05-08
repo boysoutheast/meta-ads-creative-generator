@@ -31,12 +31,55 @@ const express = require('express');
 const router = express.Router();
 const path = require('path');
 const fs = require('fs');
+const config = require('../config');
+
+// Max reference images per session — GeminiGen supports @image1..@imageN; cap at 3 for reliability
+const MAX_REFERENCE_IMAGES = 3;
+const MAX_REF_IMAGE_SIZE_BYTES = 5 * 1024 * 1024; // 5 MB per image
+
+/**
+ * Save base64 reference images to disk under uploads/reels-refs/{sessionId}-{i}.{ext}
+ * Returns array of { tag, label, url } or throws on validation error.
+ */
+function saveReferenceImages(sessionId, rawImages) {
+  if (!Array.isArray(rawImages) || rawImages.length === 0) return [];
+  const capped = rawImages.slice(0, MAX_REFERENCE_IMAGES);
+
+  const refDir = path.join(path.resolve(config.upload.uploadDir), 'reels-refs');
+  if (!fs.existsSync(refDir)) fs.mkdirSync(refDir, { recursive: true });
+
+  return capped.map(({ label, dataUrl }, i) => {
+    if (!dataUrl || typeof dataUrl !== 'string') {
+      throw new Error(`Reference image ${i + 1}: missing dataUrl`);
+    }
+    const matches = dataUrl.match(/^data:image\/([\w+]+);base64,(.+)$/);
+    if (!matches) throw new Error(`Reference image ${i + 1}: invalid dataUrl format (must be data:image/...;base64,...)`);
+
+    const ext = matches[1].replace('jpeg', 'jpg').replace('+xml', '') || 'jpg';
+    const buffer = Buffer.from(matches[2], 'base64');
+
+    if (buffer.length > MAX_REF_IMAGE_SIZE_BYTES) {
+      throw new Error(`Reference image ${i + 1} exceeds 5 MB limit (${Math.round(buffer.length / 1024)}KB)`);
+    }
+    if (buffer.length < 100) {
+      throw new Error(`Reference image ${i + 1} is too small — likely corrupt`);
+    }
+
+    const filename = `${sessionId}-ref-${i}.${ext}`;
+    fs.writeFileSync(path.join(refDir, filename), buffer);
+
+    const tag = `@image${i + 1}`;
+    const url = `${config.backendPublicUrl}/uploads/reels-refs/${filename}`;
+    return { tag, label: label || `Reference ${i + 1}`, url };
+  });
+}
 
 const {
   createSession, saveSession, getSession, auditLog, cleanupOldSessions,
 } = require('../services/sessionStore');
 const { buildStoryboard, refreshFromIndex } = require('../services/storyboardBuilder');
 const { generateFirstClip, extendClip, pollUntilComplete } = require('../services/geminiGenService');
+const { generateSceneImages, generateSingleSceneImage } = require('../services/sceneImageService');
 const {
   downloadClips, verifyClips, mergeClips, verifyMerged, cleanupClips, cleanupAll,
   sweepExpiredMerged,
@@ -69,20 +112,47 @@ function setupSSE(res) {
 // ── POST /build-storyboard ────────────────────────────────────────────────────
 
 router.post('/build-storyboard', async (req, res) => {
-  const { prompt, mode = 'normal', duration = 30 } = req.body;
+  const { prompt, mode = 'normal', duration = 30, referenceImages: rawRefImages = [] } = req.body;
 
   if (!prompt || typeof prompt !== 'string' || !prompt.trim()) {
     return res.status(400).json({ error: 'prompt is required' });
   }
   const dur = VALID_DURATIONS.includes(Number(duration)) ? Number(duration) : 30;
 
+  // Validate referenceImages count upfront
+  if (!Array.isArray(rawRefImages)) {
+    return res.status(400).json({ error: 'referenceImages must be an array' });
+  }
+  if (rawRefImages.length > MAX_REFERENCE_IMAGES) {
+    return res.status(400).json({
+      error: `Maximum ${MAX_REFERENCE_IMAGES} reference images allowed (you sent ${rawRefImages.length})`,
+    });
+  }
+
+  const session = createSession({ prompt: prompt.trim(), mode, duration: dur });
+  auditLog(session, 'info', 'SESSION_CREATED', { prompt: prompt.trim(), mode, duration: dur });
+
   try {
-    const session = createSession({ prompt: prompt.trim(), mode, duration: dur });
-    auditLog(session, 'info', 'SESSION_CREATED', { prompt: prompt.trim(), mode, duration: dur });
+    // Save reference images to disk
+    let savedRefs = [];
+    if (rawRefImages.length > 0) {
+      auditLog(session, 'info', 'REF_IMAGES_SAVE_START', { count: rawRefImages.length });
+      savedRefs = saveReferenceImages(session.sessionId, rawRefImages);
+      session.referenceImageUrls = savedRefs;
+      auditLog(session, 'info', 'REF_IMAGES_SAVED', {
+        count: savedRefs.length,
+        tags: savedRefs.map(r => r.tag),
+      });
+    }
 
     // Build storyboard via GPT-4o
-    auditLog(session, 'info', 'STORYBOARD_BUILD_START', {});
-    const storyboard = await buildStoryboard({ prompt: prompt.trim(), mode, duration: dur });
+    auditLog(session, 'info', 'STORYBOARD_BUILD_START', { refImageCount: savedRefs.length });
+    const storyboard = await buildStoryboard({
+      prompt: prompt.trim(),
+      mode,
+      duration: dur,
+      referenceImages: savedRefs,
+    });
 
     session.storyboard = storyboard;
     session.status = 'reviewing';
@@ -95,12 +165,19 @@ router.post('/build-storyboard', async (req, res) => {
       visualSummary: c.visualSummary,
       voScript: c.voScript,
       grokPrompt: c.grokPrompt,
+      sceneImageUrl: c.sceneImageUrl,
       technicalConfig: c.technicalConfig,
     }));
 
-    return res.json({ sessionId: session.sessionId, storyboard: publicStoryboard });
+    return res.json({
+      sessionId: session.sessionId,
+      storyboard: publicStoryboard,
+      referenceImageUrls: savedRefs.map(r => ({ tag: r.tag, label: r.label })),
+    });
   } catch (err) {
     console.error('[reels/build-storyboard]', err.message);
+    auditLog(session, 'error', 'BUILD_STORYBOARD_ERROR', { error: err.message });
+    try { await saveSession(session); } catch {}
     return res.status(500).json({ error: err.message });
   }
 });
@@ -128,6 +205,7 @@ router.post('/refresh-clips', async (req, res) => {
       fromIndex,
       totalClips: session.totalClips,
       hint: hint || null,
+      referenceImages: session.referenceImageUrls || [],
     });
 
     session.storyboard = newStoryboard;
@@ -143,6 +221,7 @@ router.post('/refresh-clips', async (req, res) => {
       visualSummary: c.visualSummary,
       voScript: c.voScript,
       grokPrompt: c.grokPrompt,
+      sceneImageUrl: c.sceneImageUrl,
       technicalConfig: c.technicalConfig,
     }));
 
@@ -151,6 +230,61 @@ router.post('/refresh-clips', async (req, res) => {
     console.error('[reels/refresh-clips]', err.message);
     auditLog(session, 'error', 'REFRESH_ERROR', { error: err.message });
     await saveSession(session);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// ── POST /generate-scene-images ──────────────────────────────────────────────
+// Generates one Gemini Image 2.0 preview per storyboard clip.
+// Non-blocking: individual clip failures are returned with error field, not 500.
+// Stores sceneImageUrl on session.storyboard[i] for use during video generation.
+
+router.post('/generate-scene-images', async (req, res) => {
+  const { sessionId, fromIndex } = req.body;
+  if (!sessionId) return res.status(400).json({ error: 'sessionId required' });
+
+  const session = await getSession(sessionId);
+  if (!session) return res.status(404).json({ error: 'Session not found or expired' });
+  if (!session.storyboard?.length) {
+    return res.status(400).json({ error: 'No storyboard found — build storyboard first' });
+  }
+
+  try {
+    // fromIndex: regenerate only from that index (used after refresh-clips)
+    const startIdx = typeof fromIndex === 'number' ? fromIndex : 0;
+    const clipsToProcess = session.storyboard.slice(startIdx);
+
+    auditLog(session, 'info', 'SCENE_IMAGES_START', {
+      count: clipsToProcess.length,
+      fromIndex: startIdx,
+    });
+
+    const results = await generateSceneImages(clipsToProcess);
+
+    // Merge back into session storyboard
+    results.forEach(({ clipNumber, sceneImageUrl }) => {
+      const clip = session.storyboard.find(c => c.clipNumber === clipNumber);
+      if (clip) clip.sceneImageUrl = sceneImageUrl || null;
+    });
+
+    auditLog(session, 'info', 'SCENE_IMAGES_DONE', {
+      success: results.filter(r => r.sceneImageUrl).length,
+      failed: results.filter(r => !r.sceneImageUrl).length,
+    });
+
+    await saveSession(session);
+
+    return res.json({
+      sceneImages: results.map(r => ({
+        clipNumber: r.clipNumber,
+        sceneImageUrl: r.sceneImageUrl,
+        error: r.error || null,
+      })),
+    });
+  } catch (err) {
+    console.error('[reels/generate-scene-images]', err.message);
+    auditLog(session, 'error', 'SCENE_IMAGES_ERROR', { error: err.message });
+    try { await saveSession(session); } catch {}
     return res.status(500).json({ error: err.message });
   }
 });
@@ -217,20 +351,32 @@ router.post('/generate-stream', async (req, res) => {
 
       let clipDone = false;
 
+      // All clips are independently generated (no extend chain)
+      // image_urls[] = [sceneImageUrl, ...userRefImageUrls] for visual reference
+      const clipMeta = storyboard[i];
+
+      // Collect image URLs: scene image first, then user-uploaded ref images for this clip
+      const imageUrls = [];
+      const sceneImageUrl = clipMeta?.sceneImageUrl;
+      if (sceneImageUrl) imageUrls.push(sceneImageUrl);
+
+      // User-uploaded reference images (character/product) — kept in session.referenceImageUrls
+      // Include all user refs for every clip (AI decides relevance via @imageN in grokPrompt)
+      (session.referenceImageUrls || []).forEach(r => {
+        if (r.url) imageUrls.push(r.url);
+      });
+
       for (let attempt = 1; attempt <= MAX_CLIP_ATTEMPTS; attempt++) {
         clipRecord.attempts = attempt;
-        auditLog(session, 'info', `CLIP_${i + 1}_ATTEMPT_${attempt}`, { prompt: grokPrompt.slice(0, 80) });
+        auditLog(session, 'info', `CLIP_${i + 1}_ATTEMPT_${attempt}`, {
+          prompt: grokPrompt.slice(0, 80),
+          imageUrls,
+        });
 
         try {
-          // Generate or extend
+          // Every clip is a fresh generate with its scene image as visual reference
           let result;
-          if (i === 0) {
-            result = await generateFirstClip({ prompt: grokPrompt, mode });
-          } else {
-            const prevClip = session.clips.find(c => c.index === i - 1 && c.status === 'done');
-            if (!prevClip?.uuid) throw new Error(`Previous clip UUID not found for extend`);
-            result = await extendClip({ prompt: grokPrompt, refUuid: prevClip.uuid });
-          }
+          result = await generateFirstClip({ prompt: grokPrompt, mode, imageUrls });
 
           clipRecord.uuid = result.uuid;
           clipRecord.status = 'polling';
@@ -377,6 +523,7 @@ router.get('/session/:sessionId', async (req, res) => {
     visualSummary: c.visualSummary,
     voScript: c.voScript,
     grokPrompt: c.grokPrompt,
+    sceneImageUrl: c.sceneImageUrl,
     technicalConfig: c.technicalConfig,
   }));
 
@@ -397,6 +544,7 @@ router.get('/session/:sessionId', async (req, res) => {
     })),
     downloadReady: session.downloadReady,
     mergedHash: session.mergedHash,
+    referenceImageUrls: (session.referenceImageUrls || []).map(r => ({ tag: r.tag, label: r.label })),
     createdAt: session.createdAt,
     updatedAt: session.updatedAt,
   });
