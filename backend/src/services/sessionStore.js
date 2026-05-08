@@ -160,16 +160,18 @@ function createSession({ prompt, mode, duration }) {
     sessionId: uuidv4(),
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
-    status: 'storyboard_built',
-    // storyboard_built | reviewing | generating | partial | merging | done | error
+    // Status lifecycle: pending → reviewing → generating → partial | merging → done | error
+    status: 'pending',
     prompt,
     mode,
     duration,
     totalClips: Math.ceil(duration / 10),
-    storyboard: [],   // array of { clipNumber, visualSummary, voScript, grokPrompt, technicalConfig }
-    clips: [],        // array of { index, status, uuid, videoUrl, sha256, attempts, completedAt, error }
+    storyboard: [],          // { clipNumber, visualSummary, voScript, grokPrompt, sceneImageUrl, technicalConfig }
+    referenceImageUrls: [],  // { tag, label, url } — user-uploaded reference images
+    clips: [],               // { index, status, uuid, videoUrl, thumbnailUrl, attempts, completedAt, error }
     mergedPath: null,
     mergedHash: null,
+    sizeBytes: null,         // merged file size in bytes — set after FFmpeg, shown in results UI
     downloadReady: false,
     downloadedAt: null,
     audit: [],

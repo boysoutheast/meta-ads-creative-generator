@@ -13,15 +13,14 @@ import { Label } from '@/components/ui/label'
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select'
-import { Badge } from '@/components/ui/badge'
 import {
   buildStoryboard, refreshClips, generateSceneImages,
   type PublicClip, type TechnicalConfig, type ReferenceImageInput,
 } from '@/lib/api'
 import { pushStoredSession } from '@/lib/reels-sessions'
 
-// Max reference images — matches backend MAX_REFERENCE_IMAGES constant
-const MAX_REF_IMAGES = 3
+// Max reference images — matches backend MAX_REFERENCE_IMAGES constant (GeminiGen supports up to 6)
+const MAX_REF_IMAGES = 6
 
 // ─── constants ───────────────────────────────────────────────────────────────
 
@@ -149,12 +148,12 @@ export default function ReelsPage() {
       setSessionRefLabels(data.referenceImageUrls || [])
       setHints({})
       setStep('storyboard')
-      setBuilding(false)
 
       // Auto-generate scene preview images right after storyboard text is ready
       handleGenerateSceneImages(data.sessionId, data.storyboard)
     } catch (err: any) {
       setError(err.message || 'Failed to build storyboard')
+    } finally {
       setBuilding(false)
     }
   }
@@ -322,7 +321,7 @@ export default function ReelsPage() {
               </div>
               <p className="text-xs text-muted-foreground leading-relaxed">
                 Upload character designs, product photos, or style references.
-                AI will use <span className="font-mono text-foreground/70">@image1</span>, <span className="font-mono text-foreground/70">@image2</span>, <span className="font-mono text-foreground/70">@image3</span> tags in clip prompts to maintain visual consistency.
+                AI uses <span className="font-mono text-foreground/70">@image1</span>…<span className="font-mono text-foreground/70">@image{MAX_REF_IMAGES}</span> tags in each clip's prompt to maintain visual consistency across all scenes.
               </p>
 
               {/* Uploaded images grid */}

@@ -33,8 +33,8 @@ const path = require('path');
 const fs = require('fs');
 const config = require('../config');
 
-// Max reference images per session — GeminiGen supports @image1..@imageN; cap at 3 for reliability
-const MAX_REFERENCE_IMAGES = 3;
+// Max reference images per session — GeminiGen supports @image1..@image6; match their max
+const MAX_REFERENCE_IMAGES = 6;
 const MAX_REF_IMAGE_SIZE_BYTES = 5 * 1024 * 1024; // 5 MB per image
 
 /**
@@ -78,7 +78,7 @@ const {
   createSession, saveSession, getSession, auditLog, cleanupOldSessions,
 } = require('../services/sessionStore');
 const { buildStoryboard, refreshFromIndex } = require('../services/storyboardBuilder');
-const { generateFirstClip, extendClip, pollUntilComplete } = require('../services/geminiGenService');
+const { generateFirstClip, pollUntilComplete } = require('../services/geminiGenService');
 const { generateSceneImages, generateSingleSceneImage } = require('../services/sceneImageService');
 const {
   downloadClips, verifyClips, mergeClips, verifyMerged, cleanupClips, cleanupAll,
@@ -131,6 +131,9 @@ router.post('/build-storyboard', async (req, res) => {
 
   const session = createSession({ prompt: prompt.trim(), mode, duration: dur });
   auditLog(session, 'info', 'SESSION_CREATED', { prompt: prompt.trim(), mode, duration: dur });
+
+  // Save session immediately so crash recovery can find it
+  await saveSession(session);
 
   try {
     // Save reference images to disk
@@ -477,6 +480,7 @@ router.post('/generate-stream', async (req, res) => {
     const mergedInfo = await verifyMerged(sessionId);
     session.mergedPath = mergedInfo.path;
     session.mergedHash = mergedInfo.sha256;
+    session.sizeBytes = mergedInfo.sizeBytes;
     session.status = 'done';
     session.downloadReady = true;
 
@@ -544,6 +548,7 @@ router.get('/session/:sessionId', async (req, res) => {
     })),
     downloadReady: session.downloadReady,
     mergedHash: session.mergedHash,
+    sizeBytes: session.sizeBytes ?? null,
     referenceImageUrls: (session.referenceImageUrls || []).map(r => ({ tag: r.tag, label: r.label })),
     createdAt: session.createdAt,
     updatedAt: session.updatedAt,

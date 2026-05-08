@@ -3,7 +3,7 @@ import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import {
   LayoutDashboard,
-  Library,
+  Clapperboard,
   Sparkles,
   LogOut,
   User as UserIcon,
@@ -21,7 +21,7 @@ const navGroups = [
     label: 'Workspace',
     items: [
       { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
-      { href: '/library', label: 'Library', icon: Library },
+      { href: '/results-reels', label: 'Results Reels', icon: Clapperboard },
       { href: '/history', label: 'History', icon: History },
     ],
   },

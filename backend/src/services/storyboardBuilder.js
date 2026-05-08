@@ -29,9 +29,9 @@ const MODEL = process.env.VISION_MODEL || 'gpt-4o';
 async function buildStoryboard({ prompt, mode, duration, referenceImages = [] }) {
   const totalClips = Math.ceil(duration / 10);
 
-  // Build reference images info for GPT-4o — only for @image tag usage in CHARACTER section
+  // Build reference images context — instructs GPT-4o to use @imageN tags smartly per clip
   const refImagesContext = referenceImages.length > 0
-    ? `\nUSER REFERENCE IMAGES (uploaded character/product designs):\n${referenceImages.map(r => `  ${r.tag} = "${r.label}"`).join('\n')}\nIn [CHARACTER] section, write "Maintain exact design from ${referenceImages[0].tag}" when that subject appears.\n`
+    ? `\nUSER REFERENCE IMAGES (${referenceImages.length} uploaded):\n${referenceImages.map(r => `  ${r.tag} = "${r.label}"`).join('\n')}\n\nREFERENCE IMAGE RULES:\n- In each clip's [CHARACTER] section, mention the relevant @imageN tags for subjects that appear in that clip\n- Example: "Maintain exact design from @image1 and @image2 when they appear in this scene"\n- If a clip focuses on the product, prioritize the product reference image tag\n- If a clip features a character, use that character's reference image tag\n- Always use the exact @imageN tag syntax so GeminiGen can match them to the uploaded images\n`
     : '';
 
   const systemPrompt = `You are an expert AI video director and copywriter specialising in short-form social media ads.
@@ -135,7 +135,7 @@ async function refreshFromIndex({ prompt, mode, existingClips, fromIndex, totalC
   const hintStr = hint ? `\nUser direction for this section: "${hint}"` : '';
 
   const refImagesContext = referenceImages.length > 0
-    ? `\nReference images: ${referenceImages.map(r => `${r.tag} = "${r.label}"`).join(', ')}\nUse @imageN tags in [CHARACTER] when those subjects appear.\n`
+    ? `\nReference images (${referenceImages.length}): ${referenceImages.map(r => `${r.tag}="${r.label}"`).join(', ')}\nIn [CHARACTER] section, use the relevant @imageN tags for subjects appearing in that clip. Always use exact @imageN syntax.\n`
     : '';
 
   const systemPrompt = `You are an expert AI video director creating a continuation of an existing video storyboard.

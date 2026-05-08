@@ -170,7 +170,7 @@ export type ReelsSSEEvent =
   | { type: 'clip_done'; clipIndex: number; clip: ReelsClip; totalClips: number }
   | { type: 'merge_start'; totalClips: number }
   | { type: 'merge_progress'; phase: string; progress?: number; clipIndex?: number; total?: number }
-  | { type: 'ready'; sessionId: string; mergedHash: string; sizeBytes: number; downloadUrl: string }
+  | { type: 'ready'; sessionId: string; mergedHash: string; sizeBytes: number | null; downloadUrl: string }
   | { type: 'error'; message: string; resumable?: boolean; failedAtClip?: number; sessionId?: string }
 
 /** Step 1 — GPT-4o builds storyboard, creates session */
