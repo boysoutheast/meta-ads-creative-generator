@@ -154,4 +154,41 @@ async function generateReel({ prompt, targetDuration = 30, mode, onClipProgress,
   return clips;
 }
 
-module.exports = { generateFirstClip, extendClip, pollUntilComplete, generateReel };
+/**
+ * Generate a reel from an explicit array of per-clip prompts.
+ * Clip 0 is generated fresh; clips 1+ extend from the previous UUID.
+ *
+ * @param {string[]}  clipPrompts     — per-clip prompt strings
+ * @param {string}    [mode]          — generation mode
+ * @param {Function}  onClipProgress  — (clipIndex, pct, totalClips)
+ * @param {Function}  onClipDone      — (clipIndex, clip)
+ */
+async function generateReelFromPrompts({ clipPrompts, mode, onClipProgress, onClipDone }) {
+  const totalClips = clipPrompts.length;
+  const clips = [];
+
+  for (let i = 0; i < totalClips; i++) {
+    const prompt = clipPrompts[i];
+    const isFirst = i === 0;
+
+    let result;
+    if (isFirst) {
+      result = await generateFirstClip({ prompt, mode });
+    } else {
+      result = await extendClip({ prompt, refUuid: clips[i - 1].uuid });
+    }
+
+    const { uuid } = result;
+
+    const clip = await pollUntilComplete(uuid, (pct) => {
+      onClipProgress && onClipProgress(i, pct, totalClips);
+    });
+
+    clips.push(clip);
+    onClipDone && onClipDone(i, clip);
+  }
+
+  return clips;
+}
+
+module.exports = { generateFirstClip, extendClip, pollUntilComplete, generateReel, generateReelFromPrompts };

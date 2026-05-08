@@ -129,7 +129,7 @@ export async function generateScalingVariationsStream(
   }
 }
 
-// ─── AI Reels (GeminiGen Grok) ───────────────────────────────────────────────
+// ─── AI Reels v2 — session-based storyboard + generation ─────────────────────
 
 export type ReelsClip = {
   uuid: string
@@ -137,23 +137,119 @@ export type ReelsClip = {
   thumbnailUrl: string | null
 }
 
+export type PublicClip = {
+  clipNumber: number
+  visualSummary: string
+  voScript: string
+}
+
 export type ReelsSSEEvent =
-  | { type: 'start'; totalClips: number; targetDuration: number }
+  | { type: 'start'; totalClips: number; sessionId: string }
+  | { type: 'clip_skip'; clipIndex: number; totalClips: number; uuid: string }
   | { type: 'clip_start'; clipIndex: number; totalClips: number }
   | { type: 'clip_progress'; clipIndex: number; pct: number; totalClips: number }
+  | { type: 'clip_retry'; clipIndex: number; attempt: number; error: string }
   | { type: 'clip_done'; clipIndex: number; clip: ReelsClip; totalClips: number }
-  | { type: 'done'; clips: ReelsClip[] }
-  | { type: 'error'; message: string }
+  | { type: 'merge_start'; totalClips: number }
+  | { type: 'merge_progress'; phase: string; progress?: number; clipIndex?: number; total?: number }
+  | { type: 'ready'; sessionId: string; mergedHash: string; sizeBytes: number; downloadUrl: string }
+  | { type: 'error'; message: string; resumable?: boolean; failedAtClip?: number; sessionId?: string }
 
-export async function generateReelsStream(
-  payload: { prompt: string; targetDuration: number; mode?: string },
+/** Step 1 — GPT-4o builds storyboard, creates session */
+export async function buildStoryboard(payload: {
+  prompt: string
+  mode: string
+  duration: number
+}): Promise<{ sessionId: string; storyboard: PublicClip[] }> {
+  const res = await api.post('/reels/build-storyboard', payload)
+  return res.data
+}
+
+/** Step 2 — refresh clips from index onwards (keep 0..fromIndex-1) */
+export async function refreshClips(payload: {
+  sessionId: string
+  fromIndex: number
+  hint?: string
+}): Promise<{ storyboard: PublicClip[] }> {
+  const res = await api.post('/reels/refresh-clips', payload)
+  return res.data
+}
+
+/** Step 3 — SSE stream: generate all clips + merge */
+export async function startReelGeneration(
+  sessionId: string,
   onEvent: (event: ReelsSSEEvent) => void,
-): Promise<ReelsClip[]> {
+): Promise<void> {
   const controller = new AbortController()
-  const timeoutId = setTimeout(() => controller.abort(), 30 * 60_000) // 30 min max
+  const timeoutId = setTimeout(() => controller.abort(), 40 * 60_000) // 40 min max
 
   try {
     const response = await fetch(`${API_URL}/reels/generate-stream`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessionId }),
+      signal: controller.signal,
+    })
+
+    if (!response.ok) {
+      const text = await response.text().catch(() => '')
+      throw new Error(`HTTP ${response.status}: ${text}`)
+    }
+
+    const reader = response.body!.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+
+      const parts = buffer.split('\n\n')
+      buffer = parts.pop() ?? ''
+
+      for (const part of parts) {
+        for (const line of part.split('\n')) {
+          if (!line.startsWith('data: ')) continue
+          try {
+            const evt = JSON.parse(line.slice(6)) as ReelsSSEEvent
+            onEvent(evt)
+            if (evt.type === 'error' && !evt.resumable) throw new Error(evt.message)
+          } catch (parseErr) {
+            if ((parseErr as Error).message && !(parseErr as Error).message.includes('JSON'))
+              throw parseErr
+          }
+        }
+      }
+    }
+  } finally {
+    clearTimeout(timeoutId)
+  }
+}
+
+/** Get session state (for resume on page load) */
+export async function getReelSession(sessionId: string): Promise<any> {
+  const res = await api.get(`/reels/session/${sessionId}`)
+  return res.data
+}
+
+/** Get audit log */
+export async function getReelAudit(sessionId: string): Promise<any> {
+  const res = await api.get(`/reels/audit/${sessionId}`)
+  return res.data
+}
+
+// ─── Legacy SSE stream (kept for backward compat) ────────────────────────────
+
+export async function generateReelsStream(
+  payload: { prompt: string; targetDuration: number; mode?: string },
+  onEvent: (event: any) => void,
+): Promise<ReelsClip[]> {
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(), 30 * 60_000)
+
+  try {
+    const response = await fetch(`${API_URL}/reels/generate-stream-legacy`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
@@ -182,7 +278,7 @@ export async function generateReelsStream(
         for (const line of part.split('\n')) {
           if (!line.startsWith('data: ')) continue
           try {
-            const evt = JSON.parse(line.slice(6)) as ReelsSSEEvent
+            const evt = JSON.parse(line.slice(6))
             onEvent(evt)
             if (evt.type === 'done') finalClips = evt.clips
             if (evt.type === 'error') throw new Error(evt.message)
