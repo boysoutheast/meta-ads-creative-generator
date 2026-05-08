@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef, useEffect, useCallback } from 'react'
+import React, { useState, useRef, useEffect, useCallback } from 'react'
 import {
   Film, Sparkles, Download, AlertCircle, Loader2, CheckCircle2,
   Clock, Play, RefreshCw, ChevronDown, ChevronRight, Info,
