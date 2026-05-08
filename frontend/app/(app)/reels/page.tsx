@@ -278,7 +278,7 @@ export default function ReelsPage() {
       // Re-trigger generation from where it stopped
       const n = resumeInfo.storyboard.length
       setTotalClips(n)
-      setGenClips(resumeInfo.clips.map((c: any) => ({
+      setGenClips(resumeInfo.clips.map((c: any): ClipGenState => ({
         index: c.index,
         status: c.status === 'done' ? 'done' : 'waiting',
         pct: c.status === 'done' ? 100 : 0,
@@ -546,7 +546,7 @@ export default function ReelsPage() {
                   <div className="mt-1 border-t pt-2" />
                   <ProgressRow
                     label="Downloading clips"
-                    status={mergePhase === 'downloading' ? 'generating' : mergePhase === 'idle' ? 'waiting' : 'done'}
+                    status={mergePhase === 'downloading' ? 'generating' : 'done'}
                     pct={mergePhase === 'merging' || mergePhase === 'done' ? 100 : 50}
                   />
                   <ProgressRow
