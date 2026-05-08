@@ -34,8 +34,10 @@ const DURATION_OPTIONS = [
 ]
 
 const MODE_OPTIONS = [
-  { value: 'standard', label: 'Standard (default)' },
-  { value: 'custom', label: 'Custom' },
+  { value: 'normal', label: 'Normal', desc: 'Standard video generation' },
+  { value: 'extremely-crazy', label: 'Extremely Crazy', desc: 'Wild and unpredictable results' },
+  { value: 'extremely-spicy-or-crazy', label: 'Extremely Spicy or Crazy', desc: 'Maximum creativity and chaos' },
+  { value: 'custom', label: 'Custom', desc: 'Custom generation settings' },
 ]
 
 // ─── types ───────────────────────────────────────────────────────────────────
@@ -62,7 +64,7 @@ function downloadVideo(url: string, filename: string) {
 export default function ReelsPage() {
   const [prompt, setPrompt] = useState('')
   const [targetDuration, setTargetDuration] = useState(30)
-  const [mode, setMode] = useState('standard')
+  const [mode, setMode] = useState('normal')
   const [isGenerating, setIsGenerating] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [clips, setClips] = useState<ClipState[]>([])
@@ -126,7 +128,7 @@ export default function ReelsPage() {
 
     try {
       await generateReelsStream(
-        { prompt: prompt.trim(), targetDuration, mode: mode === 'standard' ? undefined : mode },
+        { prompt: prompt.trim(), targetDuration, mode },
         handleSSEEvent
       )
     } catch (err: any) {
@@ -186,7 +188,10 @@ export default function ReelsPage() {
                 <SelectContent>
                   {MODE_OPTIONS.map((opt) => (
                     <SelectItem key={opt.value} value={opt.value}>
-                      {opt.label}
+                      <div>
+                        <div className="font-medium">{opt.label}</div>
+                        <div className="text-xs text-muted-foreground">{opt.desc}</div>
+                      </div>
                     </SelectItem>
                   ))}
                 </SelectContent>

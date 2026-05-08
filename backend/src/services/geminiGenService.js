@@ -8,6 +8,12 @@
  *   Auth     : x-api-key header
  *
  * Status codes: 1 = processing, 2 = completed, 3 = failed
+ *
+ * Confirmed generation modes (tested 2026-05-08):
+ *   "normal"                   — Standard video generation
+ *   "extremely-crazy"          — Wild and unpredictable
+ *   "extremely-spicy-or-crazy" — Maximum creativity and chaos
+ *   "custom"                   — Custom generation settings
  */
 
 const axios = require('axios');
