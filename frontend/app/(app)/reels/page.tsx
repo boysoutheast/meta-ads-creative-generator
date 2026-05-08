@@ -34,7 +34,7 @@ const DURATION_OPTIONS = [
 ]
 
 const MODE_OPTIONS = [
-  { value: '', label: 'Standard (default)' },
+  { value: 'standard', label: 'Standard (default)' },
   { value: 'custom', label: 'Custom' },
 ]
 
@@ -62,7 +62,7 @@ function downloadVideo(url: string, filename: string) {
 export default function ReelsPage() {
   const [prompt, setPrompt] = useState('')
   const [targetDuration, setTargetDuration] = useState(30)
-  const [mode, setMode] = useState('')
+  const [mode, setMode] = useState('standard')
   const [isGenerating, setIsGenerating] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [clips, setClips] = useState<ClipState[]>([])
@@ -126,7 +126,7 @@ export default function ReelsPage() {
 
     try {
       await generateReelsStream(
-        { prompt: prompt.trim(), targetDuration, mode: mode || undefined },
+        { prompt: prompt.trim(), targetDuration, mode: mode === 'standard' ? undefined : mode },
         handleSSEEvent
       )
     } catch (err: any) {
