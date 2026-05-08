@@ -4,7 +4,8 @@ import { useState, useRef, useEffect, useCallback } from 'react'
 import {
   Film, Sparkles, Download, AlertCircle, Loader2, CheckCircle2,
   Clock, Play, RefreshCw, ChevronDown, ChevronRight, Info,
-  RotateCcw, Wand2, Merge, FileVideo,
+  RotateCcw, Wand2, Merge, FileVideo, Eye, EyeOff, Camera,
+  Lightbulb, Clapperboard, MapPin,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
@@ -15,7 +16,7 @@ import {
 import { Badge } from '@/components/ui/badge'
 import {
   buildStoryboard, refreshClips, startReelGeneration,
-  getReelSession, type PublicClip, type ReelsSSEEvent,
+  getReelSession, type PublicClip, type TechnicalConfig, type ReelsSSEEvent,
 } from '@/lib/api'
 
 // ─── constants ───────────────────────────────────────────────────────────────
@@ -642,6 +643,13 @@ function StepIndicator({ step }: { step: Step }) {
 
 // ─── StoryboardClipCard ───────────────────────────────────────────────────────
 
+const TECH_BADGES: { key: keyof TechnicalConfig; icon: React.ReactNode; label: string }[] = [
+  { key: 'cameraShot',  icon: <Camera className="h-3 w-3" />,      label: 'Shot'     },
+  { key: 'lighting',    icon: <Lightbulb className="h-3 w-3" />,   label: 'Light'    },
+  { key: 'visualStyle', icon: <Clapperboard className="h-3 w-3" />,label: 'Style'    },
+  { key: 'setting',     icon: <MapPin className="h-3 w-3" />,       label: 'Setting'  },
+]
+
 function StoryboardClipCard({
   clip, idx, totalClips, hint, onHintChange, onRefresh, isRefreshing, isStale,
 }: {
@@ -655,7 +663,9 @@ function StoryboardClipCard({
   isStale: boolean
 }) {
   const [showHint, setShowHint] = useState(false)
+  const [showPrompt, setShowPrompt] = useState(false)
   const clipsAffected = totalClips - idx
+  const tc = clip.technicalConfig
 
   return (
     <Card className={`transition-opacity ${isStale && !isRefreshing ? 'opacity-50' : ''}`}>
@@ -673,7 +683,7 @@ function StoryboardClipCard({
           </div>
 
           {/* Content */}
-          <div className="flex-1 min-w-0 space-y-2">
+          <div className="flex-1 min-w-0 space-y-2.5">
             {/* Time range */}
             <p className="text-xs font-medium text-muted-foreground">
               {idx * 10}s – {(idx + 1) * 10}s
@@ -690,6 +700,56 @@ function StoryboardClipCard({
               <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-0.5">Voiceover</p>
               <p className="text-sm italic leading-relaxed">"{clip.voScript}"</p>
             </div>
+
+            {/* Technical config badges */}
+            {tc && (
+              <div className="flex flex-wrap gap-1.5 pt-0.5">
+                {TECH_BADGES.map(({ key, icon, label }) => tc[key] ? (
+                  <span
+                    key={key}
+                    className="inline-flex items-center gap-1 rounded-full border border-border/60 bg-background px-2 py-0.5 text-[11px] text-muted-foreground"
+                  >
+                    {icon}
+                    <span className="font-medium text-foreground/70">{label}:</span>
+                    {tc[key]}
+                  </span>
+                ) : null)}
+                {tc.mainSubject && (
+                  <span className="inline-flex items-center gap-1 rounded-full border border-primary/30 bg-primary/5 px-2 py-0.5 text-[11px] text-primary/80">
+                    ● {tc.mainSubject}
+                    {tc.action ? ` — ${tc.action}` : ''}
+                  </span>
+                )}
+              </div>
+            )}
+
+            {/* AI Prompt toggle */}
+            {clip.grokPrompt && (
+              <div>
+                <button
+                  className="flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors"
+                  onClick={() => setShowPrompt(p => !p)}
+                >
+                  {showPrompt ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
+                  {showPrompt ? 'Hide AI prompt' : 'View AI generation prompt'}
+                </button>
+                {showPrompt && (
+                  <div className="mt-1.5 rounded-md border border-border/60 bg-muted/30 px-3 py-2">
+                    <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1">
+                      Grok Prompt (sent to AI)
+                    </p>
+                    <p className="font-mono text-[11px] leading-relaxed text-foreground/80 whitespace-pre-wrap break-words">
+                      {clip.grokPrompt}
+                    </p>
+                    {tc?.additionalDetails && (
+                      <p className="mt-1.5 text-[10px] text-muted-foreground border-t border-border/40 pt-1.5">
+                        <span className="font-semibold">Details:</span> {tc.additionalDetails}
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Refresh controls */}
             <div className="flex items-center gap-2 pt-1">

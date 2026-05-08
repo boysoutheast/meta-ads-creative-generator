@@ -85,11 +85,12 @@ router.post('/build-storyboard', async (req, res) => {
 
     await saveSession(session);
 
-    // Return only what frontend needs (hide technicalConfig and grokPrompt)
     const publicStoryboard = storyboard.map(c => ({
       clipNumber: c.clipNumber,
       visualSummary: c.visualSummary,
       voScript: c.voScript,
+      grokPrompt: c.grokPrompt,
+      technicalConfig: c.technicalConfig,
     }));
 
     return res.json({ sessionId: session.sessionId, storyboard: publicStoryboard });
@@ -136,6 +137,8 @@ router.post('/refresh-clips', async (req, res) => {
       clipNumber: c.clipNumber,
       visualSummary: c.visualSummary,
       voScript: c.voScript,
+      grokPrompt: c.grokPrompt,
+      technicalConfig: c.technicalConfig,
     }));
 
     return res.json({ storyboard: publicStoryboard });
@@ -364,11 +367,12 @@ router.get('/session/:sessionId', async (req, res) => {
   const session = await getSession(req.params.sessionId);
   if (!session) return res.status(404).json({ error: 'Session not found or expired' });
 
-  // Return full session but strip grokPrompt from storyboard (keep hidden)
   const publicStoryboard = (session.storyboard || []).map(c => ({
     clipNumber: c.clipNumber,
     visualSummary: c.visualSummary,
     voScript: c.voScript,
+    grokPrompt: c.grokPrompt,
+    technicalConfig: c.technicalConfig,
   }));
 
   return res.json({

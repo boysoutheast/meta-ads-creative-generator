@@ -137,10 +137,22 @@ export type ReelsClip = {
   thumbnailUrl: string | null
 }
 
+export type TechnicalConfig = {
+  mainSubject: string
+  action: string
+  setting: string
+  lighting: string
+  visualStyle: string
+  cameraShot: string
+  additionalDetails: string
+}
+
 export type PublicClip = {
   clipNumber: number
   visualSummary: string
   voScript: string
+  grokPrompt: string
+  technicalConfig: TechnicalConfig
 }
 
 export type ReelsSSEEvent =
