@@ -28,12 +28,15 @@ Your task is to create a detailed, clip-by-clip video storyboard for a Grok AI v
 Rules:
 - Each clip is exactly 10 seconds long
 - Clips must flow visually and narratively — they are chained together (each extends the previous)
-- visualSummary and voScript should be in Bahasa Indonesia (clear, concise)
+- visualSummary and voScript should be in Bahasa Indonesia
 - grokPrompt MUST be in English, highly descriptive, optimised for Grok AI video generation
 - grokPrompt should specify: subject, action, setting, lighting, camera movement, visual style, mood
 - Keep each grokPrompt under 180 words but rich in visual detail
-- The voScript should feel like a real ad voiceover — punchy, brand-aligned
 - technicalConfig fields are for internal use only
+
+CONTENT DENSITY RULES (critical):
+- voScript: write EXACTLY 2-3 punchy sentences totalling ~20-25 words — this is the spoken script for 10 seconds of audio. Must feel like a real TV/Instagram ad voiceover: energetic, benefit-driven, brand-aligned. NO single-sentence scripts.
+- visualSummary: write 2-3 sentences describing the FULL visual arc of the 10s clip — opening shot, mid action, closing moment. Be specific about what the viewer sees from start to finish.
 
 Generation mode hints:
 - normal: cinematic, clean, premium
@@ -49,11 +52,13 @@ Return ONLY a valid JSON array with exactly ${totalClips} clip objects. No markd
 
 Generation mode: ${mode || 'normal'}
 
+IMPORTANT: voScript must be 2-3 sentences (~20-25 words). visualSummary must describe the full 10s arc in 2-3 sentences.
+
 Return JSON array with exactly ${totalClips} objects, each with these exact fields:
 {
   "clipNumber": <number 1-${totalClips}>,
-  "visualSummary": "<1-2 sentences in Bahasa Indonesia>",
-  "voScript": "<voiceover text in Bahasa Indonesia>",
+  "visualSummary": "<2-3 sentences in Bahasa Indonesia describing full visual arc of the 10s clip>",
+  "voScript": "<2-3 punchy ad sentences in Bahasa Indonesia, ~20-25 words total, for 10s delivery>",
   "grokPrompt": "<full English prompt for Grok video AI>",
   "technicalConfig": {
     "mainSubject": "<who/what>",
@@ -99,7 +104,11 @@ async function refreshFromIndex({ prompt, mode, existingClips, fromIndex, totalC
 Generate new clips that naturally follow the visual style and narrative of the preceding clips.
 Same rules apply: visualSummary and voScript in Bahasa Indonesia, grokPrompt in English.
 Keep visual continuity — the clips will be extended from the last clip.
-Return ONLY a valid JSON array. No markdown, no explanation.`;
+Return ONLY a valid JSON array. No markdown, no explanation.
+
+CONTENT DENSITY RULES (critical):
+- voScript: EXACTLY 2-3 punchy sentences totalling ~20-25 words for 10 seconds of spoken audio. Real ad voiceover energy.
+- visualSummary: 2-3 sentences describing the FULL visual arc of the 10s clip from opening to closing shot.`;
 
   const userPrompt = `Continue this ${Math.ceil((totalClips * 10) / 1)}-second ad storyboard.
 Original prompt: "${prompt}"
@@ -108,11 +117,13 @@ ${contextStr}${hintStr}
 
 Generate ${clipsToGenerate} new clip(s) starting from clip number ${fromIndex + 1} to ${totalClips}.
 
+IMPORTANT: voScript must be 2-3 sentences (~20-25 words). visualSummary must describe the full 10s arc in 2-3 sentences.
+
 Return JSON array with exactly ${clipsToGenerate} objects (clipNumber starts at ${fromIndex + 1}):
 {
   "clipNumber": <number>,
-  "visualSummary": "<Bahasa Indonesia>",
-  "voScript": "<Bahasa Indonesia>",
+  "visualSummary": "<2-3 sentences in Bahasa Indonesia describing full visual arc of the 10s clip>",
+  "voScript": "<2-3 punchy ad sentences in Bahasa Indonesia, ~20-25 words total, for 10s delivery>",
   "grokPrompt": "<English, for Grok AI>",
   "technicalConfig": {
     "mainSubject": "", "action": "", "setting": "",
