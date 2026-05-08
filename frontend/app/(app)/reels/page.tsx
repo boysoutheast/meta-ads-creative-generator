@@ -1,12 +1,12 @@
 'use client'
 
-import React, { useState, useRef, useEffect, useCallback } from 'react'
+import React, { useState, useEffect } from 'react'
 import {
-  Film, Sparkles, Download, AlertCircle, Loader2, CheckCircle2,
-  Clock, Play, RefreshCw, ChevronDown, ChevronRight, Info,
-  RotateCcw, Wand2, Merge, FileVideo, Eye, EyeOff, Camera,
+  Film, Sparkles, AlertCircle, Loader2,
+  RefreshCw, ChevronRight, Wand2, Eye, EyeOff, Camera,
   Lightbulb, Clapperboard, MapPin,
 } from 'lucide-react'
+import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Label } from '@/components/ui/label'
@@ -15,9 +15,10 @@ import {
 } from '@/components/ui/select'
 import { Badge } from '@/components/ui/badge'
 import {
-  buildStoryboard, refreshClips, startReelGeneration,
-  getReelSession, type PublicClip, type TechnicalConfig, type ReelsSSEEvent,
+  buildStoryboard, refreshClips,
+  type PublicClip, type TechnicalConfig,
 } from '@/lib/api'
+import { pushStoredSession } from '@/lib/reels-sessions'
 
 // ─── constants ───────────────────────────────────────────────────────────────
 
@@ -32,47 +33,16 @@ const MODE_OPTIONS = [
   { value: 'custom', label: 'Custom', desc: 'Balanced creative freedom' },
 ]
 
-const SESSION_KEY = 'reels_session_id'
-
 // ─── types ───────────────────────────────────────────────────────────────────
 
-type Step = 'input' | 'storyboard' | 'result'
-
-type ClipGenState = {
-  index: number
-  status: 'waiting' | 'generating' | 'retrying' | 'done' | 'error'
-  pct: number
-  videoUrl?: string | null
-  thumbnailUrl?: string | null
-  uuid?: string
-}
-
-type MergePhase = 'idle' | 'downloading' | 'merging' | 'done'
-
-type ResumeInfo = {
-  sessionId: string
-  status: string
-  prompt: string
-  storyboard: PublicClip[]
-  clips: any[]
-  downloadReady: boolean
-}
+type Step = 'input' | 'storyboard'
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
-
-function saveSessionId(id: string) {
-  try { localStorage.setItem(SESSION_KEY, id) } catch (e) {}
-}
-function loadSessionId(): string | null {
-  try { return localStorage.getItem(SESSION_KEY) } catch (e) { return null }
-}
-function clearSessionId() {
-  try { localStorage.removeItem(SESSION_KEY) } catch (e) {}
-}
 
 // ─── root component ───────────────────────────────────────────────────────────
 
 export default function ReelsPage() {
+  const router = useRouter()
   const [step, setStep] = useState<Step>('input')
 
   // input
@@ -87,37 +57,8 @@ export default function ReelsPage() {
   const [refreshingFrom, setRefreshingFrom] = useState<number | null>(null)
   const [hints, setHints] = useState<Record<number, string>>({})
 
-  // result / generation
-  const [genClips, setGenClips] = useState<ClipGenState[]>([])
-  const [totalClips, setTotalClips] = useState(0)
-  const [mergePhase, setMergePhase] = useState<MergePhase>('idle')
-  const [mergeProgress, setMergeProgress] = useState(0)
-  const [downloadReady, setDownloadReady] = useState(false)
-  const [mergedHash, setMergedHash] = useState<string | null>(null)
-  const [sizeBytes, setSizeBytes] = useState<number | null>(null)
-  const [generating, setGenerating] = useState(false)
-
-  // resume
-  const [resumeInfo, setResumeInfo] = useState<ResumeInfo | null>(null)
-
   // error
   const [error, setError] = useState<string | null>(null)
-  const [resumable, setResumable] = useState(false)
-
-  // check for existing session on mount
-  useEffect(() => {
-    const id = loadSessionId()
-    if (!id) return
-    getReelSession(id)
-      .then((s) => {
-        if (s && s.status !== 'error' && !s.downloadedAt) {
-          setResumeInfo(s as ResumeInfo)
-        } else {
-          clearSessionId()
-        }
-      })
-      .catch(() => clearSessionId())
-  }, [])
 
   // ── Step 1: build storyboard ───────────────────────────────────────────────
 
@@ -129,7 +70,6 @@ export default function ReelsPage() {
       const data = await buildStoryboard({ prompt: prompt.trim(), mode, duration })
       setSessionId(data.sessionId)
       setStoryboard(data.storyboard)
-      saveSessionId(data.sessionId)
       setHints({})
       setStep('storyboard')
     } catch (err: any) {
@@ -164,161 +104,20 @@ export default function ReelsPage() {
     }
   }
 
-  // ── Step 2 → 3: start generation ──────────────────────────────────────────
+  // ── Step 2 → redirect to Results Reels ────────────────────────────────────
 
-  async function handleGenerate() {
+  function handleGenerate() {
     if (!sessionId) return
-    setError(null)
-    setResumable(false)
-    setMergePhase('idle')
-    setDownloadReady(false)
-    setMergedHash(null)
-    setSizeBytes(null)
-    setGenerating(true)
-    setStep('result')
-
-    const n = storyboard.length
-    setTotalClips(n)
-    setGenClips(Array.from({ length: n }, (_, i) => ({
-      index: i, status: i === 0 ? 'generating' : 'waiting', pct: 0,
-    })))
-
-    try {
-      await startReelGeneration(sessionId, (evt: ReelsSSEEvent) => {
-        handleSSE(evt, n)
-      })
-    } catch (err: any) {
-      setError(err.message || 'Generation failed')
-      setGenerating(false)
-    }
+    // Save session metadata so Results Reels page can show it
+    pushStoredSession({
+      sessionId,
+      prompt,
+      mode,
+      duration,
+      totalClips: storyboard.length,
+    })
+    router.push('/results-reels')
   }
-
-  const handleSSE = useCallback((evt: ReelsSSEEvent, n: number) => {
-    switch (evt.type) {
-      case 'start':
-        setTotalClips(evt.totalClips)
-        break
-
-      case 'clip_skip':
-        setGenClips(prev => prev.map(c =>
-          c.index === evt.clipIndex ? { ...c, status: 'done', pct: 100 } : c
-        ))
-        break
-
-      case 'clip_start':
-        setGenClips(prev => prev.map(c =>
-          c.index === evt.clipIndex ? { ...c, status: 'generating', pct: 0 } : c
-        ))
-        break
-
-      case 'clip_progress':
-        setGenClips(prev => prev.map(c =>
-          c.index === evt.clipIndex ? { ...c, status: 'generating', pct: evt.pct } : c
-        ))
-        break
-
-      case 'clip_retry':
-        setGenClips(prev => prev.map(c =>
-          c.index === evt.clipIndex ? { ...c, status: 'retrying', pct: 0 } : c
-        ))
-        break
-
-      case 'clip_done':
-        setGenClips(prev => prev.map(c => {
-          if (c.index === evt.clipIndex)
-            return { ...c, status: 'done', pct: 100, videoUrl: evt.clip.videoUrl, thumbnailUrl: evt.clip.thumbnailUrl, uuid: evt.clip.uuid }
-          if (c.index === evt.clipIndex + 1)
-            return { ...c, status: 'generating' }
-          return c
-        }))
-        break
-
-      case 'merge_start':
-        setMergePhase('downloading')
-        break
-
-      case 'merge_progress':
-        if (evt.phase === 'downloading') setMergePhase('downloading')
-        if (evt.phase === 'merging') {
-          setMergePhase('merging')
-          setMergeProgress(evt.progress || 0)
-        }
-        break
-
-      case 'ready':
-        setMergePhase('done')
-        setDownloadReady(true)
-        setMergedHash(evt.mergedHash || null)
-        setSizeBytes(evt.sizeBytes || null)
-        setGenerating(false)
-        clearSessionId() // session complete — clear resume hint
-        break
-
-      case 'error':
-        setError(evt.message)
-        setResumable(evt.resumable || false)
-        setGenerating(false)
-        break
-    }
-  }, [])
-
-  // ── resume ────────────────────────────────────────────────────────────────
-
-  function handleResumeAccept() {
-    if (!resumeInfo) return
-    setSessionId(resumeInfo.sessionId)
-    setPrompt(resumeInfo.prompt)
-    setStoryboard(resumeInfo.storyboard)
-    setResumeInfo(null)
-
-    if (resumeInfo.status === 'done' || resumeInfo.downloadReady) {
-      setTotalClips(resumeInfo.storyboard.length)
-      setDownloadReady(true)
-      setStep('result')
-    } else if (resumeInfo.status === 'generating' || resumeInfo.status === 'partial') {
-      // Re-trigger generation from where it stopped
-      const n = resumeInfo.storyboard.length
-      setTotalClips(n)
-      setGenClips(resumeInfo.clips.map((c: any): ClipGenState => ({
-        index: c.index,
-        status: c.status === 'done' ? 'done' : 'waiting',
-        pct: c.status === 'done' ? 100 : 0,
-        videoUrl: c.videoUrl,
-        thumbnailUrl: c.thumbnailUrl,
-        uuid: c.uuid,
-      })).concat(
-        Array.from({ length: n - resumeInfo.clips.length }, (_, i) => ({
-          index: resumeInfo.clips.length + i, status: 'waiting' as const, pct: 0,
-        }))
-      ))
-      setStep('result')
-      // Auto-resume generation
-      setTimeout(() => handleResumeGeneration(resumeInfo.sessionId, n), 500)
-    } else {
-      setStep('storyboard')
-    }
-  }
-
-  async function handleResumeGeneration(sid: string, n: number) {
-    setError(null)
-    setResumable(false)
-    setGenerating(true)
-    try {
-      await startReelGeneration(sid, (evt) => handleSSE(evt, n))
-    } catch (err: any) {
-      setError(err.message || 'Resume failed')
-      setGenerating(false)
-    }
-  }
-
-  // ── download ──────────────────────────────────────────────────────────────
-
-  function handleDownload() {
-    if (!sessionId) return
-    window.open(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000'}/api/reels/download/${sessionId}`, '_blank')
-  }
-
-  const doneClips = genClips.filter(c => c.status === 'done' && c.videoUrl)
 
   // ── render ────────────────────────────────────────────────────────────────
 
@@ -338,41 +137,11 @@ export default function ReelsPage() {
       {/* Step indicator */}
       <StepIndicator step={step} />
 
-      {/* Resume banner */}
-      {resumeInfo && step === 'input' && (
-        <div className="flex items-start gap-3 rounded-lg border border-amber-300 bg-amber-50 p-4 dark:border-amber-700 dark:bg-amber-950/30">
-          <Info className="mt-0.5 h-5 w-5 shrink-0 text-amber-600" />
-          <div className="flex-1 text-sm">
-            <p className="font-medium text-amber-800 dark:text-amber-300">Unfinished session found</p>
-            <p className="mt-0.5 text-amber-700 dark:text-amber-400">
-              "{resumeInfo.prompt.slice(0, 80)}{resumeInfo.prompt.length > 80 ? '…' : ''}"
-              {' '}— Status: <span className="font-medium">{resumeInfo.status}</span>
-            </p>
-          </div>
-          <div className="flex gap-2">
-            <Button size="sm" variant="outline" onClick={() => { setResumeInfo(null); clearSessionId() }}>
-              Discard
-            </Button>
-            <Button size="sm" onClick={handleResumeAccept}>
-              <RotateCcw className="mr-1.5 h-3.5 w-3.5" />
-              Resume
-            </Button>
-          </div>
-        </div>
-      )}
-
       {/* Error banner */}
       {error && (
         <div className="flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
           <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
-          <div className="flex-1">
-            <p>{error}</p>
-            {resumable && (
-              <p className="mt-1 text-xs opacity-80">
-                Session saved — click <strong>Resume</strong> on next page load to continue from where it stopped.
-              </p>
-            )}
-          </div>
+          <p className="flex-1">{error}</p>
           <button onClick={() => setError(null)} className="shrink-0 text-destructive/60 hover:text-destructive">✕</button>
         </div>
       )}
@@ -496,112 +265,8 @@ export default function ReelsPage() {
             size="lg"
           >
             <Sparkles className="mr-2 h-4 w-4" />
-            Generate Reel ({storyboard.length} clips · {storyboard.length * 10}s)
+            Generate Reel ({storyboard.length} clips · {storyboard.length * 10}s) →
           </Button>
-        </div>
-      )}
-
-      {/* ── STEP 3: Video Result ───────────────────────────────────────────── */}
-      {step === 'result' && (
-        <div className="space-y-5">
-          <div className="flex items-center justify-between">
-            <div>
-              <h2 className="text-base font-semibold">Video Result</h2>
-              <p className="text-sm text-muted-foreground">
-                {generating ? 'Generating your reel — this runs in the background.' : downloadReady ? 'Your reel is ready!' : 'Processing…'}
-              </p>
-            </div>
-            {!generating && (
-              <Button variant="ghost" size="sm" onClick={() => setStep('storyboard')}>
-                ← Storyboard
-              </Button>
-            )}
-          </div>
-
-          {/* Generation progress */}
-          <Card>
-            <CardHeader className="pb-2">
-              <div className="flex items-center justify-between">
-                <CardTitle className="text-sm font-semibold">Progress</CardTitle>
-                {downloadReady && (
-                  <Badge variant="outline" className="border-green-500 text-green-600">
-                    <CheckCircle2 className="mr-1 h-3 w-3" />Complete
-                  </Badge>
-                )}
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-2">
-              {/* Clip rows */}
-              {genClips.map(c => (
-                <ProgressRow
-                  key={c.index}
-                  label={`Clip ${c.index + 1}/${totalClips}`}
-                  status={c.status}
-                  pct={c.pct}
-                />
-              ))}
-
-              {/* Merge rows */}
-              {mergePhase !== 'idle' && (
-                <>
-                  <div className="mt-1 border-t pt-2" />
-                  <ProgressRow
-                    label="Downloading clips"
-                    status={mergePhase === 'downloading' ? 'generating' : 'done'}
-                    pct={mergePhase === 'merging' || mergePhase === 'done' ? 100 : 50}
-                  />
-                  <ProgressRow
-                    label="Merging to final video"
-                    status={mergePhase === 'merging' ? 'generating' : mergePhase === 'done' ? 'done' : 'waiting'}
-                    pct={mergePhase === 'merging' ? mergeProgress : mergePhase === 'done' ? 100 : 0}
-                  />
-                  <ProgressRow
-                    label="Download ready"
-                    status={downloadReady ? 'done' : 'waiting'}
-                    pct={downloadReady ? 100 : 0}
-                  />
-                </>
-              )}
-            </CardContent>
-          </Card>
-
-          {/* Download section */}
-          {downloadReady && (
-            <Card className="border-green-200 bg-green-50/50 dark:border-green-800 dark:bg-green-950/20">
-              <CardContent className="flex items-center justify-between gap-4 p-4">
-                <div>
-                  <p className="font-semibold text-green-800 dark:text-green-300">Final reel ready</p>
-                  {sizeBytes && (
-                    <p className="text-xs text-green-600 dark:text-green-500">
-                      {(sizeBytes / (1024 * 1024)).toFixed(1)} MB
-                      {mergedHash && <> · SHA256: {mergedHash.slice(0, 16)}…</>}
-                    </p>
-                  )}
-                  <p className="mt-0.5 text-xs text-green-600 dark:text-green-500">
-                    Individual clip files will be deleted after download.
-                  </p>
-                </div>
-                <Button onClick={handleDownload} size="lg" className="bg-green-600 hover:bg-green-700">
-                  <Download className="mr-2 h-4 w-4" />
-                  Download Reel
-                </Button>
-              </CardContent>
-            </Card>
-          )}
-
-          {/* Individual clip previews */}
-          {doneClips.length > 0 && (
-            <div>
-              <h3 className="mb-3 text-sm font-semibold text-muted-foreground">
-                Individual Clips ({doneClips.length}/{totalClips})
-              </h3>
-              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-                {doneClips.map(c => (
-                  <ClipPreviewCard key={c.index} clip={c} />
-                ))}
-              </div>
-            </div>
-          )}
         </div>
       )}
     </div>
@@ -611,7 +276,7 @@ export default function ReelsPage() {
 // ─── StepIndicator ────────────────────────────────────────────────────────────
 
 function StepIndicator({ step }: { step: Step }) {
-  const steps: { key: Step; label: string }[] = [
+  const steps: { key: string; label: string }[] = [
     { key: 'input', label: 'Brief' },
     { key: 'storyboard', label: 'Storyboard' },
     { key: 'result', label: 'Generate & Download' },
@@ -801,66 +466,3 @@ function StoryboardClipCard({
   )
 }
 
-// ─── ProgressRow ─────────────────────────────────────────────────────────────
-
-function ProgressRow({
-  label, status, pct,
-}: {
-  label: string
-  status: 'waiting' | 'generating' | 'retrying' | 'done' | 'error'
-  pct: number
-}) {
-  return (
-    <div className="flex items-center gap-3">
-      <div className="w-4 shrink-0">
-        {status === 'done' && <CheckCircle2 className="h-4 w-4 text-green-500" />}
-        {(status === 'generating') && <Loader2 className="h-4 w-4 animate-spin text-primary" />}
-        {status === 'retrying' && <RefreshCw className="h-4 w-4 animate-spin text-amber-500" />}
-        {status === 'waiting' && <Clock className="h-4 w-4 text-muted-foreground/40" />}
-        {status === 'error' && <AlertCircle className="h-4 w-4 text-destructive" />}
-      </div>
-      <span className="w-40 shrink-0 text-xs text-muted-foreground">{label}</span>
-      <div className="flex-1 h-1.5 overflow-hidden rounded-full bg-muted">
-        <div
-          className={`h-full rounded-full transition-all duration-500 ${
-            status === 'done' ? 'bg-green-500' :
-            status === 'generating' ? 'bg-primary' :
-            status === 'retrying' ? 'bg-amber-500' :
-            status === 'error' ? 'bg-destructive' : 'bg-transparent'
-          }`}
-          style={{ width: `${pct}%` }}
-        />
-      </div>
-      <span className="w-8 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
-        {status === 'done' ? '100%' : status === 'waiting' ? '' : `${Math.round(pct)}%`}
-      </span>
-    </div>
-  )
-}
-
-// ─── ClipPreviewCard ──────────────────────────────────────────────────────────
-
-function ClipPreviewCard({ clip }: { clip: ClipGenState }) {
-  return (
-    <Card className="overflow-hidden">
-      <div className="relative aspect-[9/16] bg-black">
-        {clip.videoUrl ? (
-          <video
-            src={clip.videoUrl}
-            poster={clip.thumbnailUrl || undefined}
-            controls
-            playsInline
-            className="h-full w-full object-contain"
-          />
-        ) : (
-          <div className="flex h-full w-full items-center justify-center">
-            <Play className="h-8 w-8 text-white/20" />
-          </div>
-        )}
-        <div className="absolute left-2 top-2">
-          <Badge className="text-xs">Clip {clip.index + 1}</Badge>
-        </div>
-      </div>
-    </Card>
-  )
-}

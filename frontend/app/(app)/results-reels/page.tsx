@@ -11,17 +11,14 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { getReelSession, startReelGeneration, type ReelsSSEEvent } from '@/lib/api'
+import {
+  type StoredSession,
+  loadStoredSessions,
+  pushStoredSession,
+  removeStoredSession,
+} from '@/lib/reels-sessions'
 
 // ─── types ────────────────────────────────────────────────────────────────────
-
-type StoredSession = {
-  sessionId: string
-  prompt: string
-  mode: string
-  duration: number
-  totalClips: number
-  createdAt: string
-}
 
 type ClipGenState = {
   index: number
@@ -32,31 +29,9 @@ type ClipGenState = {
 
 type MergePhase = 'idle' | 'downloading' | 'merging' | 'done'
 
-// ─── localStorage helpers ─────────────────────────────────────────────────────
+// ─── localStorage key migration ───────────────────────────────────────────────
 
-const SESSIONS_KEY = 'reels_sessions'
 const OLD_SESSION_KEY = 'reels_session_id'
-
-export function loadStoredSessions(): StoredSession[] {
-  try { return JSON.parse(localStorage.getItem(SESSIONS_KEY) || '[]') } catch { return [] }
-}
-
-export function pushStoredSession(s: Omit<StoredSession, 'createdAt'>) {
-  try {
-    const existing = loadStoredSessions().filter(x => x.sessionId !== s.sessionId)
-    localStorage.setItem(SESSIONS_KEY, JSON.stringify(
-      [{ ...s, createdAt: new Date().toISOString() }, ...existing].slice(0, 30)
-    ))
-  } catch {}
-}
-
-function removeStoredSession(sessionId: string) {
-  try {
-    localStorage.setItem(SESSIONS_KEY, JSON.stringify(
-      loadStoredSessions().filter(s => s.sessionId !== sessionId)
-    ))
-  } catch {}
-}
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
