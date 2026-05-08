@@ -33,12 +33,12 @@ const path = require('path');
 const fs = require('fs');
 
 const {
-  createSession, saveSession, getSession, deleteSession, auditLog, cleanupOldSessions,
+  createSession, saveSession, getSession, auditLog, cleanupOldSessions,
 } = require('../services/sessionStore');
 const { buildStoryboard, refreshFromIndex } = require('../services/storyboardBuilder');
 const { generateFirstClip, extendClip, pollUntilComplete } = require('../services/geminiGenService');
 const {
-  downloadClips, verifyClips, mergeClips, verifyMerged, cleanupClips, cleanupAll, getMergedPath,
+  downloadClips, verifyClips, mergeClips, verifyMerged, cleanupClips, cleanupAll,
 } = require('../services/reelsMerger');
 
 // Run session cleanup on startup
@@ -296,7 +296,10 @@ router.post('/generate-stream', async (req, res) => {
     sse(res, { type: 'merge_progress', phase: 'downloading', progress: 0 });
     auditLog(session, 'info', 'MERGE_DOWNLOADING', {});
 
-    const doneClips = session.clips.filter(c => c.status === 'done');
+    // Sort by index to guarantee clip-0.mp4, clip-1.mp4 … order matches merge sequence
+    const doneClips = session.clips
+      .filter(c => c.status === 'done')
+      .sort((a, b) => a.index - b.index);
     await downloadClips(sessionId, doneClips, ({ clipIndex, total }) => {
       sse(res, { type: 'merge_progress', phase: 'downloading', clipIndex, total });
     });

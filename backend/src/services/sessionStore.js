@@ -13,6 +13,7 @@ const Redis = require('ioredis');
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
+const { v4: uuidv4 } = require('uuid');
 
 const SESSION_TTL_SECONDS = 24 * 60 * 60; // 24h
 const BACKUP_DIR = path.join('/tmp', 'reels-sessions');
@@ -40,14 +41,17 @@ function getRedis() {
   });
   redisClient.on('ready', () => {
     redisReady = true;
-    console.info('[SessionStore] Redis connected');
+    console.info('[SessionStore] ✅ Redis connected — primary session store active');
   });
   redisClient.on('error', (err) => {
     redisReady = false;
-    console.error('[SessionStore] Redis error:', err.message);
+    console.error('[SessionStore] ❌ Redis error — falling back to file+memory:', err.message);
+  });
+  redisClient.on('reconnecting', () => {
+    console.warn('[SessionStore] ⚠️  Redis reconnecting…');
   });
   redisClient.connect().catch((err) => {
-    console.error('[SessionStore] Redis connect failed:', err.message);
+    console.error('[SessionStore] ❌ Redis connect failed — using file+memory fallback:', err.message);
   });
   return redisClient;
 }
@@ -152,7 +156,6 @@ async function deleteSession(sessionId) {
 // ── factory ───────────────────────────────────────────────────────────────────
 
 function createSession({ prompt, mode, duration }) {
-  const { v4: uuidv4 } = require('uuid');
   return {
     sessionId: uuidv4(),
     createdAt: new Date().toISOString(),

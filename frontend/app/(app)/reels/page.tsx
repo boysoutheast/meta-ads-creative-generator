@@ -482,8 +482,8 @@ export default function ReelsPage() {
                 hint={hints[idx] || ''}
                 onHintChange={v => setHints(prev => ({ ...prev, [idx]: v }))}
                 onRefresh={() => handleRefresh(idx)}
-                isRefreshing={refreshingFrom !== null && refreshingFrom <= idx}
-                isStale={refreshingFrom !== null && refreshingFrom <= idx}
+                isRefreshing={refreshingFrom === idx}
+                isStale={refreshingFrom !== null && idx > refreshingFrom}
               />
             ))}
           </div>
@@ -663,7 +663,7 @@ function StoryboardClipCard({
         <div className="flex items-start gap-3">
           {/* Clip number */}
           <div className="mt-0.5 shrink-0">
-            {isRefreshing && idx >= (isRefreshing ? 0 : idx) ? (
+            {isRefreshing ? (
               <Loader2 className="h-5 w-5 animate-spin text-primary" />
             ) : (
               <Badge variant="secondary" className="text-xs tabular-nums">

@@ -20,16 +20,19 @@ const axios = require('axios');
 const FormData = require('form-data');
 
 const BASE_URL = 'https://api.geminigen.ai';
-const API_KEY = process.env.GEMINIGEN_API_KEY || '';
+
+// Read dynamically so Railway env vars are always current (not frozen at module load)
+function apiKey() { return process.env.GEMINIGEN_API_KEY || ''; }
 
 // How often to poll, and max wait time per clip
 const POLL_INTERVAL_MS = 8_000;
 const POLL_TIMEOUT_MS = 5 * 60_000; // 5 minutes per clip
+const REQUEST_TIMEOUT_MS = 30_000;  // 30s for generate/extend calls
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
 function apiHeaders() {
-  return { 'x-api-key': API_KEY };
+  return { 'x-api-key': apiKey() };
 }
 
 /**
@@ -44,6 +47,8 @@ async function pollUntilComplete(uuid, onProgress) {
 
     const { data } = await axios.get(`${BASE_URL}/uapi/v1/history/${uuid}`, {
       headers: apiHeaders(),
+      timeout: REQUEST_TIMEOUT_MS,
+      maxRedirects: 5,
     });
 
     const pct = data.status_percentage || 0;
@@ -87,6 +92,8 @@ async function generateFirstClip({ prompt, mode }) {
 
   const { data } = await axios.post(`${BASE_URL}/uapi/v1/video-gen/grok`, form, {
     headers: { ...apiHeaders(), ...form.getHeaders() },
+    timeout: REQUEST_TIMEOUT_MS,
+    maxRedirects: 5,
   });
 
   if (!data.uuid) throw new Error('No UUID returned from GeminiGen generate');
@@ -108,6 +115,8 @@ async function extendClip({ prompt, refUuid }) {
 
   const { data } = await axios.post(`${BASE_URL}/uapi/v1/video-extend/grok`, form, {
     headers: { ...apiHeaders(), ...form.getHeaders() },
+    timeout: REQUEST_TIMEOUT_MS,
+    maxRedirects: 5,
   });
 
   if (!data.uuid) throw new Error('No UUID returned from GeminiGen extend');

@@ -60,6 +60,7 @@ async function downloadFile(url, destPath, retries = 3) {
       const response = await axios.get(url, {
         responseType: 'stream',
         timeout: 120_000,
+        maxRedirects: 10,   // GeminiGen CDN may redirect
         headers: { 'User-Agent': 'ReelsMerger/1.0' },
       });
 
