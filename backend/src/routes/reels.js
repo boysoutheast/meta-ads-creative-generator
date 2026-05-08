@@ -39,10 +39,15 @@ const { buildStoryboard, refreshFromIndex } = require('../services/storyboardBui
 const { generateFirstClip, extendClip, pollUntilComplete } = require('../services/geminiGenService');
 const {
   downloadClips, verifyClips, mergeClips, verifyMerged, cleanupClips, cleanupAll,
+  sweepExpiredMerged,
 } = require('../services/reelsMerger');
 
-// Run session cleanup on startup
+// Run session cleanup + merged-file sweep on startup
 cleanupOldSessions().catch(() => {});
+sweepExpiredMerged();
+
+// Periodic sweep every 6 hours (catches missed deletes across restarts)
+setInterval(() => sweepExpiredMerged(), 6 * 60 * 60 * 1000);
 
 const VALID_DURATIONS = [10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120];
 const MAX_CLIP_ATTEMPTS = 3;
@@ -422,17 +427,17 @@ router.get('/download/:sessionId', async (req, res) => {
   stream.pipe(res);
 
   stream.on('end', async () => {
-    // After download complete — cleanup everything
-    session.downloadedAt = new Date().toISOString();
-    auditLog(session, 'info', 'DOWNLOAD_COMPLETE', { filename, sizeBytes: stat.size });
+    // Mark downloaded — individual clips already deleted after merge.
+    // Merged file is kept 48h from creation for re-download, then swept by sweepExpiredMerged().
+    const alreadyDownloaded = !!session.downloadedAt;
+    session.downloadedAt = session.downloadedAt || new Date().toISOString();
+    auditLog(session, 'info', 'DOWNLOAD_COMPLETE', {
+      filename,
+      sizeBytes: stat.size,
+      reDownload: alreadyDownloaded,
+    });
     await saveSession(session);
-
-    // Delete files
-    cleanupAll(req.params.sessionId);
-    auditLog(session, 'info', 'ALL_FILES_CLEANED', {});
-    await saveSession(session);
-
-    console.info(`[reels/download] Session ${req.params.sessionId} — files cleaned after download`);
+    console.info(`[reels/download] ${req.params.sessionId} — download complete (merged kept 48h)`);
   });
 
   stream.on('error', (err) => {

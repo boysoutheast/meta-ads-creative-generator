@@ -221,6 +221,44 @@ function getMergedPath(sessionId) {
   return mergedPath(sessionId);
 }
 
+/**
+ * Scan /tmp/reels/ and delete any merged.mp4 whose mtime > 48h.
+ * Called on server startup and every 6h to recover from crashes/restarts.
+ */
+const MERGED_TTL_MS = 48 * 60 * 60 * 1000; // 48 hours
+
+function sweepExpiredMerged() {
+  try {
+    if (!fs.existsSync(TMP_BASE)) return;
+    const entries = fs.readdirSync(TMP_BASE);
+    let cleaned = 0;
+
+    for (const sessionId of entries) {
+      const dir = path.join(TMP_BASE, sessionId);
+      try { if (!fs.statSync(dir).isDirectory()) continue; } catch { continue; }
+
+      const merged = path.join(dir, 'merged.mp4');
+
+      if (!fs.existsSync(merged)) {
+        // Orphan dir with no merged file — remove it
+        try { fs.rmdirSync(dir); } catch {}
+        continue;
+      }
+
+      const ageMs = Date.now() - fs.statSync(merged).mtimeMs;
+      if (ageMs > MERGED_TTL_MS) {
+        cleanupAll(sessionId);
+        cleaned++;
+        console.info(`[Merger] sweep — deleted ${sessionId} (age ${Math.round(ageMs / 3_600_000)}h)`);
+      }
+    }
+
+    if (cleaned) console.info(`[Merger] sweepExpiredMerged — cleaned ${cleaned} session(s)`);
+  } catch (e) {
+    console.warn('[Merger] sweepExpiredMerged failed:', e.message);
+  }
+}
+
 module.exports = {
   downloadClips,
   verifyClips,
@@ -229,4 +267,5 @@ module.exports = {
   cleanupClips,
   cleanupAll,
   getMergedPath,
+  sweepExpiredMerged,
 };
