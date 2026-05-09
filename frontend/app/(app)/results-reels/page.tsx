@@ -257,13 +257,18 @@ function SessionCard({ stored, onRemove }: { stored: StoredSession; onRemove: ()
           return
         }
 
-        // Auto-start / reconnect SSE only for sessions already in generation — NOT reviewing/storyboard_built
-        const active = ['generating', 'partial']
-        if (active.includes(s.status) && !sseStarted.current) {
+        // Auto-reconnect SSE only for sessions actively generating in another tab.
+        // 'partial' and 'reviewing' sessions stay paused — user must click Resume/Start
+        // to ensure clear user intent and avoid runaway retries.
+        if (s.status === 'generating' && !sseStarted.current) {
           sseStarted.current = true
           setStatus('generating')
           startReelGeneration(stored.sessionId, handleSSE).catch(err => {
-            if (!cancelled) { setStatus('error'); setError(err.message) }
+            if (!cancelled) {
+              sseStarted.current = false  // reset so user can retry via Resume button
+              setStatus('error')
+              setError(err.message)
+            }
           })
         }
       } catch (err: any) {
@@ -285,6 +290,7 @@ function SessionCard({ stored, onRemove }: { stored: StoredSession; onRemove: ()
     setStatus('generating')
     setError(null)
     startReelGeneration(stored.sessionId, handleSSE).catch(err => {
+      sseStarted.current = false  // reset so user can retry
       setStatus('error')
       setError(err.message)
     })
@@ -329,14 +335,14 @@ function SessionCard({ stored, onRemove }: { stored: StoredSession; onRemove: ()
                 Start Generation
               </Button>
             )}
-            {status === 'partial' && !downloadReady && (
+            {(status === 'partial' || status === 'error') && !downloadReady && (
               <Button
                 size="sm"
                 className="h-8 bg-amber-600 hover:bg-amber-700 text-white text-xs"
                 onClick={handleStart}
               >
                 <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
-                Resume
+                {status === 'error' ? 'Retry' : 'Resume'}
               </Button>
             )}
             {downloadReady && (
