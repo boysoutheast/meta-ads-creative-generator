@@ -536,17 +536,61 @@ export async function analyzeWinningVideo(file: File) {
 }
 
 /** Sprint 3 — Analyze winning video directly from a social media URL (yt-dlp + Whisper or Gemini full) */
-export async function analyzeWinningVideoFromUrl(url: string, mode: 'audio' | 'full' = 'full') {
-  const res = await api.post('/scale-video/analyze-from-url', { url, mode }, { timeout: 240000 })
-  return res.data as {
-    analysis: any
-    framesAnalyzed: number
-    filename: string
-    platform?: string
-    transcript?: string
-    mode?: 'audio' | 'full'
-    availableAngles: import('./types').ScalingAngle[]
+export interface AnalyzeUrlDonePayload {
+  analysis: any
+  framesAnalyzed: number
+  filename: string
+  platform?: string
+  transcript?: string
+  mode?: 'audio' | 'full'
+  availableAngles: import('./types').ScalingAngle[]
+}
+
+export type AnalyzeUrlEvent =
+  | { type: 'phase'; ts: number; phase: string; message: string; detail?: string }
+  | { type: 'done'; payload: AnalyzeUrlDonePayload }
+  | { type: 'error'; message: string }
+
+export async function analyzeWinningVideoFromUrl(
+  url: string,
+  mode: 'audio' | 'full' = 'full',
+  onEvent?: (evt: AnalyzeUrlEvent) => void,
+): Promise<AnalyzeUrlDonePayload> {
+  const response = await fetch(`${API_URL}/scale-video/analyze-from-url`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url, mode }),
+  })
+  if (!response.ok) throw new Error(`HTTP ${response.status}`)
+
+  const reader = response.body!.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  let donePayload: AnalyzeUrlDonePayload | null = null
+
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    const parts = buffer.split('\n\n')
+    buffer = parts.pop() ?? ''
+    for (const part of parts) {
+      for (const line of part.split('\n')) {
+        if (!line.startsWith('data: ')) continue
+        try {
+          const evt = JSON.parse(line.slice(6)) as AnalyzeUrlEvent
+          onEvent?.(evt)
+          if (evt.type === 'done') donePayload = evt.payload
+          if (evt.type === 'error') throw new Error(evt.message)
+        } catch (parseErr) {
+          if ((parseErr as Error).message && !(parseErr as Error).message.includes('JSON')) throw parseErr
+        }
+      }
+    }
   }
+
+  if (!donePayload) throw new Error('Stream ended without a result')
+  return donePayload
 }
 
 /** Sprint 3 v2 — Translate winning-ad analysis + user intent → tailored GeminiGen video prompt */

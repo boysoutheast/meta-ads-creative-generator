@@ -225,10 +225,14 @@ router.get('/remake/:remakeId', (req, res) => {
 });
 
 /**
- * POST /api/scale-video/analyze-from-url
- * Download & analyze a social media video URL (Instagram, TikTok, YouTube, Facebook).
- * Body: { url: string }
- * Returns: same format as /analyze endpoint + { platform, transcript }
+ * POST /api/scale-video/analyze-from-url  (SSE)
+ * Streams live progress events while downloading + analyzing a social media URL.
+ * Body: { url: string, mode?: 'audio'|'full' }
+ *
+ * SSE event types:
+ *   { type: 'phase', phase: '...', message: '...', detail?: '...' }  ← live log
+ *   { type: 'done', payload: { analysis, framesAnalyzed, filename, platform, transcript, mode, availableAngles } }
+ *   { type: 'error', message: '...' }
  */
 router.post('/analyze-from-url', async (req, res) => {
   const { url, mode = 'full' } = req.body || {};
@@ -236,36 +240,65 @@ router.post('/analyze-from-url', async (req, res) => {
     return res.status(400).json({ error: 'url is required and must start with http' });
   }
 
+  // SSE setup
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
+  res.flushHeaders();
+
+  const send = (data) => {
+    if (!res.writableEnded) {
+      res.write(`data: ${JSON.stringify(data)}\n\n`);
+      if (typeof res.flush === 'function') res.flush();
+    }
+  };
+  const ping = setInterval(() => { if (!res.writableEnded) res.write(': ping\n\n'); }, 20_000);
+
+  const onProgress = (evt) => {
+    send({ type: 'phase', ts: Date.now(), ...evt });
+  };
+
   try {
-    const { analysis, frames, transcript, platform, mode: usedMode } = await analyzeVideoFromUrl(url, mode);
+    onProgress({ phase: 'start', message: `Menerima URL: ${url.slice(0, 80)}` });
+
+    const { analysis, frames, transcript, platform, mode: usedMode } = await analyzeVideoFromUrl(url, mode, onProgress);
     const availableAngles = Object.entries(SCALING_ANGLES).map(([key, val]) => ({
       key,
       label: val.label,
       hook: val.hook,
     }));
-    res.json({
-      analysis,
-      framesAnalyzed: frames,
-      filename: `${platform}: ${url.slice(-50)}`,
-      platform,
-      transcript,
-      mode: usedMode,
-      availableAngles,
+
+    onProgress({ phase: 'finalizing', message: 'Menyiapkan response...' });
+
+    send({
+      type: 'done',
+      payload: {
+        analysis,
+        framesAnalyzed: frames,
+        filename: `${platform}: ${url.slice(-50)}`,
+        platform,
+        transcript,
+        mode: usedMode,
+        availableAngles,
+      },
     });
+    res.end();
   } catch (err) {
     const msg = err.message || 'Gagal menganalisis URL';
-    // yt-dlp binary not installed — happens on local dev (works on Railway/Docker)
     const isYtdlpMissing =
       msg.includes('yt-dlp: command not found') ||
       msg.includes("yt-dlp' is not recognized") ||
+      msg.includes('yt-dlp tidak terinstall') ||
       (msg.includes('ENOENT') && msg.includes('yt-dlp')) ||
       (err.code === 'ENOENT' && String(err.path || '').includes('yt-dlp'));
-    if (isYtdlpMissing) {
-      return res.status(500).json({
-        error: 'yt-dlp tidak tersedia di environment ini. Untuk Instagram/TikTok gunakan Upload File manual, atau coba YouTube URL (tidak butuh yt-dlp).',
-      });
-    }
-    res.status(500).json({ error: msg });
+    const friendly = isYtdlpMissing
+      ? 'yt-dlp tidak tersedia. Untuk Instagram/TikTok gunakan Upload File manual, atau coba YouTube URL.'
+      : msg;
+    send({ type: 'error', message: friendly });
+    res.end();
+  } finally {
+    clearInterval(ping);
   }
 });
 

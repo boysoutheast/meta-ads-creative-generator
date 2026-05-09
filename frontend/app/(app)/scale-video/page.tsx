@@ -71,6 +71,9 @@ export default function ScaleVideoPage() {
   const [scriptOutline, setScriptOutline] = useState('')
   const [showIntentStep, setShowIntentStep] = useState(false)
 
+  // Live action log — populated by SSE phase events from /analyze-from-url
+  const [liveLog, setLiveLog] = useState<Array<{ ts: number; phase: string; message: string; detail?: string }>>([])
+
   useEffect(() => {
     getProducts()
       .then((list) => {
@@ -89,9 +92,14 @@ export default function ScaleVideoPage() {
     setResult(null)
     setAvailableAngles([])
     setSelectedAngles([])
+    setLiveLog([])
     try {
       const resp = inputMode === 'url'
-        ? await analyzeWinningVideoFromUrl(urlInput.trim(), analyzeMode)
+        ? await analyzeWinningVideoFromUrl(urlInput.trim(), analyzeMode, (evt) => {
+            if (evt.type === 'phase') {
+              setLiveLog((prev) => [...prev, { ts: evt.ts, phase: evt.phase, message: evt.message, detail: evt.detail }])
+            }
+          })
         : await analyzeWinningVideo(file!)
       setVideoAnalysis(resp.analysis)
       if (resp.availableAngles?.length) {
@@ -375,8 +383,54 @@ export default function ScaleVideoPage() {
             </div>
           )}
 
-          {/* Analyzing skeleton */}
-          {analyzing && (
+          {/* Live action log — shows during URL analysis (SSE phase events) */}
+          {(analyzing || liveLog.length > 0) && inputMode === 'url' && (
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm flex items-center gap-2">
+                  {analyzing ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
+                  ) : (
+                    <Sparkles className="h-3.5 w-3.5 text-emerald-600" />
+                  )}
+                  Live System Log
+                </CardTitle>
+                <CardDescription className="text-[11px]">
+                  {analyzing ? 'Sistem sedang bekerja…' : 'Selesai ✓'}
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="max-h-48 overflow-y-auto rounded-md bg-muted/40 px-2.5 py-2 space-y-1 font-mono text-[10.5px]">
+                  {liveLog.length === 0 ? (
+                    <p className="text-muted-foreground italic">Initialising...</p>
+                  ) : (
+                    liveLog.map((entry, i) => (
+                      <div key={i} className="flex gap-2 leading-snug">
+                        <span className="shrink-0 text-muted-foreground/60 tabular-nums">
+                          {new Date(entry.ts).toLocaleTimeString('id-ID', { hour12: false })}
+                        </span>
+                        <span className={`shrink-0 font-semibold ${
+                          entry.phase.includes('error') ? 'text-red-600' :
+                          entry.phase.includes('done') || entry.phase === 'cleanup' || entry.phase === 'transcribed' || entry.phase === 'enriched' || entry.phase === 'downloaded' ? 'text-emerald-600' :
+                          entry.phase === 'download_retry' || entry.phase === 'transcript_empty' || entry.phase === 'compress_skip' ? 'text-amber-600' :
+                          'text-blue-600'
+                        }`}>
+                          [{entry.phase}]
+                        </span>
+                        <span className="text-foreground/80 break-words">{entry.message}</span>
+                        {entry.detail && (
+                          <span className="text-muted-foreground/60 italic ml-1 truncate">— {entry.detail.slice(0, 80)}</span>
+                        )}
+                      </div>
+                    ))
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Analyzing skeleton — only for file upload (URL has live log) */}
+          {analyzing && inputMode === 'file' && (
             <Card>
               <CardContent className="space-y-3 p-6">
                 <Skeleton className="h-4 w-1/3" />

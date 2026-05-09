@@ -1,12 +1,14 @@
 /**
  * videoUrlAnalyzer.js
  *
- * Two analysis modes:
+ * Two analysis modes with live progress callbacks:
  *   'audio' → yt-dlp + Whisper-1 transcript + GPT-4o enrich (fast, cheap)
  *   'full'  → Gemini 2.5 Flash via apimart native (visual + audio in 1 call)
  *
  * YouTube in 'full' mode: URL sent directly (Gemini supports YouTube natively).
  * IG/TikTok/Facebook: yt-dlp download → compress → base64 → Gemini.
+ *
+ * onProgress(evt) is called at every phase boundary so SSE can stream live status.
  *
  * Requires: yt-dlp + ffmpeg installed in container.
  */
@@ -21,9 +23,89 @@ const config = require('../config');
 const GEMINI_ENDPOINT =
   'https://api.apimart.ai/v1beta/models/gemini-2.5-flash:generateContent';
 
+// ─── helpers ─────────────────────────────────────────────────────────────────
+
+const NOOP = () => {};
+
+function bytesMb(bytes) {
+  return (bytes / 1_048_576).toFixed(1);
+}
+
+/**
+ * Run yt-dlp with a chain of progressively-more-lenient format selectors.
+ * Instagram, TikTok, etc don't always expose separate video+audio streams.
+ * @returns {string} path to the downloaded file
+ */
+function ytDlpDownload(url, outFile, { audioOnly = false, onProgress = NOOP } = {}) {
+  const flagsCommon = `--no-playlist --max-filesize 200M --no-warnings --output "${outFile}"`;
+
+  // Format chains — tried in order until one works
+  const chains = audioOnly
+    ? [
+        // 1. Modern fallback chain: bestaudio→best→single stream
+        '"bestaudio/best"',
+        '"best"',
+      ]
+    : [
+        // 1. Prefer mp4 single stream (works on IG, TikTok, FB)
+        '"best[ext=mp4]/best"',
+        // 2. Universal best (any container, any height)
+        '"best"',
+        // 3. Try separate video+audio merge (YT, some others)
+        '"bestvideo+bestaudio/best"',
+      ];
+
+  let lastErr = null;
+  for (const chain of chains) {
+    try {
+      onProgress({
+        phase: 'downloading',
+        message: `Mencoba download dengan format: ${chain.replace(/"/g, '')}…`,
+      });
+      const cmd = `yt-dlp ${flagsCommon} ${audioOnly ? '--extract-audio --audio-format mp3' : '--merge-output-format mp4'} --format ${chain} "${url}"`;
+      execSync(cmd, { timeout: 120000, stdio: 'pipe' });
+
+      // yt-dlp may produce outFile with different extension when audioOnly — locate it
+      if (audioOnly) {
+        const dir = path.dirname(outFile);
+        const baseName = path.basename(outFile, path.extname(outFile));
+        const found = fs.readdirSync(dir).find((f) => f.startsWith(baseName) && /\.(mp3|m4a|webm|opus|aac)$/i.test(f));
+        if (found) {
+          const foundPath = path.join(dir, found);
+          if (fs.statSync(foundPath).size > 5000) {
+            onProgress({
+              phase: 'downloaded',
+              message: `Audio downloaded: ${bytesMb(fs.statSync(foundPath).size)} MB`,
+            });
+            return foundPath;
+          }
+        }
+      } else if (fs.existsSync(outFile) && fs.statSync(outFile).size > 10000) {
+        onProgress({
+          phase: 'downloaded',
+          message: `Video downloaded: ${bytesMb(fs.statSync(outFile).size)} MB`,
+        });
+        return outFile;
+      }
+    } catch (e) {
+      lastErr = e;
+      const stderr = (e.stderr || e.message || '').toString().slice(0, 300);
+      onProgress({ phase: 'download_retry', message: `Format ${chain.replace(/"/g, '')} gagal — coba next...`, detail: stderr });
+    }
+  }
+
+  // Detect missing yt-dlp (vs format error)
+  const errMsg = lastErr ? (lastErr.stderr || lastErr.message || '').toString() : 'unknown';
+  if (errMsg.includes('command not found') || errMsg.includes('ENOENT') || errMsg.includes('not recognized')) {
+    throw new Error('yt-dlp tidak terinstall di server (deploy ulang Railway dengan Dockerfile baru)');
+  }
+  throw new Error(`Download gagal — semua format selector failed. Detail: ${errMsg.slice(0, 200)}`);
+}
+
 // ─── Gemini helper ────────────────────────────────────────────────────────────
 
-async function callGemini(parts) {
+async function callGemini(parts, onProgress = NOOP) {
+  onProgress({ phase: 'gemini_call', message: 'Mengirim ke Gemini 2.5 Flash...' });
   const { data } = await axios.post(
     GEMINI_ENDPOINT,
     { contents: [{ role: 'user', parts }], generationConfig: { maxOutputTokens: 2048 } },
@@ -32,6 +114,7 @@ async function callGemini(parts) {
       timeout: 120000,
     }
   );
+  onProgress({ phase: 'gemini_done', message: 'Gemini selesai analisis ✓' });
   return data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
 }
 
@@ -84,66 +167,80 @@ function parseGeminiResponse(raw) {
 
 // ─── FULL MODE: Gemini 2.5 Flash ─────────────────────────────────────────────
 
-async function analyzeYouTubeUrl(url) {
-  // Gemini supports YouTube URLs natively — no download needed
+async function analyzeYouTubeUrl(url, onProgress) {
+  onProgress({ phase: 'youtube_native', message: 'YouTube URL — mengirim ke Gemini langsung tanpa download...' });
   return parseGeminiResponse(
-    await callGemini([{ fileData: { fileUri: url } }, { text: buildGeminiPrompt() }])
+    await callGemini(
+      [{ fileData: { fileUri: url } }, { text: buildGeminiPrompt() }],
+      onProgress
+    )
   );
 }
 
-async function analyzeDownloadedVideoFull(url) {
+async function analyzeDownloadedVideoFull(url, onProgress) {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ytdl_'));
   const rawFile = path.join(tmpDir, 'source.mp4');
   const compressedFile = path.join(tmpDir, 'compressed.mp4');
   try {
-    execSync(
-      `yt-dlp --no-playlist --format "bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[height<=720][ext=mp4]/best[height<=720]" --merge-output-format mp4 --max-filesize 50M --output "${rawFile}" "${url}"`,
-      { timeout: 120000, stdio: 'pipe' }
-    );
-    if (!fs.existsSync(rawFile) || fs.statSync(rawFile).size < 10000) {
-      throw new Error('Download gagal atau video private/removed');
-    }
+    onProgress({ phase: 'tmp_dir', message: `Tmp dir: ${tmpDir}` });
+
+    const downloadedPath = ytDlpDownload(url, rawFile, { onProgress });
+
+    // Compress to keep base64 payload < ~10MB so Gemini accepts it fast
+    onProgress({ phase: 'compressing', message: 'Compressing dengan ffmpeg (854px, 500kbps)...' });
     try {
       execSync(
-        `ffmpeg -i "${rawFile}" -vf "scale=854:-2" -c:v libx264 -b:v 500k -c:a aac -b:a 64k "${compressedFile}" -y`,
+        `ffmpeg -i "${downloadedPath}" -vf "scale=854:-2" -c:v libx264 -b:v 500k -c:a aac -b:a 64k "${compressedFile}" -y`,
         { timeout: 60000, stdio: 'pipe' }
       );
-    } catch { /* fall back to raw */ }
-    const videoFile =
+    } catch (compErr) {
+      onProgress({ phase: 'compress_skip', message: 'Compression skipped — pakai raw file', detail: compErr.message?.slice(0, 100) });
+    }
+
+    const finalFile =
       fs.existsSync(compressedFile) && fs.statSync(compressedFile).size > 10000
-        ? compressedFile : rawFile;
-    const videoBase64 = fs.readFileSync(videoFile).toString('base64');
+        ? compressedFile
+        : downloadedPath;
+    const sizeMb = bytesMb(fs.statSync(finalFile).size);
+    onProgress({ phase: 'encoding', message: `Encoding ${sizeMb}MB ke base64...` });
+    const videoBase64 = fs.readFileSync(finalFile).toString('base64');
+
     return parseGeminiResponse(
-      await callGemini([
-        { inlineData: { mimeType: 'video/mp4', data: videoBase64 } },
-        { text: buildGeminiPrompt() },
-      ])
+      await callGemini(
+        [
+          { inlineData: { mimeType: 'video/mp4', data: videoBase64 } },
+          { text: buildGeminiPrompt() },
+        ],
+        onProgress
+      )
     );
   } finally {
     try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}
+    onProgress({ phase: 'cleanup', message: 'Tmp files cleaned up ✓' });
   }
 }
 
 // ─── AUDIO ONLY MODE: yt-dlp + Whisper + GPT-4o text enrich ──────────────────
 
-async function analyzeAudioOnly(url) {
+async function analyzeAudioOnly(url, onProgress) {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ytdl_'));
   const rawFile = path.join(tmpDir, 'source.mp4');
   try {
-    execSync(
-      `yt-dlp --no-playlist --format "bestaudio[ext=m4a]/bestaudio/best" --extract-audio --audio-format mp3 --output "${rawFile}" "${url}"`,
-      { timeout: 120000, stdio: 'pipe' }
-    );
-    // Find downloaded file (yt-dlp may output .mp3 even with .mp4 template)
-    const files = fs.readdirSync(tmpDir);
-    const audioFile = files.find((f) => f.match(/\.(mp3|m4a|webm|opus)$/i));
-    if (!audioFile) throw new Error('Audio download gagal');
-    const audioPath = path.join(tmpDir, audioFile);
+    onProgress({ phase: 'tmp_dir', message: `Tmp dir: ${tmpDir}` });
 
+    const audioPath = ytDlpDownload(url, rawFile, { audioOnly: true, onProgress });
+
+    onProgress({ phase: 'transcribing', message: 'Mengirim audio ke Whisper-1...' });
     const { transcribeAudio } = require('./videoAnalyzer');
     const transcript = await transcribeAudio(audioPath);
 
-    // Build analysis from transcript via GPT-4o
+    if (!transcript) {
+      onProgress({ phase: 'transcript_empty', message: '⚠️ Whisper return empty — mungkin video tanpa speech' });
+    } else {
+      onProgress({ phase: 'transcribed', message: `Transcript: ${transcript.length} karakter` });
+    }
+
+    onProgress({ phase: 'enriching', message: 'Inferring creative strategy via GPT-4o...' });
     const { chatCompletion } = require('./apimart');
     const enrichRaw = await chatCompletion({
       model: config.models.chat,
@@ -175,11 +272,13 @@ Return ONLY valid JSON:
       ],
       maxTokens: 600,
     });
+    onProgress({ phase: 'enriched', message: 'Strategy inference ✓' });
     const m = enrichRaw.match(/\{[\s\S]*\}/);
     const analysis = m ? JSON.parse(m[0]) : { overallStyle: 'Audio analysis only', scenes: [], colorPalette: [] };
     return { analysis, transcript: transcript.slice(0, 1000) };
   } finally {
     try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}
+    onProgress({ phase: 'cleanup', message: 'Tmp files cleaned up ✓' });
   }
 }
 
@@ -187,18 +286,23 @@ Return ONLY valid JSON:
 
 /**
  * @param {string} url
- * @param {'audio'|'full'} mode  default: 'full'
+ * @param {'audio'|'full'} mode
+ * @param {function} onProgress  (evt: { phase, message, detail? }) => void
  */
-async function analyzeVideoFromUrl(url, mode = 'full') {
+async function analyzeVideoFromUrl(url, mode = 'full', onProgress = NOOP) {
   const platform = detectPlatform(url);
+  onProgress({ phase: 'detected', message: `Platform terdeteksi: ${platform}` });
 
   let result;
   if (mode === 'audio') {
-    result = await analyzeAudioOnly(url);
+    onProgress({ phase: 'mode', message: '🎙 Audio Only mode (yt-dlp + Whisper-1 + GPT-4o)' });
+    result = await analyzeAudioOnly(url, onProgress);
   } else if (platform === 'YouTube') {
-    result = await analyzeYouTubeUrl(url);
+    onProgress({ phase: 'mode', message: '🎬 Visual+Audio mode (Gemini 2.5 Flash native YouTube)' });
+    result = await analyzeYouTubeUrl(url, onProgress);
   } else {
-    result = await analyzeDownloadedVideoFull(url);
+    onProgress({ phase: 'mode', message: '🎬 Visual+Audio mode (yt-dlp + Gemini 2.5 Flash)' });
+    result = await analyzeDownloadedVideoFull(url, onProgress);
   }
 
   return {
