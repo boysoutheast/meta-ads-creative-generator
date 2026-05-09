@@ -154,6 +154,39 @@ Based on these frames, return a detailed JSON analysis. Return ONLY valid JSON, 
   };
 }
 
+/**
+ * Extract audio from video and transcribe via apimart Whisper-1.
+ * Returns transcript string (empty string on failure — non-blocking).
+ */
+async function transcribeAudio(videoPath) {
+  try {
+    const { execSync } = require('child_process');
+    const audioPath = videoPath.replace(/\.[^.]+$/, '_audio.mp3');
+    execSync(
+      `ffmpeg -i "${videoPath}" -vn -ar 16000 -ac 1 -b:a 64k "${audioPath}" -y`,
+      { timeout: 30000, stdio: 'pipe' }
+    );
+    if (!fs.existsSync(audioPath) || fs.statSync(audioPath).size < 100) return '';
+
+    const FormData = require('form-data');
+    const axios = require('axios');
+    const form = new FormData();
+    form.append('file', fs.createReadStream(audioPath), { filename: 'audio.mp3', contentType: 'audio/mpeg' });
+    form.append('model', 'whisper-1');
+
+    const baseUrl = (config.apimart.baseUrl || '').replace(/\/$/, '');
+    const { data } = await axios.post(`${baseUrl}/audio/transcriptions`, form, {
+      headers: { ...form.getHeaders(), Authorization: `Bearer ${config.apimart.apiKey}` },
+      timeout: 60000,
+    });
+    fs.unlink(audioPath, () => {});
+    return (data.text || '').trim();
+  } catch (e) {
+    console.warn('[Whisper] transcription failed (non-fatal):', e.message);
+    return '';
+  }
+}
+
 async function generateVideoPromptFromReference(referenceAnalysis, productName, adGoal) {
   const videoPrompt = await chatCompletion({
     model: config.models.chat,
@@ -186,5 +219,6 @@ Output ONLY the video prompt, no explanations.`,
 module.exports = {
   analyzeImageReference,
   analyzeVideoReference,
+  transcribeAudio,
   generateVideoPromptFromReference,
 };

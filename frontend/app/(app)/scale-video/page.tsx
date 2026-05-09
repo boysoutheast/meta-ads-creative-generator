@@ -1,8 +1,9 @@
 'use client'
 import { useEffect, useState } from 'react'
-import { Loader2, AlertCircle, Video, Sparkles, Play, Download } from 'lucide-react'
+import { Loader2, AlertCircle, Video, Sparkles, Play, Download, Link2 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
 import {
@@ -17,6 +18,7 @@ import { Dropzone } from '@/components/ads/Dropzone'
 import { AngleSelector } from '@/components/ads/AngleSelector'
 import {
   analyzeWinningVideo,
+  analyzeWinningVideoFromUrl,
   generateScaleVideoJob,
   getProducts,
   type Product,
@@ -52,6 +54,10 @@ export default function ScaleVideoPage() {
 
   const [error, setError] = useState<string | null>(null)
 
+  // Sprint 3 — input mode: file upload OR URL paste
+  const [inputMode, setInputMode] = useState<'file' | 'url'>('file')
+  const [urlInput, setUrlInput] = useState('')
+
   useEffect(() => {
     getProducts()
       .then((list) => {
@@ -62,7 +68,8 @@ export default function ScaleVideoPage() {
   }, [])
 
   const handleAnalyze = async () => {
-    if (!file) return
+    if (inputMode === 'file' && !file) return
+    if (inputMode === 'url' && !urlInput.trim()) return
     setError(null)
     setAnalyzing(true)
     setVideoAnalysis(null)
@@ -70,7 +77,9 @@ export default function ScaleVideoPage() {
     setAvailableAngles([])
     setSelectedAngles([])
     try {
-      const resp = await analyzeWinningVideo(file)
+      const resp = inputMode === 'url'
+        ? await analyzeWinningVideoFromUrl(urlInput.trim())
+        : await analyzeWinningVideo(file!)
       setVideoAnalysis(resp.analysis)
       if (resp.availableAngles?.length) {
         setAvailableAngles(resp.availableAngles)
@@ -120,7 +129,7 @@ export default function ScaleVideoPage() {
           <h1 className="text-2xl font-bold tracking-tight">Scale Winning Video</h1>
         </div>
         <p className="text-muted-foreground">
-          Upload video iklan winning → AI analisis konsep → adaptasi ke produkmu → generate variasi video baru dengan kling-v2-6 (10 detik).
+          Upload video iklan winning → AI analisis konsep → adaptasi ke produkmu → generate variasi video baru dengan GeminiGen grok-3 (10 detik).
         </p>
       </div>
 
@@ -134,16 +143,61 @@ export default function ScaleVideoPage() {
               <CardDescription>MP4 / MOV / WEBM, maks 50MB.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              <Dropzone file={file} onChange={setFile} accept="video" />
+              {/* Sprint 3 — Input mode toggle (file upload vs URL) */}
+              <div className="flex rounded-lg border bg-muted/40 p-1 gap-1">
+                <button
+                  type="button"
+                  onClick={() => setInputMode('file')}
+                  className={`flex-1 rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+                    inputMode === 'file' ? 'bg-background shadow-sm' : 'text-muted-foreground hover:text-foreground'
+                  }`}
+                >
+                  📁 Upload File
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setInputMode('url')}
+                  className={`flex-1 rounded-md px-3 py-1.5 text-sm font-medium transition-colors flex items-center justify-center gap-1 ${
+                    inputMode === 'url' ? 'bg-background shadow-sm' : 'text-muted-foreground hover:text-foreground'
+                  }`}
+                >
+                  <Link2 className="h-3.5 w-3.5" />
+                  Dari URL
+                </button>
+              </div>
+
+              {inputMode === 'file' ? (
+                <Dropzone file={file} onChange={setFile} accept="video" />
+              ) : (
+                <div className="space-y-2">
+                  <Input
+                    type="url"
+                    placeholder="https://www.instagram.com/reel/..."
+                    value={urlInput}
+                    onChange={(e) => setUrlInput(e.target.value)}
+                    className="text-sm"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Support: Instagram Reels, TikTok, YouTube Shorts, Facebook. Video harus publik.
+                  </p>
+                </div>
+              )}
+
               <Button
                 className="w-full"
                 onClick={handleAnalyze}
-                disabled={!file || analyzing}
+                disabled={(inputMode === 'file' ? !file : !urlInput.trim()) || analyzing}
               >
                 {analyzing ? (
-                  <><Loader2 className="h-4 w-4 animate-spin" /> Menganalisis video…</>
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    {inputMode === 'url' ? 'Downloading & analyzing…' : 'Menganalisis video…'}
+                  </>
                 ) : (
-                  <><Sparkles className="h-4 w-4" /> Analyze Video</>
+                  <>
+                    <Sparkles className="h-4 w-4" />
+                    {inputMode === 'url' ? 'Analyze dari URL' : 'Analyze Video'}
+                  </>
                 )}
               </Button>
             </CardContent>
@@ -208,7 +262,7 @@ export default function ScaleVideoPage() {
                 {/* Duration info badge */}
                 <div className="flex items-center gap-2 rounded-lg border border-primary/20 bg-primary/5 px-3 py-2">
                   <Video className="h-3.5 w-3.5 text-primary shrink-0" />
-                  <p className="text-xs text-primary font-medium">Durasi: 10 detik · Model: kling-v2-6</p>
+                  <p className="text-xs text-primary font-medium">Durasi: 10 detik · Model: GeminiGen grok-3</p>
                 </div>
 
                 {/* Angle selector */}
@@ -298,7 +352,7 @@ export default function ScaleVideoPage() {
             <div className="space-y-4">
               <div className="flex items-center gap-2 rounded-lg border border-primary/20 bg-primary/5 p-4 text-sm text-primary font-medium">
                 <Loader2 className="h-4 w-4 animate-spin" />
-                Generating {selectedAngles.length} variasi video dengan kling-v2-6… estimasi 5-10 menit
+                Generating {selectedAngles.length} variasi video dengan GeminiGen grok-3… estimasi 5-10 menit
               </div>
               <div className="grid gap-4 sm:grid-cols-2">
                 {selectedAngles.map((_, i) => (

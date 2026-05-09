@@ -12,6 +12,7 @@ const {
 const axios = require('axios');
 const { analyzeImage, uploadImageToApimart } = require('../services/apimart');
 const { startRemakeJob, getJob } = require('../services/videoRemakeService');
+const { analyzeVideoFromUrl } = require('../services/videoUrlAnalyzer');
 
 /**
  * POST /api/scale-video/analyze
@@ -216,6 +217,42 @@ router.get('/remake/:remakeId', (req, res) => {
     error: job.error,
     createdAt: job.createdAt,
   });
+});
+
+/**
+ * POST /api/scale-video/analyze-from-url
+ * Download & analyze a social media video URL (Instagram, TikTok, YouTube, Facebook).
+ * Body: { url: string }
+ * Returns: same format as /analyze endpoint + { platform, transcript }
+ */
+router.post('/analyze-from-url', async (req, res) => {
+  const { url } = req.body || {};
+  if (!url || typeof url !== 'string' || !url.startsWith('http')) {
+    return res.status(400).json({ error: 'url is required and must start with http' });
+  }
+
+  try {
+    const { analysis, frames, transcript, platform } = await analyzeVideoFromUrl(url);
+    const availableAngles = Object.entries(SCALING_ANGLES).map(([key, val]) => ({
+      key,
+      label: val.label,
+      hook: val.hook,
+    }));
+    res.json({
+      analysis,
+      framesAnalyzed: frames,
+      filename: `${platform}: ${url.slice(-50)}`,
+      platform,
+      transcript,
+      availableAngles,
+    });
+  } catch (err) {
+    const msg = err.message || 'Gagal menganalisis URL';
+    if (msg.includes('yt-dlp') || msg.includes('not found') || msg.includes('spawn')) {
+      return res.status(500).json({ error: 'yt-dlp tidak tersedia. Silakan upload file manual.' });
+    }
+    res.status(500).json({ error: msg });
+  }
 });
 
 module.exports = router;

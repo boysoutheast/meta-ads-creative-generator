@@ -535,6 +535,19 @@ export async function analyzeWinningVideo(file: File) {
   return res.data as { analysis: any; framesAnalyzed: number; filename: string; availableAngles: import('./types').ScalingAngle[] }
 }
 
+/** Sprint 3 — Analyze winning video directly from a social media URL (yt-dlp + Whisper) */
+export async function analyzeWinningVideoFromUrl(url: string) {
+  const res = await api.post('/scale-video/analyze-from-url', { url }, { timeout: 240000 })
+  return res.data as {
+    analysis: any
+    framesAnalyzed: number
+    filename: string
+    platform?: string
+    transcript?: string
+    availableAngles: import('./types').ScalingAngle[]
+  }
+}
+
 export interface ScaleVideoGenerateResponse {
   productName: string
   aspectRatio: string
