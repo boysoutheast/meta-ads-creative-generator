@@ -20,6 +20,7 @@ model User {
   generationJobs  GenerationJob[]
   auditLogs       AuditLog[]
   products        Product[]
+  characters      Character[]
 
   @@map("users")
 }
@@ -104,4 +105,19 @@ model Product {
 
   @@index([userId, createdAt(sort: Desc)])
   @@map("products")
+}
+
+model Character {
+  id          String   @id @default(cuid())
+  userId      String   @map("user_id")
+  name        String
+  description String?  @db.Text
+  photos      Json?    // array of base64 data URLs (max 10)
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@map("characters")
 }

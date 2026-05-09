@@ -618,12 +618,87 @@ export async function translateVideoPrompt(payload: {
   productDescription?: string
   /** Asset mode: product / character / none */
   assetMode?: 'product' | 'character' | 'none'
-  /** Character mode: character photo base64 (no data: prefix) */
-  characterPhotoBase64?: string
-  characterPhotoMime?: string
-}): Promise<{ videoPrompt: string; hookVariants: string[]; scriptOutline: string }> {
+  /** Character mode: ALL character photos as base64 data URLs or raw base64 strings (max 10) */
+  characterPhotosBase64?: string[]
+  /** Product mode: single product photo base64 (raw, no data: prefix) */
+  productPhotoBase64?: string
+}): Promise<{
+  videoPrompt: string
+  hookVariants: string[]
+  scriptOutline: string
+  adaptedScenes: Array<{ scene: number; duration: string; voiceover: string; imagePrompt: string }>
+}> {
   const res = await api.post('/scale-video/translate-prompt', payload, { timeout: 60000 })
   return res.data
+}
+
+/** Scale Video — generate one preview image per adapted scene (gpt-image-2)
+ *  assetPhotosBase64: base64 data URLs of product/character photos passed as reference images
+ */
+export async function generateScaleVideoSceneImages(
+  adaptedScenes: Array<{ scene: number; duration: string; voiceover: string; imagePrompt: string }>,
+  assetPhotosBase64?: string[],
+): Promise<Array<{
+  scene: number
+  duration: string
+  voiceover: string
+  imagePrompt: string
+  imageUrl: string | null
+}>> {
+  const res = await api.post(
+    '/scale-video/generate-scene-images',
+    { adaptedScenes, assetPhotosBase64 },
+    { timeout: 300000 },
+  )
+  return res.data.scenes
+}
+
+// ─── Characters ──────────────────────────────────────────────────────────────
+
+export interface Character {
+  id: string
+  name: string
+  description?: string
+  photos?: string[]
+  createdAt: string
+}
+
+export async function getCharacters(): Promise<Character[]> {
+  const res = await api.get<{ characters: Character[] }>('/characters')
+  return res.data.characters
+}
+
+export async function createCharacter(data: {
+  name: string
+  description?: string
+  photos?: File[]
+}): Promise<Character> {
+  const fd = new FormData()
+  fd.append('name', data.name)
+  if (data.description) fd.append('description', data.description)
+  data.photos?.forEach((f) => fd.append('photos', f))
+  const res = await api.post<{ character: Character }>('/characters', fd, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  })
+  return res.data.character
+}
+
+export async function updateCharacter(
+  id: string,
+  data: { name?: string; description?: string; photos?: File[] },
+): Promise<Character> {
+  const fd = new FormData()
+  if (data.name) fd.append('name', data.name)
+  if (data.description !== undefined) fd.append('description', data.description)
+  data.photos?.forEach((f) => fd.append('photos', f))
+  const res = await api.put<{ character: Character }>(`/characters/${id}`, fd, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  })
+  return res.data.character
+}
+
+export async function deleteCharacter(id: string): Promise<void> {
+  await api.delete(`/characters/${id}`)
 }
 
 export interface ScaleVideoGenerateResponse {

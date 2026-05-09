@@ -2,23 +2,95 @@
  * translatePromptService.js
  *
  * Given a video analysis + user intent + asset (product/character/none),
- * use GPT-4o via apimart to produce a detailed, ready-to-use GeminiGen grok-3
- * video prompt tailored for the chosen asset mode.
+ * use GPT-4o to produce a detailed GeminiGen video prompt + per-scene
+ * storyboard with Indonesian VO and rich imagePrompts for GPT-image-2.
+ *
+ * CHARACTER MODE:
+ *   - Analyzes ALL character photos (up to 10) in parallel via GPT-4o vision
+ *   - Merges into a comprehensive "character sheet" (hair, skin, outfit, features)
+ *   - Injects character appearance into EVERY scene imagePrompt explicitly
+ *   - All character photos passed as referenceImages to GPT-image-2 later
  */
 
 const { chatCompletion, analyzeImage } = require('./apimart');
 const config = require('../config');
 
 /**
+ * Analyze multiple character photos in parallel and build a merged
+ * visual character sheet from all descriptions.
+ * @param {string[]} photosBase64 - array of base64 data URLs or raw base64 strings
+ * @returns {Promise<string>} - merged character appearance description
+ */
+async function buildCharacterSheet(photosBase64, characterName) {
+  if (!photosBase64 || photosBase64.length === 0) return '';
+
+  // Analyze up to 10 photos in parallel
+  const toAnalyze = photosBase64.slice(0, 10);
+  const descriptions = await Promise.all(
+    toAnalyze.map((raw, i) => {
+      // Strip data: prefix if present
+      const hasPrefix = raw.startsWith('data:');
+      const mimeMatch = hasPrefix ? raw.match(/^data:([^;]+);base64,/) : null;
+      const mimeType = mimeMatch?.[1] || 'image/jpeg';
+      const base64 = hasPrefix ? raw.replace(/^data:[^;]+;base64,/, '') : raw;
+
+      return analyzeImage({
+        imageBase64: base64,
+        mimeType,
+        prompt: `This is reference photo ${i + 1} of ${toAnalyze.length} for character "${characterName}".
+Extract these specific details for AI image generation:
+- FACE: skin tone, eye shape/color, eyebrow style, facial structure, any distinctive features
+- HAIR: color, length, style/texture (straight/wavy/curly), bangs or not
+- BUILD: approximate height (tall/average/petite), body type
+- OUTFIT in this photo: specific clothing items, colors, patterns, materials
+- ACCESSORIES: glasses, jewelry, bags, hats, etc.
+- EXPRESSION/ENERGY: default expression style, overall vibe/personality
+
+Be very specific. Under 80 words. Use descriptive adjectives an AI image model would use.`,
+      }).catch(() => null);
+    })
+  );
+
+  const valid = descriptions.filter(Boolean);
+  if (valid.length === 0) return '';
+
+  // If multiple photos, use GPT-4o to merge into a unified coherent character sheet
+  if (valid.length === 1) return valid[0];
+
+  const mergeRaw = await chatCompletion({
+    model: config.models.scalingChat || config.models.chat,
+    messages: [
+      {
+        role: 'system',
+        content: 'You are a character designer. Merge multiple photo descriptions into one precise, consistent character sheet for AI image generation. Return plain text only, no JSON.',
+      },
+      {
+        role: 'user',
+        content: `Merge these ${valid.length} descriptions of the SAME character "${characterName}" into one coherent character sheet.
+Focus on the MOST CONSISTENT features across photos. If outfit varies, describe their signature style.
+Output: Under 100 words, highly specific, using terms AI image models understand.
+
+${valid.map((d, i) => `Photo ${i + 1}: ${d}`).join('\n\n')}`,
+      },
+    ],
+    maxTokens: 200,
+  }).catch(() => valid[0]); // fallback to first description if merge fails
+
+  return mergeRaw || valid[0];
+}
+
+/**
+ * Main translate function.
  * @param {object} opts
- * @param {object} opts.videoAnalysis       - result from analyzeVideoFromUrl.analysis
- * @param {string} opts.userIntent          - free-text: "untuk apa video ini?"
- * @param {string} opts.productName         - product / character name (or 'Generic' for none)
+ * @param {object} opts.videoAnalysis
+ * @param {string} opts.userIntent
+ * @param {string} opts.productName
  * @param {string} [opts.productDescription]
  * @param {'product'|'character'|'none'} [opts.assetMode]
- * @param {string|null} [opts.characterPhotoBase64]  - base64 (no data: prefix) for character mode
- * @param {string} [opts.characterPhotoMime]         - default 'image/jpeg'
- * @returns {Promise<{ videoPrompt, hookVariants, scriptOutline }>}
+ * @param {string[]} [opts.characterPhotosBase64]  - ALL character photos (data URLs or raw base64), up to 10
+ * @param {string} [opts.productPhotoBase64]       - single product photo (raw base64) for product mode
+ * @param {string} [opts.productPhotoMime]
+ * @returns {Promise<{ videoPrompt, hookVariants, scriptOutline, adaptedScenes }>}
  */
 async function translateVideoPrompt({
   videoAnalysis,
@@ -26,8 +98,10 @@ async function translateVideoPrompt({
   productName,
   productDescription = '',
   assetMode = 'product',
-  characterPhotoBase64 = null,
+  characterPhotosBase64 = [],   // replaces single characterPhotoBase64
+  characterPhotoBase64 = null,  // legacy fallback
   characterPhotoMime = 'image/jpeg',
+  productPhotoBase64 = null,
 }) {
   const analysisStr = JSON.stringify({
     overallStyle: videoAnalysis.overallStyle,
@@ -43,86 +117,159 @@ async function translateVideoPrompt({
     hookWords: videoAnalysis.hookWords,
   }, null, 2);
 
-  // Character mode: analyze the character photo first to get appearance details
-  let characterVisualDesc = '';
-  if (assetMode === 'character' && characterPhotoBase64) {
-    try {
-      characterVisualDesc = await analyzeImage({
-        imageBase64: characterPhotoBase64,
-        mimeType: characterPhotoMime || 'image/jpeg',
-        prompt: 'Describe this character: appearance, outfit, hair, skin tone, expression, style. Under 60 words. For use in AI video generation prompts.',
+  // Per-scene VO context from Gemini analysis
+  const originalScenes = Array.isArray(videoAnalysis.scenes) ? videoAnalysis.scenes : [];
+  const scenesVoContext = originalScenes.length > 0
+    ? originalScenes
+        .map((s) => {
+          const sceneNum = s.sceneNumber ?? '?';
+          const dur = s.duration ?? '';
+          const dialogue = (s.dialogue || '').trim();
+          const desc = (s.description || '').slice(0, 80);
+          return dialogue
+            ? `Scene ${sceneNum} (${dur}): "${dialogue}" [visual: ${desc}]`
+            : `Scene ${sceneNum} (${dur}): [silent / no VO] [visual: ${desc}]`;
+        })
+        .join('\n')
+    : (videoAnalysis.transcript
+        ? `Full transcript: "${(videoAnalysis.transcript || '').slice(0, 600)}"`
+        : 'No transcript available');
+
+  // ── Character mode: build comprehensive character sheet from ALL photos ────
+  let characterSheet = '';
+  if (assetMode === 'character') {
+    // Merge legacy single-photo with array
+    const allPhotos = [
+      ...characterPhotosBase64,
+      ...(characterPhotoBase64 ? [characterPhotoBase64] : []),
+    ].filter(Boolean);
+
+    if (allPhotos.length > 0) {
+      console.log(`[translatePrompt] Analyzing ${allPhotos.length} character photo(s) for "${productName}"…`);
+      characterSheet = await buildCharacterSheet(allPhotos, productName).catch((e) => {
+        console.warn('[translatePrompt] characterSheet build failed:', e.message);
+        return '';
       });
-    } catch (e) {
-      console.warn('[translatePrompt] character photo analysis non-fatal:', e.message);
+      if (characterSheet) console.log('[translatePrompt] Character sheet built:', characterSheet.slice(0, 120));
     }
   }
 
-  // Build the asset block conditionally per mode
-  const assetBlock =
-    assetMode === 'character'
-      ? `CHARACTER NAME: ${productName}
-${characterVisualDesc ? `CHARACTER APPEARANCE: ${characterVisualDesc}` : ''}
-${productDescription ? `ADDITIONAL INFO: ${productDescription}` : ''}`
-      : assetMode === 'none'
-      ? 'ASSET: None — create a generic/conceptual video prompt without a specific product or character. Build the scene around the user intent and the winning ad DNA only.'
-      : `PRODUCT: ${productName}
+  // ── Product mode: optional visual description from product photo ──────────
+  let productVisualDesc = '';
+  if (assetMode === 'product' && productPhotoBase64) {
+    try {
+      productVisualDesc = await analyzeImage({
+        imageBase64: productPhotoBase64.replace(/^data:[^;]+;base64,/, ''),
+        mimeType: 'image/jpeg',
+        prompt: 'Describe this product for AI image generation: shape, color, packaging, label/logo, size, texture. Under 60 words.',
+      });
+    } catch (e) {
+      console.warn('[translatePrompt] product photo analysis non-fatal:', e.message);
+    }
+  }
+
+  // ── Build asset block for GPT-4o prompt ──────────────────────────────────
+  const assetBlock = assetMode === 'character'
+    ? `CHARACTER NAME: "${productName}"
+${characterSheet ? `CHARACTER APPEARANCE (from ${[...characterPhotosBase64, ...(characterPhotoBase64 ? [characterPhotoBase64] : [])].filter(Boolean).length} reference photos):
+${characterSheet}` : '(no photo provided — describe character based on name and intent only)'}
+${productDescription ? `ADDITIONAL CONTEXT: ${productDescription}` : ''}`
+    : assetMode === 'none'
+    ? 'ASSET: None — build prompt around user intent and winning ad DNA. No specific product or character.'
+    : `PRODUCT: "${productName}"
+${productVisualDesc ? `PRODUCT APPEARANCE: ${productVisualDesc}` : ''}
 ${productDescription ? `PRODUCT DESCRIPTION: ${productDescription}` : ''}`;
 
-  const adaptInstruction =
-    assetMode === 'character'
-      ? `Adapts the content to showcase the character "${productName}"${characterVisualDesc ? ` (whose appearance is described above — keep them consistent throughout)` : ''}`
-      : assetMode === 'none'
-      ? 'Adapts the content to express the concept described in the user intent (no specific product / character branding)'
-      : `Adapts the content to showcase "${productName}"`;
+  const characterImagePromptPrefix = characterSheet
+    ? `MANDATORY: Every imagePrompt MUST start with "CHARACTER '${productName}': ${characterSheet.slice(0, 120)}. " then describe the scene action.`
+    : assetMode === 'character'
+    ? `MANDATORY: Every imagePrompt MUST start with "CHARACTER '${productName}' in scene: " then describe scene.`
+    : '';
 
+  const adaptInstruction = assetMode === 'character'
+    ? `Showcase the character "${productName}" (appearance described above) — they must appear in every scene`
+    : assetMode === 'none'
+    ? 'Express the concept from user intent — no specific character or product branding'
+    : `Showcase product "${productName}"${productVisualDesc ? ' (appearance described above)' : ''}`;
+
+  // ── GPT-4o call ───────────────────────────────────────────────────────────
   const raw = await chatCompletion({
     model: config.models.scalingChat || config.models.chat,
     messages: [
       {
         role: 'system',
-        content: 'You are an expert video ad copywriter and prompt engineer for AI video generation tools. Return only valid JSON, no markdown.',
+        content: 'You are an expert video ad director, copywriter, and AI prompt engineer. Your imagePrompts will be used directly with GPT-image-2 + character reference photos to generate storyboard frames. Be extremely specific about visual appearance. Return only valid JSON, no markdown.',
       },
       {
         role: 'user',
-        content: `A winning ad video has been analyzed. You must adapt its creative DNA for a new asset.
+        content: `A winning ad video has been analyzed. Adapt its creative DNA for a new asset.
 
 WINNING AD DNA:
 ${analysisStr}
+
+ORIGINAL SCENES + VOICEOVER (from winning ad):
+${scenesVoContext}
 
 USER INTENT:
 "${userIntent}"
 
 ${assetBlock}
 
-Your tasks:
-1. Write a detailed 150-200 word video generation prompt (for GeminiGen grok-3) that:
-   - Replicates the visual style, pacing, camera movement, and color palette of the winning ad
+${characterImagePromptPrefix}
+
+YOUR TASKS:
+
+1. VIDEO PROMPT (150-200 words, English) for GeminiGen grok-3:
+   - Replicate visual style, pacing, camera movement, color palette of winning ad
    - ${adaptInstruction}
-   - Incorporates the user's intent: "${userIntent}"
-   - Includes specific cinematic details (shot types, lighting, transitions, music direction)
+   - Incorporate user intent: "${userIntent}"
+   - Include cinematic details: shot types, lighting, transitions, music direction
 
-2. Write 3 hook variants (first 3 seconds) adapted from the winning ad's hook style.
+2. HOOK VARIANTS: 3 opening lines (first 3 seconds), adapted from winning ad's hook style.
 
-3. Write a script outline adapted from the winning ad's structure.
+3. SCRIPT OUTLINE: step-by-step structure (hook → conflict/problem → resolution/solution → CTA)
 
-Return ONLY valid JSON:
+4. ADAPTED SCENES — one per original scene:
+   - voiceover: Bahasa Indonesia VO text, matching emotional arc and timing of original. ALWAYS Indonesian.
+   - imagePrompt: English prompt for GPT-image-2 (image generation AI). Rules:
+     ${assetMode === 'character'
+       ? `* MUST start with full character description: "CHARACTER '${productName}': [physical appearance]. "
+       * Then describe: exact pose/action in this scene, setting/environment, lighting, color grade, camera angle
+       * Include enough visual detail that GPT-image-2 can draw the scene without additional info
+       * Under 120 words per scene`
+       : assetMode === 'product'
+       ? `* Describe the scene including the product "${productName}" prominently
+       * Include: setting, lighting, color grade, camera angle, mood
+       * Under 120 words per scene`
+       : `* Describe scene: setting, mood, visual style, lighting, camera angle. Under 100 words.`
+     }
+
+Return ONLY valid JSON — no markdown fences:
 {
-  "videoPrompt": "the full 150-200 word cinematic video prompt in English",
-  "hookVariants": [
-    "Hook variant 1 (adapt style from winning ad)",
-    "Hook variant 2",
-    "Hook variant 3"
-  ],
-  "scriptOutline": "step-by-step script outline: 1) hook, 2) problem, 3) solution, 4) CTA — adapted from winning ad structure"
+  "videoPrompt": "150-200 word cinematic video prompt in English",
+  "hookVariants": ["hook 1", "hook 2", "hook 3"],
+  "scriptOutline": "1) hook: ... 2) conflict: ... 3) solution: ... 4) CTA: ...",
+  "adaptedScenes": [
+    {
+      "scene": 1,
+      "duration": "0-Xs",
+      "voiceover": "teks VO bahasa Indonesia scene 1",
+      "imagePrompt": "GPT-image-2 prompt for scene 1${assetMode === 'character' ? ` — must start with CHARACTER '${productName}': [appearance]...` : ''}"
+    }
+  ]
 }`,
       },
     ],
-    maxTokens: 800,
+    maxTokens: 2500,
   });
 
   try {
     const m = raw.match(/\{[\s\S]*\}/);
-    if (m) return JSON.parse(m[0]);
+    if (m) {
+      const parsed = JSON.parse(m[0]);
+      if (!Array.isArray(parsed.adaptedScenes)) parsed.adaptedScenes = [];
+      return parsed;
+    }
   } catch (e) {
     console.warn('[translatePromptService] JSON parse failed:', e.message);
   }
@@ -131,6 +278,7 @@ Return ONLY valid JSON:
     videoPrompt: raw.slice(0, 400) || 'Video prompt generation failed.',
     hookVariants: [],
     scriptOutline: '',
+    adaptedScenes: [],
   };
 }
 

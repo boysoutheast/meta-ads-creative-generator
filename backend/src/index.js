@@ -24,6 +24,7 @@ const authRoutes = require('./routes/auth');
 const libraryRoutes = require('./routes/library');
 const singleImageRoutes = require('./routes/single-image');
 const productRoutes = require('./routes/products');
+const characterRoutes = require('./routes/characters');
 const { requireAuth } = require('./middleware/auth');
 const { getTask } = require('./services/apimart');
 
@@ -55,6 +56,7 @@ app.use('/health', healthRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/library', libraryRoutes);
 app.use('/api/products', productRoutes);
+app.use('/api/characters', characterRoutes);
 app.use('/api/scale/single-image', singleImageRoutes);
 
 // Generic task polling for async video jobs

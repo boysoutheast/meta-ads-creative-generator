@@ -133,7 +133,11 @@ async function generateSingleSceneImage(clip) {
  * @param {string} promptText
  * @returns {Promise<string|null>} URL of generated image (or null on failure)
  */
-async function generateSceneImage(promptText) {
+/**
+ * @param {string} promptText - image generation prompt
+ * @param {string[]} [referenceImages] - optional array of base64 data URLs (product/character photos)
+ */
+async function generateSceneImage(promptText, referenceImages) {
   if (!promptText || typeof promptText !== 'string') return null;
   try {
     const images = await generateImage({
@@ -142,6 +146,9 @@ async function generateSceneImage(promptText) {
       model: SCENE_IMAGE_MODEL,
       pollIntervalMs: 2000,
       timeoutMs: 90000,
+      ...(Array.isArray(referenceImages) && referenceImages.length > 0
+        ? { referenceImages }
+        : {}),
     });
     return images?.[0]?.url || null;
   } catch (e) {

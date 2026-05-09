@@ -21,9 +21,12 @@ import {
   analyzeWinningVideo,
   analyzeWinningVideoFromUrl,
   translateVideoPrompt,
+  generateScaleVideoSceneImages,
   generateScaleVideoJob,
   getProducts,
+  getCharacters,
   type Product,
+  type Character,
   type ScaleVideoGenerateResponse,
 } from '@/lib/api'
 import type { ScalingAngle, AngleVariation } from '@/lib/types'
@@ -59,10 +62,12 @@ export default function ScaleVideoPage() {
   // Step 2 — settings
   const [products, setProducts] = useState<Product[]>([])
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null)
+  const [characters, setCharacters] = useState<Character[]>([])
+  const [selectedCharacter, setSelectedCharacter] = useState<Character | null>(null)
 
-  // Asset mode — product (existing) / character (new) / none
+  // Asset mode — product / character (saved) / none
   const [assetMode, setAssetMode] = useState<'product' | 'character' | 'none'>('product')
-  // Character mode states
+  // Character mode — inline builder (fallback if no saved characters used)
   const [characterName, setCharacterName] = useState('')
   const [characterPhotos, setCharacterPhotos] = useState<string[]>([]) // base64 data URLs, max 10
   const [aspectRatio, setAspectRatio] = useState<string>('9:16')
@@ -87,6 +92,10 @@ export default function ScaleVideoPage() {
   const [hookVariants, setHookVariants] = useState<string[]>([])
   const [scriptOutline, setScriptOutline] = useState('')
   const [showIntentStep, setShowIntentStep] = useState(false)
+  const [adaptedScenes, setAdaptedScenes] = useState<Array<{
+    scene: number; duration: string; voiceover: string; imagePrompt: string; imageUrl?: string | null
+  }>>([])
+  const [generatingSceneImages, setGeneratingSceneImages] = useState(false)
 
   // Live action log — populated by SSE phase events from /analyze-from-url
   const [liveLog, setLiveLog] = useState<Array<{ ts: number; phase: string; message: string; detail?: string }>>([])
@@ -97,6 +106,12 @@ export default function ScaleVideoPage() {
       .then((list) => {
         setProducts(list)
         if (list.length > 0) setSelectedProduct(list[0])
+      })
+      .catch(() => {})
+    getCharacters()
+      .then((list) => {
+        setCharacters(list)
+        if (list.length > 0) setSelectedCharacter(list[0])
       })
       .catch(() => {})
   }, [])
@@ -134,6 +149,7 @@ export default function ScaleVideoPage() {
       setRefinedPrompt('')
       setHookVariants([])
       setScriptOutline('')
+      setAdaptedScenes([])
       setUserIntent('')
       setShowIntentStep(true)
     } catch (e: any) {
@@ -149,6 +165,13 @@ export default function ScaleVideoPage() {
     setError(null)
     setTranslating(true)
     try {
+      // Resolve character data — saved character takes priority over inline builder
+      const activeCharacter = assetMode === 'character' && selectedCharacter
+        ? selectedCharacter
+        : null
+      const activeCharPhotos = activeCharacter?.photos ?? characterPhotos
+      const activeCharName = activeCharacter?.name ?? characterName
+
       const result = await translateVideoPrompt({
         videoAnalysis,
         userIntent: userIntent.trim(),
@@ -156,27 +179,49 @@ export default function ScaleVideoPage() {
           assetMode === 'product'
             ? (selectedProduct?.name ?? 'Unknown Product')
             : assetMode === 'character'
-            ? (characterName || 'Character')
+            ? (activeCharName || 'Character')
             : 'Generic',
         productDescription:
           assetMode === 'product'
             ? (selectedProduct?.description ?? '')
             : assetMode === 'character'
-            ? `Character name: ${characterName || 'unnamed'}. ${characterPhotos.length} character photo(s) provided.`
+            ? `Character: ${activeCharName || 'unnamed'}. ${activeCharPhotos.length} reference photo(s).${activeCharacter?.description ? ' ' + activeCharacter.description : ''}`
             : '',
         assetMode,
-        characterPhotoBase64:
-          assetMode === 'character' && characterPhotos.length > 0
-            ? characterPhotos[0].replace(/^data:[^;]+;base64,/, '')
+        // Pass ALL character photos (up to 10) — backend builds comprehensive character sheet from all
+        characterPhotosBase64:
+          assetMode === 'character' && activeCharPhotos.length > 0
+            ? activeCharPhotos  // data URLs; translatePromptService strips prefix per photo
             : undefined,
-        characterPhotoMime:
-          assetMode === 'character' && characterPhotos.length > 0
-            ? (characterPhotos[0].match(/^data:([^;]+);/)?.[1] ?? 'image/jpeg')
+        // Product mode: pass first product photo for visual description
+        productPhotoBase64:
+          assetMode === 'product' && selectedProduct?.photos?.[0]
+            ? selectedProduct.photos[0].replace(/^data:[^;]+;base64,/, '')
             : undefined,
       })
       setRefinedPrompt(result.videoPrompt || '')
       setHookVariants(result.hookVariants || [])
       setScriptOutline(result.scriptOutline || '')
+      const scenes = result.adaptedScenes || []
+      setAdaptedScenes(scenes)
+
+      // Build asset photo references for scene image generation — pass all (up to 10) for max fidelity
+      let assetPhotosBase64: string[] | undefined
+      if (assetMode === 'product' && selectedProduct?.photos && selectedProduct.photos.length > 0) {
+        assetPhotosBase64 = selectedProduct.photos.slice(0, 10)
+      } else if (assetMode === 'character') {
+        const charPhotos = selectedCharacter?.photos ?? characterPhotos
+        if (charPhotos.length > 0) assetPhotosBase64 = charPhotos.slice(0, 10)
+      }
+
+      // Auto-generate storyboard images in background
+      if (scenes.length > 0) {
+        setGeneratingSceneImages(true)
+        generateScaleVideoSceneImages(scenes, assetPhotosBase64)
+          .then((withImages) => setAdaptedScenes(withImages))
+          .catch((e) => console.warn('[scene-images] gen failed:', e.message))
+          .finally(() => setGeneratingSceneImages(false))
+      }
     } catch (e: any) {
       setError(e?.response?.data?.error || e.message || 'Gagal generate prompt')
     } finally {
@@ -206,17 +251,16 @@ export default function ScaleVideoPage() {
         productName = selectedProduct.name
         productDescription = selectedProduct.description ?? ''
       } else if (assetMode === 'character') {
-        productName = characterName || 'Character'
-        productDescription = `Character: ${characterName || 'unnamed'}`
-        if (characterPhotos.length > 0) {
-          // First photo as primary image-to-video reference
-          const firstMatch = characterPhotos[0].match(/^data:([^;]+);base64,(.+)$/)
+        // Saved character takes priority over inline builder
+        const activeChar = selectedCharacter
+        const activePhotos = activeChar?.photos ?? characterPhotos
+        productName = (activeChar?.name ?? characterName) || 'Character'
+        productDescription = `Character: ${productName}${activeChar?.description ? '. ' + activeChar.description : ''}`
+        if (activePhotos.length > 0) {
+          const firstMatch = activePhotos[0].match(/^data:([^;]+);base64,(.+)$/)
           productPhotoBase64 = firstMatch?.[2] ?? undefined
           productPhotoMime = firstMatch?.[1] ?? undefined
-          // All photos as additional references for combined description
-          characterPhotosBase64 = characterPhotos.map((p) =>
-            p.replace(/^data:[^;]+;base64,/, '')
-          )
+          characterPhotosBase64 = activePhotos.map((p) => p.replace(/^data:[^;]+;base64,/, ''))
         }
       }
       // assetMode === 'none': all remain undefined/empty, productName='Generic'
@@ -424,14 +468,62 @@ export default function ScaleVideoPage() {
                   </p>
                 )}
 
-                {/* ── Character builder ────────────────────── */}
+                {/* ── Character picker / builder ───────────── */}
                 {assetMode === 'character' && (
-                  <CharacterBuilder
-                    name={characterName}
-                    onNameChange={setCharacterName}
-                    photos={characterPhotos}
-                    onPhotosChange={setCharacterPhotos}
-                  />
+                  characters.length > 0 ? (
+                    <div className="space-y-2">
+                      <Select
+                        value={selectedCharacter?.id || ''}
+                        onValueChange={(id) => {
+                          const c = characters.find((x) => x.id === id)
+                          if (c) setSelectedCharacter(c)
+                        }}
+                      >
+                        <SelectTrigger><SelectValue placeholder="Pilih karakter…" /></SelectTrigger>
+                        <SelectContent>
+                          {characters.map((c) => (
+                            <SelectItem key={c.id} value={c.id}>
+                              {c.name}{c.photos?.length ? ` — ${c.photos.length} foto` : ''}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      {selectedCharacter?.photos && selectedCharacter.photos.length > 0 && (
+                        <div className="flex gap-1 mt-1.5">
+                          {selectedCharacter.photos.slice(0, 5).map((src, i) => (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img key={i} src={src} alt="" className="h-10 w-10 rounded object-cover border" />
+                          ))}
+                          {selectedCharacter.photos.length > 5 && (
+                            <div className="h-10 w-10 rounded border bg-muted flex items-center justify-center text-[10px] text-muted-foreground">
+                              +{selectedCharacter.photos.length - 5}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                      {selectedCharacter?.photos && selectedCharacter.photos.length > 0 && (
+                        <p className="flex items-center gap-1 text-xs text-emerald-600">
+                          <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 inline-block" />
+                          {selectedCharacter.photos.length} foto karakter — image reference aktif
+                        </p>
+                      )}
+                    </div>
+                  ) : (
+                    // Fallback: inline builder if no saved characters
+                    <div className="space-y-2">
+                      <p className="text-xs text-amber-700 dark:text-amber-400 rounded border border-dashed p-2 text-center">
+                        Belum ada karakter tersimpan.{' '}
+                        <a href="/characters" className="underline">Tambah di menu Insert Karakter</a>
+                        {' '}atau isi manual di bawah.
+                      </p>
+                      <CharacterBuilder
+                        name={characterName}
+                        onNameChange={setCharacterName}
+                        photos={characterPhotos}
+                        onPhotosChange={setCharacterPhotos}
+                      />
+                    </div>
+                  )
                 )}
 
                 {/* ── None info ────────────────────────────── */}
@@ -628,6 +720,71 @@ export default function ScaleVideoPage() {
                         <summary className="cursor-pointer text-xs text-muted-foreground hover:text-foreground">Script outline</summary>
                         <p className="mt-1.5 rounded border bg-muted p-2.5 text-xs leading-relaxed whitespace-pre-wrap">{scriptOutline}</p>
                       </details>
+                    )}
+
+                    {/* Storyboard per scene */}
+                    {adaptedScenes.length > 0 && (
+                      <div className="space-y-2">
+                        <p className="text-xs font-semibold text-muted-foreground flex items-center gap-1.5">
+                          🎬 Storyboard per scene
+                          {generatingSceneImages && (
+                            <span className="flex items-center gap-1 text-[10px] text-primary">
+                              <Loader2 className="h-2.5 w-2.5 animate-spin" /> generating images…
+                            </span>
+                          )}
+                        </p>
+                        <div className="space-y-2">
+                          {adaptedScenes.map((item, i) => (
+                            <div key={i} className="rounded-lg border bg-background overflow-hidden">
+                              {/* Scene image */}
+                              <div className="relative aspect-video bg-muted flex items-center justify-center">
+                                {item.imageUrl ? (
+                                  // eslint-disable-next-line @next/next/no-img-element
+                                  <img
+                                    src={item.imageUrl}
+                                    alt={`Scene ${item.scene}`}
+                                    className="w-full h-full object-cover"
+                                  />
+                                ) : (
+                                  <div className="flex flex-col items-center gap-1 text-muted-foreground">
+                                    {generatingSceneImages
+                                      ? <Loader2 className="h-5 w-5 animate-spin text-primary" />
+                                      : <ImageIcon className="h-5 w-5 opacity-30" />
+                                    }
+                                    <span className="text-[10px]">
+                                      {generatingSceneImages ? 'Generating…' : 'No image'}
+                                    </span>
+                                  </div>
+                                )}
+                                <div className="absolute top-1.5 left-1.5 flex items-center gap-1">
+                                  <span className="text-[10px] font-semibold bg-primary text-primary-foreground rounded px-1.5 py-0.5">
+                                    Scene {item.scene}
+                                  </span>
+                                  <span className="text-[10px] bg-black/50 text-white rounded px-1.5 py-0.5">
+                                    {item.duration}
+                                  </span>
+                                </div>
+                              </div>
+                              {/* VO + image prompt */}
+                              <div className="p-2.5 space-y-1.5">
+                                <p className="text-xs leading-relaxed italic text-foreground">
+                                  🎙 "{item.voiceover}"
+                                </p>
+                                {item.imagePrompt && (
+                                  <details>
+                                    <summary className="cursor-pointer text-[10px] text-muted-foreground hover:text-foreground">
+                                      Lihat image prompt
+                                    </summary>
+                                    <p className="mt-1 text-[10px] leading-relaxed text-muted-foreground bg-muted rounded p-1.5">
+                                      {item.imagePrompt}
+                                    </p>
+                                  </details>
+                                )}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
                     )}
 
                     <div className="flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 dark:bg-emerald-900/20 dark:border-emerald-800 px-3 py-2">

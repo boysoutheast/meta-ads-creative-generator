@@ -24,6 +24,7 @@ const { analyzeImage, uploadImageToApimart } = require('../services/apimart');
 const { startRemakeJob, getJob } = require('../services/videoRemakeService');
 const { analyzeVideoFromUrl } = require('../services/videoUrlAnalyzer');
 const { translateVideoPrompt } = require('../services/translatePromptService');
+const { generateSceneImage } = require('../services/sceneImageService');
 
 /**
  * POST /api/scale-video/analyze
@@ -353,8 +354,8 @@ router.post('/translate-prompt', async (req, res) => {
     productName,
     productDescription = '',
     assetMode = 'product',
-    characterPhotoBase64,
-    characterPhotoMime = 'image/jpeg',
+    characterPhotosBase64 = [],   // array of base64 data URLs or raw base64, all photos, max 10
+    productPhotoBase64 = null,    // product mode: single photo
   } = req.body || {};
   if (!videoAnalysis || !userIntent || !productName) {
     return res.status(400).json({ error: 'videoAnalysis, userIntent, and productName are required' });
@@ -366,13 +367,53 @@ router.post('/translate-prompt', async (req, res) => {
       productName,
       productDescription,
       assetMode,
-      characterPhotoBase64: characterPhotoBase64 || null,
-      characterPhotoMime,
+      characterPhotosBase64: Array.isArray(characterPhotosBase64) ? characterPhotosBase64 : [],
+      productPhotoBase64: productPhotoBase64 || null,
     });
     res.json(result);
   } catch (err) {
     res.status(500).json({ error: err.message || 'Gagal generate prompt' });
   }
+});
+
+/**
+ * POST /api/scale-video/generate-scene-images
+ * Generate one preview image per adapted scene using gpt-image-2.
+ * Body: {
+ *   adaptedScenes: [{ scene, duration, voiceover, imagePrompt }],
+ *   assetPhotosBase64?: string[]  — base64 data URLs of product/character photos used as reference
+ * }
+ * Returns: { scenes: [{ scene, duration, voiceover, imagePrompt, imageUrl }] }
+ */
+router.post('/generate-scene-images', async (req, res) => {
+  const { adaptedScenes, assetPhotosBase64 } = req.body || {};
+  if (!Array.isArray(adaptedScenes) || adaptedScenes.length === 0) {
+    return res.status(400).json({ error: 'adaptedScenes array is required' });
+  }
+
+  // Build referenceImages from asset photos — pass all up to 10 for maximum character fidelity
+  const referenceImages = Array.isArray(assetPhotosBase64) && assetPhotosBase64.length > 0
+    ? assetPhotosBase64.slice(0, 10).filter(Boolean)
+    : undefined;
+
+  if (referenceImages) {
+    console.log(`[scene-images] using ${referenceImages.length} asset reference image(s)`);
+  }
+
+  // Generate images in parallel — cap at 10 scenes
+  const results = await Promise.all(
+    adaptedScenes.slice(0, 10).map(async (s) => {
+      const imageUrl = s.imagePrompt
+        ? await generateSceneImage(s.imagePrompt, referenceImages).catch((e) => {
+            console.warn(`[scene-images] scene ${s.scene} gen failed:`, e.message);
+            return null;
+          })
+        : null;
+      return { ...s, imageUrl };
+    })
+  );
+
+  res.json({ scenes: results });
 });
 
 module.exports = router;

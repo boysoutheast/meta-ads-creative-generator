@@ -10,6 +10,7 @@ import {
   Image as ImageIcon,
   Palette,
   Package,
+  Users,
   User as UserIcon,
 } from 'lucide-react'
 
@@ -38,6 +39,7 @@ export const navGroups = [
     label: 'Produk',
     items: [
       { href: '/products', label: 'Insert Produk', icon: Package },
+      { href: '/characters', label: 'Insert Karakter', icon: Users },
     ],
   },
   {
