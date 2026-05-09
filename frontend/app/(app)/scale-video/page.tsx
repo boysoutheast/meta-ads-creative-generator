@@ -100,8 +100,11 @@ export default function ScaleVideoPage() {
   }>>([])
   const [generatingSceneImages, setGeneratingSceneImages] = useState(false)
   // Duration-aware comparison
-  const [targetDuration, setTargetDuration] = useState<number>(30)
+  const [targetDuration, setTargetDuration] = useState<number>(10)
   const [adaptedAnalysis, setAdaptedAnalysis] = useState<AdaptedAnalysis | null>(null)
+
+  // Wizard step: 1=Analyze, 2=Asset, 3=Refine, 4=Generate
+  const [step, setStep] = useState<1 | 2 | 3 | 4>(1)
 
   // Live action log — populated by SSE phase events from /analyze-from-url
   const [liveLog, setLiveLog] = useState<Array<{ ts: number; phase: string; message: string; detail?: string }>>([])
@@ -169,6 +172,7 @@ export default function ScaleVideoPage() {
       setAdaptedAnalysis(null)
       setUserIntent('')
       setShowIntentStep(true)
+      setStep(2)  // auto-advance to asset setup
     } catch (e: any) {
       setError(e?.response?.data?.error || e.message || 'Gagal menganalisis video')
     } finally {
@@ -305,603 +309,650 @@ export default function ScaleVideoPage() {
   }
 
   return (
-    <div className="space-y-8">
+    <div className="max-w-3xl mx-auto space-y-5 pb-12">
+
+      {/* ── Header ── */}
       <div>
-        <div className="mb-2 inline-flex items-center gap-2">
+        <div className="mb-1 inline-flex items-center gap-2">
           <Video className="h-5 w-5 text-primary" />
           <h1 className="text-2xl font-bold tracking-tight">Scale Winning Video</h1>
         </div>
-        <p className="text-muted-foreground">
-          Upload video iklan winning → AI analisis konsep → adaptasi ke produkmu → generate variasi video baru dengan GeminiGen grok-3 (10 detik).
+        <p className="text-muted-foreground text-sm">
+          Analisis video iklan winning → adaptasi untuk produkmu → generate 1 video 10 detik via GeminiGen grok-3.
         </p>
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-[420px_1fr]">
-        {/* ── Left panel ── */}
-        <div className="space-y-6">
-          {/* Step 1 */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">1. Upload & Analyze Video</CardTitle>
-              <CardDescription>MP4 / MOV / WEBM, maks 50MB.</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {/* Sprint 3 — Input mode toggle (file upload vs URL) */}
-              <div className="flex rounded-lg border bg-muted/40 p-1 gap-1">
-                <button
-                  type="button"
-                  onClick={() => setInputMode('file')}
-                  className={`flex-1 rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
-                    inputMode === 'file' ? 'bg-background shadow-sm' : 'text-muted-foreground hover:text-foreground'
-                  }`}
-                >
-                  📁 Upload File
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setInputMode('url')}
-                  className={`flex-1 rounded-md px-3 py-1.5 text-sm font-medium transition-colors flex items-center justify-center gap-1 ${
-                    inputMode === 'url' ? 'bg-background shadow-sm' : 'text-muted-foreground hover:text-foreground'
-                  }`}
-                >
-                  <Link2 className="h-3.5 w-3.5" />
-                  Dari URL
-                </button>
-              </div>
+      {/* ── Step indicator ── */}
+      <div className="flex items-center">
+        {([
+          { n: 1, label: 'Analyze' },
+          { n: 2, label: 'Asset' },
+          { n: 3, label: 'Refine' },
+          { n: 4, label: 'Generate' },
+        ] as const).map(({ n, label }, i) => {
+          const done = step > n
+          const active = step === n
+          const clickable = done || active
+          return (
+            <>
+              <button
+                key={n}
+                type="button"
+                onClick={() => { if (clickable) setStep(n) }}
+                className={[
+                  'flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors',
+                  active ? 'bg-primary text-primary-foreground shadow-sm'
+                    : done ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-200 dark:hover:bg-emerald-900/50 cursor-pointer'
+                    : 'text-muted-foreground cursor-default',
+                ].join(' ')}
+              >
+                <span className={[
+                  'flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[9px] font-bold',
+                  active ? 'bg-primary-foreground/20 text-primary-foreground'
+                    : done ? 'bg-emerald-500 text-white'
+                    : 'bg-muted-foreground/20 text-muted-foreground',
+                ].join(' ')}>
+                  {done ? '✓' : n}
+                </span>
+                {label}
+              </button>
+              {i < 3 && (
+                <div className={['flex-1 h-px mx-1', step > n ? 'bg-emerald-400' : 'bg-border'].join(' ')} />
+              )}
+            </>
+          )
+        })}
+      </div>
 
-              {inputMode === 'file' ? (
-                <Dropzone file={file} onChange={setFile} accept="video" />
+      {/* ── Global error ── */}
+      {error && (
+        <div className="flex items-start gap-2 rounded-lg border border-destructive/40 bg-destructive/5 p-3 text-sm text-destructive">
+          <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+          <span>{error}</span>
+        </div>
+      )}
+
+      {/* ══════════════════════════════════════════════
+          STEP 1 — Analyze
+      ══════════════════════════════════════════════ */}
+      {step === 1 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">1. Upload & Analyze Video Winning</CardTitle>
+            <CardDescription>MP4 / MOV / WEBM · maks 50MB · atau paste URL YouTube / TikTok / Instagram</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {/* Input mode toggle */}
+            <div className="flex rounded-lg border bg-muted/40 p-1 gap-1">
+              <button type="button" onClick={() => setInputMode('file')}
+                className={`flex-1 rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${inputMode === 'file' ? 'bg-background shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>
+                📁 Upload File
+              </button>
+              <button type="button" onClick={() => setInputMode('url')}
+                className={`flex-1 rounded-md px-3 py-1.5 text-sm font-medium transition-colors flex items-center justify-center gap-1 ${inputMode === 'url' ? 'bg-background shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>
+                <Link2 className="h-3.5 w-3.5" /> Dari URL
+              </button>
+            </div>
+
+            {inputMode === 'file' ? (
+              <Dropzone file={file} onChange={setFile} accept="video" />
+            ) : (
+              <div className="space-y-3">
+                <Input type="url" placeholder="https://www.instagram.com/reel/..." value={urlInput}
+                  onChange={(e) => setUrlInput(e.target.value)} className="text-sm" />
+                <p className="text-xs text-muted-foreground">
+                  Support: <b>YouTube Shorts</b>, <b>TikTok</b>, <b>Facebook</b>, <b>Instagram</b>*.{' '}
+                  <span className="text-amber-700 dark:text-amber-400">*Instagram wajib login (yt-dlp limitation).</span>
+                </p>
+                <div>
+                  <p className="text-xs font-medium text-muted-foreground mb-1">Mode analisis:</p>
+                  <div className="flex rounded-md border bg-muted/30 p-0.5 gap-0.5">
+                    <button type="button" onClick={() => setAnalyzeMode('audio')}
+                      className={`flex-1 rounded px-2 py-1 text-xs font-medium transition-colors ${analyzeMode === 'audio' ? 'bg-background shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>
+                      🎙 Audio Only
+                    </button>
+                    <button type="button" onClick={() => setAnalyzeMode('full')}
+                      className={`flex-1 rounded px-2 py-1 text-xs font-medium transition-colors ${analyzeMode === 'full' ? 'bg-background shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>
+                      🎬 Visual + Audio
+                    </button>
+                  </div>
+                  <p className="text-[10px] text-muted-foreground mt-1">
+                    {analyzeMode === 'audio' ? 'Hanya analisis script/narasi (~15 detik)' : 'Analisis visual + audio via Gemini 2.5 Flash (~30-45 detik)'}
+                  </p>
+                </div>
+              </div>
+            )}
+
+            <Button className="w-full" onClick={handleAnalyze}
+              disabled={(inputMode === 'file' ? !file : !urlInput.trim()) || analyzing}>
+              {analyzing
+                ? <><Loader2 className="h-4 w-4 animate-spin" />{inputMode === 'url' ? 'Downloading & analyzing…' : 'Menganalisis video…'}</>
+                : <><Sparkles className="h-4 w-4" />{inputMode === 'url' ? 'Analyze dari URL' : 'Analyze Video'}</>}
+            </Button>
+
+            {/* Live log — URL mode */}
+            {(analyzing || liveLog.length > 0) && inputMode === 'url' && (
+              <div>
+                <p className="text-xs font-medium text-muted-foreground mb-1.5 flex items-center gap-1.5">
+                  {analyzing ? <Loader2 className="h-3 w-3 animate-spin" /> : <Sparkles className="h-3 w-3 text-emerald-500" />}
+                  Live System Log{analyzing ? '' : ' — Selesai ✓'}
+                </p>
+                <div ref={logScrollRef} className="max-h-40 overflow-y-auto rounded-md bg-muted/40 px-2.5 py-2 space-y-1 font-mono text-[10.5px]">
+                  {liveLog.length === 0
+                    ? <p className="text-muted-foreground italic">Initialising...</p>
+                    : liveLog.map((entry, i) => (
+                        <div key={i} className="flex gap-2 leading-snug">
+                          <span className="shrink-0 text-muted-foreground/60 tabular-nums">+{((entry.ts - liveLog[0].ts) / 1000).toFixed(1)}s</span>
+                          <span className={`shrink-0 font-semibold ${phaseColor(entry.phase)}`}>[{entry.phase}]</span>
+                          <span className="text-foreground/80 break-words">{entry.message}</span>
+                          {entry.detail && <span className="text-muted-foreground/60 italic ml-1 truncate">— {entry.detail.slice(0, 80)}</span>}
+                        </div>
+                      ))}
+                </div>
+              </div>
+            )}
+
+            {/* Analyzing skeleton — file mode */}
+            {analyzing && inputMode === 'file' && (
+              <div className="space-y-2 pt-1">
+                <Skeleton className="h-3 w-1/3" />
+                <Skeleton className="h-3 w-full" />
+                <Skeleton className="h-3 w-4/5" />
+                <Skeleton className="h-3 w-2/3" />
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Step 1 compact summary */}
+      {step > 1 && videoAnalysis && (
+        <StepSummary
+          n={1} label="Video Dianalisis"
+          value={[
+            typeof videoAnalysis.overallStyle === 'string'
+              ? videoAnalysis.overallStyle.slice(0, 70)
+              : 'Video berhasil dianalisis',
+            Array.isArray(videoAnalysis.scenes) && videoAnalysis.scenes.length > 0
+              ? `${videoAnalysis.scenes.length} scenes`
+              : null,
+          ].filter(Boolean).join(' · ')}
+          onClick={() => setStep(1)}
+        />
+      )}
+
+      {/* ══════════════════════════════════════════════
+          STEP 2 — Asset & Format
+      ══════════════════════════════════════════════ */}
+      {step === 2 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">2. Asset & Format</CardTitle>
+            <CardDescription>Pilih produk / karakter yang mau di-scale, dan format output video.</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-5">
+
+            {/* Asset mode */}
+            <div className="space-y-2">
+              <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Aset yang dipakai</Label>
+              <div className="grid grid-cols-3 gap-2">
+                {([
+                  { mode: 'product', icon: Package, label: 'Produk' },
+                  { mode: 'character', icon: User, label: 'Karakter' },
+                  { mode: 'none', icon: Ban, label: 'None' },
+                ] as const).map(({ mode, icon: Icon, label }) => (
+                  <button key={mode} type="button" onClick={() => setAssetMode(mode)}
+                    className={`flex flex-col items-center gap-1.5 rounded-xl border py-3.5 text-sm font-medium transition-colors ${
+                      assetMode === mode
+                        ? 'border-primary bg-primary/10 text-primary'
+                        : 'border-border bg-background text-muted-foreground hover:text-foreground hover:border-muted-foreground'
+                    }`}>
+                    <Icon className="h-5 w-5" />{label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Product picker */}
+            {assetMode === 'product' && products.length > 0 && (
+              <div className="space-y-2">
+                <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Pilih Produk</Label>
+                <Select value={selectedProduct?.id || ''} onValueChange={(id) => { const p = products.find((x) => x.id === id); if (p) setSelectedProduct(p) }}>
+                  <SelectTrigger><SelectValue placeholder="Pilih produk…" /></SelectTrigger>
+                  <SelectContent>
+                    {products.map((p) => <SelectItem key={p.id} value={p.id}>{p.name}{p.price !== undefined ? ` — ${fmt(p.price)}` : ''}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+                {selectedProduct?.photos && selectedProduct.photos.length > 0 && (
+                  <div className="flex items-center gap-3 rounded-xl border bg-muted/30 p-3">
+                    <div className="flex gap-1">
+                      {selectedProduct.photos.slice(0, 4).map((src, i) => (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img key={i} src={src} alt="" className="h-10 w-10 rounded-lg object-cover border" />
+                      ))}
+                      {selectedProduct.photos.length > 4 && (
+                        <div className="h-10 w-10 rounded-lg border bg-muted flex items-center justify-center text-[10px] text-muted-foreground">
+                          +{selectedProduct.photos.length - 4}
+                        </div>
+                      )}
+                    </div>
+                    <p className="text-xs text-emerald-600 flex items-center gap-1">
+                      <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 inline-block" />
+                      {selectedProduct.photos.length} foto produk · image reference aktif
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
+            {assetMode === 'product' && products.length === 0 && (
+              <p className="text-xs text-muted-foreground rounded-xl border border-dashed p-3 text-center">
+                Belum ada produk. <a href="/products" className="underline text-primary">Tambah di Insert Produk →</a>
+              </p>
+            )}
+
+            {/* Character picker */}
+            {assetMode === 'character' && (
+              characters.length > 0 ? (
+                <div className="space-y-2">
+                  <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Pilih Karakter</Label>
+                  <Select value={selectedCharacter?.id || ''} onValueChange={(id) => { const c = characters.find((x) => x.id === id); if (c) setSelectedCharacter(c) }}>
+                    <SelectTrigger><SelectValue placeholder="Pilih karakter…" /></SelectTrigger>
+                    <SelectContent>
+                      {characters.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}{c.photos?.length ? ` — ${c.photos.length} foto` : ''}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                  {selectedCharacter?.photos && selectedCharacter.photos.length > 0 && (
+                    <div className="flex items-center gap-3 rounded-xl border bg-muted/30 p-3">
+                      <div className="flex gap-1">
+                        {selectedCharacter.photos.slice(0, 5).map((src, i) => (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img key={i} src={src} alt="" className="h-10 w-10 rounded-lg object-cover border" />
+                        ))}
+                        {selectedCharacter.photos.length > 5 && (
+                          <div className="h-10 w-10 rounded-lg border bg-muted flex items-center justify-center text-[10px] text-muted-foreground">
+                            +{selectedCharacter.photos.length - 5}
+                          </div>
+                        )}
+                      </div>
+                      <p className="text-xs text-emerald-600 flex items-center gap-1">
+                        <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 inline-block" />
+                        {selectedCharacter.photos.length} foto reference · character sheet aktif
+                      </p>
+                    </div>
+                  )}
+                </div>
               ) : (
                 <div className="space-y-3">
-                  <Input
-                    type="url"
-                    placeholder="https://www.instagram.com/reel/..."
-                    value={urlInput}
-                    onChange={(e) => setUrlInput(e.target.value)}
-                    className="text-sm"
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    Support: <b>YouTube Shorts</b>, <b>TikTok</b>, <b>Facebook</b>, <b>Instagram</b>*. Video harus publik.
-                    <br />
-                    <span className="text-amber-700 dark:text-amber-400 text-[11px]">*Instagram saat ini wajib login (yt-dlp limitation) — kalau gagal, download manual lalu Upload File.</span>
+                  <p className="text-xs text-amber-700 dark:text-amber-400 rounded-xl border border-dashed p-3 text-center">
+                    Belum ada karakter. <a href="/characters" className="underline">Tambah di Insert Karakter →</a>
                   </p>
+                  <CharacterBuilder name={characterName} onNameChange={setCharacterName} photos={characterPhotos} onPhotosChange={setCharacterPhotos} />
+                </div>
+              )
+            )}
+            {assetMode === 'none' && (
+              <p className="text-xs text-muted-foreground rounded-xl border border-dashed p-3 text-center">
+                Generate tanpa foto referensi — prompt saja yang drives the visual.
+              </p>
+            )}
 
-                  {/* Sprint 3 v2 — Analysis mode toggle */}
-                  <div>
-                    <p className="text-xs font-medium text-muted-foreground mb-1">Mode analisis:</p>
-                    <div className="flex rounded-md border bg-muted/30 p-0.5 gap-0.5">
-                      <button
-                        type="button"
-                        onClick={() => setAnalyzeMode('audio')}
-                        className={`flex-1 rounded px-2 py-1 text-xs font-medium transition-colors ${
-                          analyzeMode === 'audio' ? 'bg-background shadow-sm' : 'text-muted-foreground hover:text-foreground'
-                        }`}
-                      >
-                        🎙 Audio Only
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setAnalyzeMode('full')}
-                        className={`flex-1 rounded px-2 py-1 text-xs font-medium transition-colors ${
-                          analyzeMode === 'full' ? 'bg-background shadow-sm' : 'text-muted-foreground hover:text-foreground'
-                        }`}
-                      >
-                        🎬 Visual + Audio
-                      </button>
+            {/* Format */}
+            <div className="space-y-2">
+              <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Format Output</Label>
+              <div className="flex gap-2">
+                {FORMATS.map((f) => (
+                  <Button key={f.value} type="button" size="sm"
+                    variant={aspectRatio === f.value ? 'default' : 'outline'}
+                    onClick={() => setAspectRatio(f.value)}
+                    className="flex-1 flex-col h-auto py-3">
+                    <span className="text-sm font-bold">{f.value}</span>
+                    <span className="text-[10px] opacity-70">{f.hint}</span>
+                  </Button>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex gap-2 pt-1">
+              <Button variant="outline" size="sm" onClick={() => setStep(1)} className="shrink-0">← Kembali</Button>
+              <Button className="flex-1" onClick={() => setStep(3)}>
+                Lanjut ke Refine Prompt →
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Step 2 compact summary */}
+      {step > 2 && (
+        <StepSummary
+          n={2} label="Asset & Format"
+          value={[
+            assetMode === 'product' ? `Produk: ${selectedProduct?.name ?? '—'}`
+              : assetMode === 'character' ? `Karakter: ${selectedCharacter?.name ?? (characterName || '—')}`
+              : 'No asset',
+            aspectRatio,
+          ].join(' · ')}
+          onClick={() => setStep(2)}
+        />
+      )}
+
+      {/* ══════════════════════════════════════════════
+          STEP 3 — Refine Prompt
+      ══════════════════════════════════════════════ */}
+      {step === 3 && (
+        <div className="space-y-4">
+          {/* Analysis reference — expandable */}
+          {videoAnalysis && (
+            <details className="group">
+              <summary className="cursor-pointer list-none flex items-center gap-2 rounded-xl border bg-muted/30 px-4 py-3 text-sm font-medium hover:bg-muted/50 transition-colors">
+                <Sparkles className="h-4 w-4 text-primary shrink-0" />
+                <span className="flex-1">Lihat hasil analisis video winning (referensi)</span>
+                <ChevronRight className="h-4 w-4 text-muted-foreground group-open:rotate-90 transition-transform" />
+              </summary>
+              <div className="mt-2">
+                <AnalysisCard analysis={videoAnalysis} />
+              </div>
+            </details>
+          )}
+
+          <Card className="border-primary/30 bg-primary/5">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base flex items-center gap-2">
+                <Wand2 className="h-4 w-4 text-primary" />
+                3. Refine Prompt
+              </CardTitle>
+              <CardDescription>
+                Ceritakan tujuan video ini — AI buat prompt spesifik + storyboard 3 scene (10 detik total).
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <Textarea
+                placeholder="Contoh: jual suplemen kolagen untuk wanita 30-45 tahun, target ibu-ibu Jakarta yang aktif, tone: warm dan aspirational"
+                value={userIntent} onChange={(e) => setUserIntent(e.target.value)}
+                rows={3} className="text-sm resize-none"
+              />
+              <Button className="w-full" onClick={handleTranslatePrompt} disabled={!userIntent.trim() || translating}>
+                {translating
+                  ? <><Loader2 className="h-4 w-4 animate-spin" /> Generating prompt + storyboard…</>
+                  : <><Wand2 className="h-4 w-4" /> Refine dengan AI</>}
+              </Button>
+
+              {/* Refined output */}
+              {refinedPrompt && (
+                <div className="space-y-4 pt-2">
+                  {/* Editable prompt */}
+                  <div className="space-y-1.5">
+                    <p className="text-xs font-semibold text-primary">Video Prompt (editable):</p>
+                    <Textarea value={refinedPrompt} onChange={(e) => setRefinedPrompt(e.target.value)}
+                      rows={5} className="text-xs font-mono resize-none" />
+                  </div>
+
+                  {/* Hook variants */}
+                  {hookVariants.length > 0 && (
+                    <div className="space-y-1.5">
+                      <p className="text-xs font-semibold text-muted-foreground">Hook variants (3 detik pertama):</p>
+                      <div className="space-y-1">
+                        {hookVariants.map((h, i) => (
+                          <div key={i} className="rounded-lg border bg-background px-3 py-2 text-xs">
+                            <span className="font-semibold text-primary">{i + 1}.</span> {h}
+                          </div>
+                        ))}
+                      </div>
                     </div>
-                    <p className="text-[10px] text-muted-foreground mt-1">
-                      {analyzeMode === 'audio'
-                        ? 'Hanya analisis script/narasi (~15 detik, lebih murah)'
-                        : 'Analisis visual + audio lengkap via Gemini 2.5 Flash (~30-45 detik)'}
-                    </p>
+                  )}
+
+                  {/* Script outline */}
+                  {scriptOutline && (
+                    <details>
+                      <summary className="cursor-pointer text-xs text-muted-foreground hover:text-foreground select-none">Script outline ↓</summary>
+                      <p className="mt-1.5 rounded-lg border bg-muted p-2.5 text-xs leading-relaxed whitespace-pre-wrap">{scriptOutline}</p>
+                    </details>
+                  )}
+
+                  {/* Storyboard — 3-col grid, portrait aspect */}
+                  {adaptedScenes.length > 0 && (
+                    <div className="space-y-2">
+                      <p className="text-xs font-semibold text-muted-foreground flex items-center gap-1.5">
+                        🎬 Storyboard — {adaptedScenes.length} scene · 10 detik
+                        {generatingSceneImages && (
+                          <span className="flex items-center gap-1 text-[10px] text-primary">
+                            <Loader2 className="h-2.5 w-2.5 animate-spin" /> generating…
+                          </span>
+                        )}
+                      </p>
+                      <div className="grid grid-cols-3 gap-2">
+                        {adaptedScenes.map((item, i) => (
+                          <div key={i} className="rounded-xl border bg-background overflow-hidden">
+                            <div className="relative bg-muted flex items-center justify-center" style={{ aspectRatio: '9/16' }}>
+                              {item.imageUrl
+                                ? <img src={item.imageUrl} alt={`Scene ${item.scene}`} className="w-full h-full object-cover" /> // eslint-disable-line @next/next/no-img-element
+                                : (
+                                  <div className="flex flex-col items-center gap-1 text-muted-foreground">
+                                    {generatingSceneImages ? <Loader2 className="h-4 w-4 animate-spin text-primary" /> : <ImageIcon className="h-4 w-4 opacity-30" />}
+                                    <span className="text-[9px]">{generatingSceneImages ? 'Generating…' : '—'}</span>
+                                  </div>
+                                )}
+                              <div className="absolute top-1 left-1 flex gap-1">
+                                <span className="text-[9px] font-bold bg-primary text-primary-foreground rounded px-1.5 py-0.5">S{item.scene}</span>
+                                <span className="text-[9px] bg-black/60 text-white rounded px-1 py-0.5">{item.duration}</span>
+                              </div>
+                            </div>
+                            <div className="p-2 space-y-1">
+                              <p className="text-[10px] leading-snug italic text-foreground/80 line-clamp-3">"{item.voiceover}"</p>
+                              {item.imagePrompt && (
+                                <details>
+                                  <summary className="cursor-pointer text-[9px] text-muted-foreground select-none">prompt ↓</summary>
+                                  <p className="mt-0.5 text-[9px] leading-relaxed text-muted-foreground bg-muted rounded p-1">{item.imagePrompt.slice(0, 140)}…</p>
+                                </details>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="flex gap-2 pt-1">
+                    <Button variant="outline" size="sm" onClick={() => setStep(2)} className="shrink-0">← Kembali</Button>
+                    <Button className="flex-1" onClick={() => setStep(4)}>
+                      Lanjut ke Generate →
+                    </Button>
                   </div>
                 </div>
               )}
 
-              <Button
-                className="w-full"
-                onClick={handleAnalyze}
-                disabled={(inputMode === 'file' ? !file : !urlInput.trim()) || analyzing}
-              >
-                {analyzing ? (
-                  <>
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    {inputMode === 'url' ? 'Downloading & analyzing…' : 'Menganalisis video…'}
-                  </>
-                ) : (
-                  <>
-                    <Sparkles className="h-4 w-4" />
-                    {inputMode === 'url' ? 'Analyze dari URL' : 'Analyze Video'}
-                  </>
-                )}
-              </Button>
+              {!refinedPrompt && (
+                <Button variant="outline" size="sm" className="w-full" onClick={() => setStep(2)}>← Kembali ke Asset</Button>
+              )}
             </CardContent>
           </Card>
-
-          {/* Step 2 — Setting & Aset (asset mode + format + angles) */}
-          {videoAnalysis && (
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-base">2. Setting & Aset</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-
-                {/* ── Asset mode selector ─────────────────── */}
-                <div className="space-y-2">
-                  <Label>Tambahan aset tersimpan</Label>
-                  <div className="grid grid-cols-3 gap-1.5">
-                    {(
-                      [
-                        { mode: 'product', icon: Package, label: 'Produk' },
-                        { mode: 'character', icon: User, label: 'Karakter' },
-                        { mode: 'none', icon: Ban, label: 'None' },
-                      ] as const
-                    ).map(({ mode, icon: Icon, label }) => (
-                      <button
-                        key={mode}
-                        type="button"
-                        onClick={() => setAssetMode(mode)}
-                        className={`flex flex-col items-center gap-1 rounded-lg border py-2.5 text-xs font-medium transition-colors ${
-                          assetMode === mode
-                            ? 'border-primary bg-primary/10 text-primary'
-                            : 'border-border bg-background text-muted-foreground hover:text-foreground hover:border-muted-foreground'
-                        }`}
-                      >
-                        <Icon className="h-4 w-4" />
-                        {label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                {/* ── Product picker ───────────────────────── */}
-                {assetMode === 'product' && products.length > 0 && (
-                  <div className="space-y-2">
-                    <Select
-                      value={selectedProduct?.id || ''}
-                      onValueChange={(id) => {
-                        const p = products.find((x) => x.id === id)
-                        if (p) setSelectedProduct(p)
-                      }}
-                    >
-                      <SelectTrigger><SelectValue placeholder="Pilih produk…" /></SelectTrigger>
-                      <SelectContent>
-                        {products.map((p) => (
-                          <SelectItem key={p.id} value={p.id}>
-                            {p.name}{p.price !== undefined ? ` — ${fmt(p.price)}` : ''}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    {selectedProduct?.photos?.[0] && (
-                      <p className="flex items-center gap-1 text-xs text-emerald-600">
-                        <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 inline-block" />
-                        Foto produk tersedia — image-to-video aktif
-                      </p>
-                    )}
-                  </div>
-                )}
-                {assetMode === 'product' && products.length === 0 && (
-                  <p className="text-xs text-muted-foreground rounded border border-dashed p-2 text-center">
-                    Belum ada produk tersimpan. Tambah dulu di menu Produk.
-                  </p>
-                )}
-
-                {/* ── Character picker / builder ───────────── */}
-                {assetMode === 'character' && (
-                  characters.length > 0 ? (
-                    <div className="space-y-2">
-                      <Select
-                        value={selectedCharacter?.id || ''}
-                        onValueChange={(id) => {
-                          const c = characters.find((x) => x.id === id)
-                          if (c) setSelectedCharacter(c)
-                        }}
-                      >
-                        <SelectTrigger><SelectValue placeholder="Pilih karakter…" /></SelectTrigger>
-                        <SelectContent>
-                          {characters.map((c) => (
-                            <SelectItem key={c.id} value={c.id}>
-                              {c.name}{c.photos?.length ? ` — ${c.photos.length} foto` : ''}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      {selectedCharacter?.photos && selectedCharacter.photos.length > 0 && (
-                        <div className="flex gap-1 mt-1.5">
-                          {selectedCharacter.photos.slice(0, 5).map((src, i) => (
-                            // eslint-disable-next-line @next/next/no-img-element
-                            <img key={i} src={src} alt="" className="h-10 w-10 rounded object-cover border" />
-                          ))}
-                          {selectedCharacter.photos.length > 5 && (
-                            <div className="h-10 w-10 rounded border bg-muted flex items-center justify-center text-[10px] text-muted-foreground">
-                              +{selectedCharacter.photos.length - 5}
-                            </div>
-                          )}
-                        </div>
-                      )}
-                      {selectedCharacter?.photos && selectedCharacter.photos.length > 0 && (
-                        <p className="flex items-center gap-1 text-xs text-emerald-600">
-                          <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 inline-block" />
-                          {selectedCharacter.photos.length} foto karakter — image reference aktif
-                        </p>
-                      )}
-                    </div>
-                  ) : (
-                    // Fallback: inline builder if no saved characters
-                    <div className="space-y-2">
-                      <p className="text-xs text-amber-700 dark:text-amber-400 rounded border border-dashed p-2 text-center">
-                        Belum ada karakter tersimpan.{' '}
-                        <a href="/characters" className="underline">Tambah di menu Insert Karakter</a>
-                        {' '}atau isi manual di bawah.
-                      </p>
-                      <CharacterBuilder
-                        name={characterName}
-                        onNameChange={setCharacterName}
-                        photos={characterPhotos}
-                        onPhotosChange={setCharacterPhotos}
-                      />
-                    </div>
-                  )
-                )}
-
-                {/* ── None info ────────────────────────────── */}
-                {assetMode === 'none' && (
-                  <p className="text-xs text-muted-foreground rounded border border-dashed p-2 text-center">
-                    Generate tanpa referensi foto produk / karakter.
-                  </p>
-                )}
-
-                {/* Format */}
-                <div className="space-y-2">
-                  <Label>Format</Label>
-                  <div className="flex gap-2">
-                    {FORMATS.map((f) => (
-                      <Button
-                        key={f.value}
-                        type="button"
-                        size="sm"
-                        variant={aspectRatio === f.value ? 'default' : 'outline'}
-                        onClick={() => setAspectRatio(f.value)}
-                        className="flex-1 flex-col h-auto py-2"
-                      >
-                        <span className="text-xs font-semibold">{f.value}</span>
-                        <span className="text-[10px] opacity-70">{f.hint}</span>
-                      </Button>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Duration info badge */}
-                <div className="flex items-center gap-2 rounded-lg border border-primary/20 bg-primary/5 px-3 py-2">
-                  <Video className="h-3.5 w-3.5 text-primary shrink-0" />
-                  <p className="text-xs text-primary font-medium">Durasi: 10 detik · Model: GeminiGen grok-3</p>
-                </div>
-
-                <Button
-                  className="w-full"
-                  onClick={handleGenerate}
-                  disabled={generating || !videoAnalysis}
-                >
-                  {generating ? (
-                    <><Loader2 className="h-4 w-4 animate-spin" /> Generating video… (bisa 5-10 menit)</>
-                  ) : (
-                    <><Video className="h-4 w-4" /> Generate Video</>
-                  )}
-                </Button>
-              </CardContent>
-            </Card>
-          )}
         </div>
+      )}
 
-        {/* ── Right panel ── */}
-        <div className="space-y-6">
-          {error && (
-            <div className="flex items-start gap-2 rounded-lg border border-destructive/40 bg-destructive/5 p-4 text-sm text-destructive">
-              <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
-              <span>{error}</span>
-            </div>
-          )}
+      {/* Step 3 compact summary */}
+      {step > 3 && refinedPrompt && (
+        <StepSummary
+          n={3} label="Prompt Refined"
+          value={refinedPrompt.slice(0, 90) + (refinedPrompt.length > 90 ? '…' : '')}
+          onClick={() => setStep(3)}
+        />
+      )}
 
-          {/* Live action log — shows during URL analysis (SSE phase events) */}
-          {(analyzing || liveLog.length > 0) && inputMode === 'url' && (
-            <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm flex items-center gap-2">
-                  {analyzing ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
-                  ) : (
-                    <Sparkles className="h-3.5 w-3.5 text-emerald-600" />
-                  )}
-                  Live System Log
-                </CardTitle>
-                <CardDescription className="text-[11px]">
-                  {analyzing ? 'Sistem sedang bekerja…' : 'Selesai ✓'}
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div ref={logScrollRef} className="max-h-48 overflow-y-auto rounded-md bg-muted/40 px-2.5 py-2 space-y-1 font-mono text-[10.5px]">
-                  {liveLog.length === 0 ? (
-                    <p className="text-muted-foreground italic">Initialising...</p>
-                  ) : (
-                    liveLog.map((entry, i) => {
-                      const startTs = liveLog[0].ts
-                      return (
-                        <div key={i} className="flex gap-2 leading-snug">
-                          <span className="shrink-0 text-muted-foreground/60 tabular-nums">
-                            +{((entry.ts - startTs) / 1000).toFixed(1)}s
-                          </span>
-                          <span className={`shrink-0 font-semibold ${phaseColor(entry.phase)}`}>
-                            [{entry.phase}]
-                          </span>
-                          <span className="text-foreground/80 break-words">{entry.message}</span>
-                          {entry.detail && (
-                            <span className="text-muted-foreground/60 italic ml-1 truncate">— {entry.detail.slice(0, 80)}</span>
-                          )}
-                        </div>
-                      )
-                    })
-                  )}
-                </div>
-              </CardContent>
-            </Card>
-          )}
-
-          {/* Analyzing skeleton — only for file upload (URL has live log) */}
-          {analyzing && inputMode === 'file' && (
-            <Card>
-              <CardContent className="space-y-3 p-6">
-                <Skeleton className="h-4 w-1/3" />
-                <Skeleton className="h-3 w-full" />
-                <Skeleton className="h-3 w-5/6" />
-                <Skeleton className="h-3 w-2/3" />
-                <Skeleton className="h-3 w-4/5" />
-              </CardContent>
-            </Card>
-          )}
-
-          {/* Analysis result — NotebookLM-style rich detail with expandable sections */}
-          {videoAnalysis && !analyzing && (
-            <AnalysisCard analysis={videoAnalysis} />
-          )}
-
-          {/* Step 1.5: Refine Prompt — duration picker + intent */}
-          {videoAnalysis && !analyzing && showIntentStep && (
-            <Card className="border-primary/30 bg-primary/5">
-              <CardHeader className="pb-3">
-                <CardTitle className="text-base flex items-center gap-2">
-                  <Wand2 className="h-4 w-4 text-primary" />
-                  Refine Prompt
-                </CardTitle>
-                <CardDescription>
-                  AI akan translate analisis video winning jadi struktur yang persis sama, tapi diadaptasi untuk produkmu.
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-
-                {/* Duration picker */}
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2">
-                    <Clock className="h-3.5 w-3.5 text-muted-foreground" />
-                    <Label className="text-xs font-medium">Target durasi video</Label>
-                    <span className="ml-auto text-xs font-semibold text-primary">{targetDuration}s</span>
-                  </div>
-                  <div className="flex flex-wrap gap-1.5">
-                    {DURATION_OPTIONS.map((d) => (
-                      <button
-                        key={d}
-                        type="button"
-                        onClick={() => setTargetDuration(d)}
-                        className={`rounded-md px-3 py-1 text-xs font-medium border transition-colors ${
-                          targetDuration === d
-                            ? 'bg-primary text-primary-foreground border-primary'
-                            : 'bg-background text-muted-foreground border-border hover:border-primary hover:text-primary'
-                        }`}
-                      >
-                        {d}s
-                      </button>
-                    ))}
-                  </div>
-                  {videoAnalysis?.recommendedDuration && (
-                    <p className="text-[10px] text-muted-foreground">
-                      ⚡ Video asli ≈ {videoAnalysis.recommendedDuration}s — default sudah disesuaikan
-                    </p>
-                  )}
-                </div>
-
-                {/* Intent textarea */}
-                <div className="space-y-2">
-                  <Label className="text-xs font-medium">Ceritakan tujuanmu</Label>
-                  <Textarea
-                    placeholder="Contoh: jual suplemen kolagen untuk wanita 30-45 tahun, target ibu-ibu Jakarta yang aktif, tone: warm dan aspirational"
-                    value={userIntent}
-                    onChange={(e) => setUserIntent(e.target.value)}
-                    rows={3}
-                    className="text-sm resize-none"
-                  />
-                </div>
-
-                {assetMode === 'product' && !selectedProduct && (
-                  <p className="text-[11px] text-amber-700 dark:text-amber-400">
-                    ℹ️ Belum pilih produk — refine akan pakai placeholder. Pilih produk untuk hasil terbaik.
-                  </p>
-                )}
-                {assetMode === 'character' && !characterName.trim() && (
-                  <p className="text-[11px] text-amber-700 dark:text-amber-400">
-                    ℹ️ Isi nama karakter untuk hasil yang lebih spesifik.
-                  </p>
-                )}
-
-                <Button
-                  className="w-full"
-                  onClick={handleTranslatePrompt}
-                  disabled={!userIntent.trim() || translating}
-                >
-                  {translating ? (
-                    <><Loader2 className="h-4 w-4 animate-spin" /> Generating {targetDuration}s adaptation…</>
-                  ) : (
-                    <><Wand2 className="h-4 w-4" /> Generate Adaptasi {targetDuration}s</>
-                  )}
-                </Button>
-
-                {/* Results: Comparison + Storyboard */}
-                {(adaptedAnalysis || refinedPrompt) && (
-                  <div className="space-y-4 pt-1">
-
-                    {/* ── Comparison View ──────────────────────────── */}
-                    {adaptedAnalysis && (
-                      <ComparisonView
-                        original={videoAnalysis}
-                        adapted={adaptedAnalysis}
-                        productName={
-                          assetMode === 'product' ? (selectedProduct?.name ?? 'Produk')
-                          : assetMode === 'character' ? (selectedCharacter?.name ?? (characterName || 'Karakter'))
-                          : 'Adaptasi'
-                        }
-                        targetDuration={targetDuration}
-                        hookVariants={hookVariants}
-                        scriptOutline={scriptOutline}
-                      />
-                    )}
-
-                    {/* ── Video Prompt (editable) ────────────────── */}
-                    <div className="space-y-1.5">
-                      <p className="text-xs font-semibold text-primary">🎬 Video Prompt (editable · dipakai di Generate):</p>
-                      <Textarea
-                        value={refinedPrompt}
-                        onChange={(e) => setRefinedPrompt(e.target.value)}
-                        rows={5}
-                        className="text-xs font-mono resize-none"
-                      />
-                    </div>
-
-                    {/* ── Storyboard per scene ──────────────────── */}
-                    {adaptedScenes.length > 0 && (
-                      <div className="space-y-2">
-                        <p className="text-xs font-semibold text-muted-foreground flex items-center gap-1.5">
-                          🎞 Storyboard ({adaptedScenes.length} scenes · {targetDuration}s)
-                          {generatingSceneImages && (
-                            <span className="flex items-center gap-1 text-[10px] text-primary">
-                              <Loader2 className="h-2.5 w-2.5 animate-spin" /> generating images…
-                            </span>
-                          )}
-                        </p>
-                        <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
-                          {adaptedScenes.map((item, i) => (
-                            <div key={i} className="rounded-lg border bg-background overflow-hidden">
-                              {/* Scene image — portrait 9:16 */}
-                              <div className="relative bg-muted" style={{ aspectRatio: '9/16', maxHeight: '240px' }}>
-                                {item.imageUrl ? (
-                                  // eslint-disable-next-line @next/next/no-img-element
-                                  <img
-                                    src={item.imageUrl}
-                                    alt={`Scene ${item.scene}`}
-                                    className="w-full h-full object-cover"
-                                    onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }}
-                                  />
-                                ) : (
-                                  <div className="flex flex-col items-center justify-center h-full gap-1 text-muted-foreground">
-                                    {generatingSceneImages
-                                      ? <Loader2 className="h-5 w-5 animate-spin text-primary" />
-                                      : <ImageIcon className="h-5 w-5 opacity-30" />
-                                    }
-                                    <span className="text-[10px]">
-                                      {generatingSceneImages ? 'Generating…' : 'No preview'}
-                                    </span>
-                                  </div>
-                                )}
-                                <div className="absolute top-1.5 left-1.5 flex items-center gap-1">
-                                  <span className="text-[10px] font-semibold bg-primary text-primary-foreground rounded px-1.5 py-0.5">
-                                    {item.scene}
-                                  </span>
-                                  <span className="text-[10px] bg-black/60 text-white rounded px-1.5 py-0.5 font-mono">
-                                    {item.duration}
-                                  </span>
-                                </div>
-                              </div>
-                              {/* VO text */}
-                              <div className="p-2 space-y-1">
-                                <p className="text-[11px] leading-relaxed italic text-foreground line-clamp-3">
-                                  🎙 "{item.voiceover}"
-                                </p>
-                                {item.imagePrompt && (
-                                  <details>
-                                    <summary className="cursor-pointer text-[10px] text-muted-foreground hover:text-foreground">
-                                      Image prompt
-                                    </summary>
-                                    <p className="mt-1 text-[10px] leading-relaxed text-muted-foreground bg-muted rounded p-1.5">
-                                      {item.imagePrompt}
-                                    </p>
-                                  </details>
-                                )}
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-
-                    <div className="flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 dark:bg-emerald-900/20 dark:border-emerald-800 px-3 py-2">
-                      <ChevronRight className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
-                      <p className="text-xs text-emerald-700 dark:text-emerald-400 font-medium">
-                        Prompt {targetDuration}s siap — klik Generate di Step 2 untuk pakai prompt ini.
-                      </p>
-                    </div>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          )}
-
-          {/* Generating skeletons */}
-          {generating && (
-            <div className="space-y-4">
-              <div className="flex items-center gap-2 rounded-lg border border-primary/20 bg-primary/5 p-4 text-sm text-primary font-medium">
-                <Loader2 className="h-4 w-4 animate-spin" />
-                Generating {availableAngles.length || 'variasi'} video dengan GeminiGen grok-3… estimasi 5-10 menit
+      {/* ══════════════════════════════════════════════
+          STEP 4 — Generate
+      ══════════════════════════════════════════════ */}
+      {step === 4 && !result && !generating && (
+        <Card className="border-emerald-300 dark:border-emerald-700">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base flex items-center gap-2">
+              <Video className="h-4 w-4 text-primary" />
+              4. Generate Video
+            </CardTitle>
+            <CardDescription>
+              Semua siap. Klik Generate untuk buat 1 video 10 detik.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {/* Config summary */}
+            <div className="rounded-xl border divide-y text-sm overflow-hidden">
+              <div className="flex items-center justify-between px-4 py-2.5 bg-muted/20">
+                <span className="text-xs text-muted-foreground">Asset</span>
+                <span className="text-xs font-semibold">
+                  {assetMode === 'product' ? (selectedProduct?.name ?? '—')
+                    : assetMode === 'character' ? (selectedCharacter?.name ?? (characterName || '—'))
+                    : 'None'}
+                </span>
               </div>
-              <div className="grid gap-4 sm:grid-cols-2">
-                {Array.from({ length: availableAngles.length || 3 }).map((_, i) => (
-                  <Card key={i}>
-                    <Skeleton className="aspect-video w-full rounded-t-lg" />
-                    <CardContent className="space-y-2 p-4">
-                      <Skeleton className="h-4 w-3/4" />
-                      <Skeleton className="h-3 w-full" />
-                    </CardContent>
-                  </Card>
+              <div className="flex items-center justify-between px-4 py-2.5">
+                <span className="text-xs text-muted-foreground">Format · Durasi</span>
+                <span className="text-xs font-semibold">{aspectRatio} · 10 detik</span>
+              </div>
+              <div className="flex items-center justify-between px-4 py-2.5">
+                <span className="text-xs text-muted-foreground">Model</span>
+                <span className="text-xs font-semibold">GeminiGen grok-3</span>
+              </div>
+              <div className="px-4 py-2.5">
+                <p className="text-xs text-muted-foreground mb-1">Prompt</p>
+                <p className="text-xs leading-relaxed text-foreground/80 line-clamp-4 font-mono">{refinedPrompt}</p>
+              </div>
+            </div>
+
+            {/* Storyboard mini preview */}
+            {adaptedScenes.length > 0 && (
+              <div className="flex gap-1.5 overflow-hidden rounded-lg">
+                {adaptedScenes.map((s, i) => (
+                  <div key={i} className="flex-1 relative overflow-hidden rounded-lg bg-muted" style={{ aspectRatio: '9/16' }}>
+                    {s.imageUrl
+                      ? <img src={s.imageUrl} alt="" className="w-full h-full object-cover" /> // eslint-disable-line @next/next/no-img-element
+                      : <div className="w-full h-full flex items-center justify-center"><ImageIcon className="h-4 w-4 text-muted-foreground/40" /></div>}
+                    <div className="absolute bottom-0 inset-x-0 bg-gradient-to-t from-black/60 px-1.5 pb-1">
+                      <p className="text-[9px] text-white font-semibold">{s.duration}</p>
+                    </div>
+                  </div>
                 ))}
               </div>
-            </div>
-          )}
+            )}
 
-          {/* Results grid */}
-          {result && !generating && (
-            <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <h2 className="text-lg font-semibold">{result.totalVariations} variasi video siap</h2>
-                <p className="text-sm text-muted-foreground">{result.productName} · {result.aspectRatio} · 10s</p>
-              </div>
-              <div className="grid gap-4 sm:grid-cols-2">
-                {result.variations.map((v, i) => (
-                  <VideoVariationCard key={i} variation={v} index={i} />
-                ))}
-              </div>
+            <div className="flex gap-2">
+              <Button variant="outline" size="sm" onClick={() => setStep(3)} className="shrink-0">← Edit Prompt</Button>
+              <Button className="flex-1" size="lg" onClick={handleGenerate}>
+                <Video className="h-4 w-4" /> Generate Video 10 Detik
+              </Button>
             </div>
-          )}
+          </CardContent>
+        </Card>
+      )}
 
-          {/* Empty state */}
-          {!analyzing && !videoAnalysis && !error && (
-            <div className="rounded-xl border border-dashed p-12 text-center text-muted-foreground">
-              <Video className="mx-auto mb-3 h-10 w-10 opacity-40" />
-              <p className="font-medium">Upload video iklan winning untuk mulai.</p>
-              <p className="mt-1 text-sm">AI analisis konsep → generate variasi video baru.</p>
+      {/* ── Generating progress ── */}
+      {generating && (
+        <Card className="border-primary/30 bg-primary/5">
+          <CardContent className="p-6 space-y-5">
+            <div className="flex items-center gap-4">
+              <div className="relative h-12 w-12 shrink-0">
+                <div className="absolute inset-0 rounded-full border-4 border-primary/20" />
+                <div className="absolute inset-0 rounded-full border-4 border-t-primary animate-spin" />
+                <Video className="absolute inset-0 m-auto h-5 w-5 text-primary" />
+              </div>
+              <div>
+                <p className="font-semibold">Generating video 10 detik…</p>
+                <p className="text-sm text-muted-foreground">GeminiGen grok-3 · estimasi 2–5 menit</p>
+              </div>
             </div>
-          )}
-        </div>
-      </div>
+            <div className="space-y-2.5">
+              {[
+                { label: 'Prompt dikirim ke GeminiGen', done: true },
+                { label: 'Rendering video frames', done: false, active: true },
+                { label: 'Encode & finalize', done: false },
+              ].map((s, i) => (
+                <div key={i} className="flex items-center gap-2.5 text-sm">
+                  {s.done
+                    ? <span className="h-5 w-5 rounded-full bg-emerald-500 flex items-center justify-center shrink-0 text-white text-[10px] font-bold">✓</span>
+                    : s.active
+                    ? <Loader2 className="h-5 w-5 animate-spin text-primary shrink-0" />
+                    : <span className="h-5 w-5 rounded-full border-2 border-muted-foreground/20 shrink-0" />}
+                  <span className={s.active ? 'text-primary font-medium' : s.done ? 'text-emerald-600' : 'text-muted-foreground'}>
+                    {s.label}
+                  </span>
+                </div>
+              ))}
+            </div>
+            <div className="h-1.5 rounded-full bg-primary/20 overflow-hidden">
+              <div className="h-full w-1/3 rounded-full bg-primary animate-pulse" />
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* ── Result ── */}
+      {result && !generating && (
+        <Card className="overflow-hidden border-emerald-200 dark:border-emerald-800">
+          <CardHeader className="pb-2 bg-emerald-50/50 dark:bg-emerald-900/10 border-b border-emerald-100 dark:border-emerald-800/50">
+            <CardTitle className="text-base flex items-center gap-2">
+              <span className="h-2.5 w-2.5 rounded-full bg-emerald-500 inline-block" />
+              Video Siap!
+              <span className="ml-auto text-xs font-normal text-muted-foreground">{result.productName} · {result.aspectRatio} · 10s</span>
+            </CardTitle>
+          </CardHeader>
+
+          <div className="relative bg-black flex items-center justify-center min-h-[320px]">
+            {result.variations[0]?.videoUrl ? (
+              <video src={result.variations[0].videoUrl} controls autoPlay loop
+                className="max-h-[520px] w-full object-contain" />
+            ) : (
+              <div className="flex flex-col items-center gap-3 py-16 text-destructive/70">
+                <AlertCircle className="h-8 w-8" />
+                <p className="text-sm">{result.variations[0]?.videoError || 'Video tidak tersedia'}</p>
+              </div>
+            )}
+          </div>
+
+          <CardContent className="p-4 space-y-3">
+            <div className="flex gap-2">
+              {result.variations[0]?.videoUrl && (
+                <Button className="flex-1" onClick={async () => {
+                  try {
+                    const r = await fetch(result.variations[0].videoUrl!)
+                    const blob = await r.blob()
+                    const url = URL.createObjectURL(blob)
+                    const a = document.createElement('a')
+                    a.href = url
+                    a.download = `scale-video-${result.productName}-${Date.now()}.mp4`
+                    document.body.appendChild(a); a.click(); document.body.removeChild(a)
+                    URL.revokeObjectURL(url)
+                  } catch { window.open(result.variations[0].videoUrl!, '_blank') }
+                }}>
+                  <Download className="h-4 w-4" /> Download Video
+                </Button>
+              )}
+              <Button variant="outline" onClick={() => { setResult(null); setStep(3); setRefinedPrompt(''); setAdaptedScenes([]); setHookVariants([]); setScriptOutline(''); setUserIntent('') }}>
+                Refine Ulang
+              </Button>
+              <Button variant="outline" onClick={() => { setResult(null); setStep(4) }}>
+                Generate Ulang
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
     </div>
   )
 }
+
+// ── StepSummary — clickable compact summary for completed steps ────────────────
+function StepSummary({ n, label, value, onClick }: { n: number; label: string; value: string; onClick: () => void }) {
+  return (
+    <button type="button" onClick={onClick}
+      className="w-full flex items-center gap-3 rounded-xl border bg-muted/20 px-4 py-3 text-left hover:bg-muted/40 transition-colors group">
+      <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-emerald-100 dark:bg-emerald-900/40 text-emerald-600 text-[10px] font-bold">✓</span>
+      <div className="flex-1 min-w-0">
+        <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">Step {n} — {label}</p>
+        <p className="text-sm font-medium truncate text-foreground/80">{value}</p>
+      </div>
+      <ChevronRight className="h-4 w-4 text-muted-foreground group-hover:text-foreground transition-colors shrink-0 group-hover:translate-x-0.5 transition-transform" />
+    </button>
+  )
+}
+
 
 // ── ComparisonView — kiri-kanan: original AI analysis vs adapted version ─────
 

@@ -137,6 +137,29 @@ router.post('/generate', async (req, res) => {
     }
   }
 
+  // ── Fast path: refined prompt → 1 video only, skip angle variation machine ──
+  if (customVideoPrompt) {
+    console.log('[scale-video/generate] refined prompt detected — generating 1 video directly');
+    const singleVar = [{
+      imagePrompt: customVideoPrompt,
+      angle: 'refined',
+      headline: productName,
+      subheadline: '',
+      bodyText: productDescription || '',
+      cta: '',
+      translatedConcept: `Refined prompt for "${productName}"`,
+    }];
+    const finalVariations = await batchGenerateVideos(singleVar, aspectRatio, productImageUrl);
+    return res.json({
+      productName,
+      aspectRatio,
+      totalVariations: 1,
+      variations: finalVariations,
+      productVisualDescription: productVisualDescription || null,
+      mode: 'refined',
+    });
+  }
+
   // Step 3: Generate scaling angles using video analysis as the "winning ad DNA"
   const angles = await generateScalingAngles(
     videoAnalysis,
@@ -370,7 +393,7 @@ router.post('/translate-prompt', async (req, res) => {
       assetMode,
       characterPhotosBase64: Array.isArray(characterPhotosBase64) ? characterPhotosBase64 : [],
       productPhotoBase64: productPhotoBase64 || null,
-      targetDuration: parseInt(targetDuration) || 30,
+      targetDuration: 10,   // GeminiGen always generates 10-second clips — hardlock
     });
     res.json(result);
   } catch (err) {
