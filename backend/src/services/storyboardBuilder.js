@@ -56,6 +56,87 @@ const ASPECT_RATIO_LABELS = {
   horizontal: '3:2',
 };
 
+// ── visual style presets ──────────────────────────────────────────────────────
+const VISUAL_STYLE_PRESETS = {
+  // Original 5
+  premium_3d:     '3D semi-cartoon premium product ad, glossy surfaces, cinematic volumetric lighting, ultra-detailed render, smooth fluid animation',
+  realistic:      'photorealistic live-action cinematic, natural lighting, shot on RED camera, shallow depth of field, 4K detail, film grain',
+  anime:          'Japanese anime style, vibrant saturated colors, sharp expressive outlines, dynamic action lines, hand-drawn feel',
+  cinematic:      'cinematic live-action commercial, anamorphic lens flare, golden hour color grade, Dolby Vision HDR, movie-quality production',
+  cartoon:        '3D Pixar-style cartoon, bright cheerful colors, smooth rounded shapes, exaggerated expressions, family-friendly fun',
+  // 5 new styles (Zopia-inspired)
+  ghibli:         'Studio Ghibli animation style, hand-painted watercolor backgrounds, warm soft light, lush detailed nature, expressive wide-eyed characters, storybook magic',
+  makoto_shinkai: 'Makoto Shinkai film aesthetic, hyperdetailed city backgrounds, chromatic lens flare, golden hour rays, hazy bokeh atmosphere, emotional color grading',
+  chibi:          'Chibi anime style, super-deformed proportions, cute oversized heads, pastel color palette, big sparkly eyes, soft rounded shapes, kawaii energy',
+  pixel_art:      'Retro pixel art style, 16-bit aesthetic, limited color palette, chunky detailed sprites, nostalgic game aesthetic, crisp pixel edges',
+  chinese_cg:     '3D Chinese animation style (Donghua), wuxia aesthetic, ink wash mountain backgrounds, dramatic silk fabric physics, jade and gold accents, epic cinematic lighting',
+};
+
+const DEFAULT_VISUAL_STYLE = VISUAL_STYLE_PRESETS.premium_3d;
+
+// ── project type instructions ─────────────────────────────────────────────────
+/**
+ * Returns system prompt addendum based on project type.
+ * projectType: 'story' | 'product_promo' | 'digital_human' | 'default'
+ */
+function getProjectTypeRules(projectType) {
+  switch (projectType) {
+    case 'product_promo':
+      return `
+PROJECT TYPE: PRODUCT PROMO (commercial ad)
+CRITICAL RULES for product_promo:
+- EVERY clip MUST prominently feature the product — product appearance is FIXED, never alter
+- Clip 1 (Hook): eye-catching product reveal or problem statement
+- Middle clips: product features, benefits, texture/use demonstration
+- Last clip: strong CTA (Call to Action) + brand name + product close-up
+- Action: always show the product DOING something — dripping, rotating, being applied, being held
+- Setting: always product-centric — beauty flat-lay, studio hero shot, lifestyle in-use`;
+
+    case 'story':
+      return `
+PROJECT TYPE: STORY VIDEO (narrative film)
+CRITICAL RULES for story_video:
+- Build a clear narrative arc: Setup → Rising tension → Climax → Resolution across clips
+- Characters must have personality — name them, give them clear motivation
+- Clip 1: establish the world and main character, hook viewer emotionally
+- Middle clips: develop the conflict or journey
+- Last clip: emotional resolution + brand/product appears naturally as part of the story
+- Prioritize emotional beats over direct product promotion`;
+
+    case 'digital_human':
+      return `
+PROJECT TYPE: DIGITAL HUMAN AD (presenter showcase)
+CRITICAL RULES for digital_human:
+- Every clip MUST include an AI presenter/avatar character speaking to camera
+- Presenter style: professional, approachable, relatable — like a real person
+- Presenter MUST be consistent: same face, outfit, background across all clips
+- Clip 1: Presenter introduces themselves and the product/topic with energy
+- Middle clips: Presenter demonstrates or explains features (talking head + product shots)
+- Last clip: Presenter delivers CTA directly to camera with confident smile
+- character field REQUIRED in every clip — describe the presenter design in detail`;
+
+    default:
+      return `
+PROJECT TYPE: GENERAL (default)
+Create a balanced, premium ad video — engaging visuals, clear messaging, brand consistent.`;
+  }
+}
+
+// ── output language map ───────────────────────────────────────────────────────
+const OUTPUT_LANGUAGE_NAMES = {
+  id: 'Bahasa Indonesia',
+  en: 'English',
+  th: 'Thai (ภาษาไทย)',
+  vi: 'Vietnamese (Tiếng Việt)',
+  zh: 'Mandarin Chinese (普通话)',
+  hi: 'Hindi (हिन्दी)',
+  es: 'Spanish (Español)',
+  pt: 'Portuguese (Português)',
+  ar: 'Arabic (العربية)',
+  ko: 'Korean (한국어)',
+  ja: 'Japanese (日本語)',
+};
+
 // ── Audio dimension rules by voType + clip duration ──────────────────────────
 /**
  * Returns rules + JSON spec for the audio dimension block.
@@ -360,11 +441,16 @@ function buildClipSchema(arLabel, clipDuration, flags, referenceImages, audioRul
 
 // ── build full storyboard from scratch ───────────────────────────────────────
 
-async function buildStoryboard({ prompt, mode, duration, referenceImages = [], aspectRatio = 'portrait', clipDuration = 10, voType = 'narration' }) {
+async function buildStoryboard({ prompt, mode, duration, referenceImages = [], aspectRatio = 'portrait', clipDuration = 10, voType = 'narration', visualStyle = 'premium_3d', scriptText = null, projectType = 'default', outputLanguage = 'id' }) {
   const totalClips = Math.ceil(duration / clipDuration);
   const arLabel = ASPECT_RATIO_LABELS[aspectRatio] || '9:16';
   const audio = getAudioRules(voType, clipDuration);
-  const flags = buildConditionalContext(prompt, referenceImages);
+  const styleDesc = VISUAL_STYLE_PRESETS[visualStyle] || DEFAULT_VISUAL_STYLE;
+  const projectRules = getProjectTypeRules(projectType);
+  const langName = OUTPUT_LANGUAGE_NAMES[outputLanguage] || 'Bahasa Indonesia';
+  // When scriptText is provided, also use it as the brief context for conditional detection
+  const contextForDetection = scriptText ? `${prompt}\n${scriptText}` : prompt;
+  const flags = buildConditionalContext(contextForDetection, referenceImages);
 
   // Reference images context — classify each image and build enforcement rules
   let refCtx = '';
@@ -397,10 +483,10 @@ CHARACTER REFERENCE (${characterRefs.map(r => r.tag).join(', ')}):
   const clipSchema = buildClipSchema(arLabel, clipDuration, flags, referenceImages, audio, totalClips);
 
   const voSentenceNote = audio.sentenceCount
-    ? `- audioDimension.voScript: MUST be ${audio.sentenceCount} connected sentences that flow as one ${audio.type === 'dialogue' ? 'character speech' : 'narration'}`
+    ? `- audioDimension.voScript: MUST be ${audio.sentenceCount} connected sentences in ${langName} that flow as one ${audio.type === 'dialogue' ? 'character speech' : 'narration'}`
     : `- soundDesign: be ASMR-specific — list every physical sound in sequence`;
 
-  const systemPrompt = `You are a world-class AI video director and ad copywriter for premium Indonesian brands.
+  const systemPrompt = `You are a world-class AI video director and ad copywriter creating premium video content.
 
 You generate STRUCTURED JSON storyboards for Grok AI video generation.
 Each clip is a JSON object with structured fields that mirror GeminiGen's Advanced Prompt UI.
@@ -411,7 +497,9 @@ MISSION: Produce ad-agency quality briefs. Every field must be film-director spe
 FORMAT CONTEXT:
 - ${clipDuration}s per clip, ${arLabel} aspect ratio, ${mode || 'normal'} generation mode
 - Clips are independently generated (no chaining) — each must be visually self-contained
-- All voScript/audioDimension text in Bahasa Indonesia; all other fields in English
+- All voScript/audioDimension text in ${langName}; all other fields in English
+- VISUAL STYLE (apply to every clip): ${styleDesc}
+${projectRules}
 ${refCtx}
 ${audio.rules}
 
@@ -420,7 +508,7 @@ CORE FIELD QUALITY STANDARDS:
 - action: MUST have Enter/Mid/Peak sub-beats. NEVER write "appears", "showcases", "presents"
 - setting: name the location + describe its visual atmosphere in 1-2 sentences
 - lighting: be specific — color temperature, direction, source type
-- visualStyle: name the render style + key visual qualities
+- visualStyle: MUST match the preset style: "${styleDesc}" — keep this consistent across ALL clips
 - cameraShot: describe the full progression — opening frame → movement → closing frame
 ${voSentenceNote}
 - textOverlay: real ad copy — punchy, no typos, brand-relevant
@@ -442,11 +530,36 @@ GENERATION MODE STYLE:
 
 Return ONLY a valid JSON array with exactly ${totalClips} clip objects. No markdown, no text outside JSON.`;
 
-  const userPrompt = `Create a ${totalClips}-clip premium ad storyboard for:
+  // Script mode: adapt existing script text into clips instead of generating from scratch
+  const userPrompt = scriptText
+    ? `You have an existing ad script to adapt into a ${totalClips}-clip video storyboard.
+
+BRAND BRIEF: "${prompt}"
+
+EXISTING AD SCRIPT:
+"""
+${scriptText}
+"""
+
+Your job: Break this script into exactly ${totalClips} clips of ${clipDuration}s each.
+- Divide the script text evenly across clips — each clip gets its own section of copy
+- The voScript per clip = the dialogue/narration for THAT clip's time slot
+- Visual scenes must match and amplify what the script copy says
+- Mode: ${mode || 'normal'} | Format: ${arLabel} | Audio: ${audio.type.toUpperCase()}
+
+MANDATORY RULES:
+1. voScript per clip = the EXACT portion of the script for that clip's ${clipDuration}s slot
+2. Each clip must be visually self-contained — no "continued from previous"
+3. action = Enter/Mid/Peak sub-beats only — NEVER "appears"/"showcases"
+4. ONLY include conditional fields if relevant to the brief
+
+Return JSON array of exactly ${totalClips} objects:
+${clipSchema}`
+    : `Create a ${totalClips}-clip premium ad storyboard for:
 
 "${prompt}"
 
-Mode: ${mode || 'normal'} | Format: ${arLabel} | ${clipDuration}s per clip | Total: ${duration}s | Audio: ${audio.type.toUpperCase()}
+Mode: ${mode || 'normal'} | Format: ${arLabel} | ${clipDuration}s per clip | Total: ${duration}s | Audio: ${audio.type.toUpperCase()} | Style: ${visualStyle}
 
 MANDATORY RULES:
 1. Audio type = ${audio.type.toUpperCase()} — follow the audio dimension rules exactly
@@ -472,11 +585,14 @@ ${clipSchema}`;
 
 // ── refresh from a specific clip index ───────────────────────────────────────
 
-async function refreshFromIndex({ prompt, mode, existingClips, fromIndex, totalClips, hint, referenceImages = [], aspectRatio = 'portrait', clipDuration = 10, voType = 'narration' }) {
+async function refreshFromIndex({ prompt, mode, existingClips, fromIndex, totalClips, hint, referenceImages = [], aspectRatio = 'portrait', clipDuration = 10, voType = 'narration', visualStyle = 'premium_3d', projectType = 'default', outputLanguage = 'id' }) {
   const clipsToKeep = existingClips.slice(0, fromIndex);
   const clipsToGenerate = totalClips - fromIndex;
   const arLabel = ASPECT_RATIO_LABELS[aspectRatio] || '9:16';
   const audio = getAudioRules(voType, clipDuration);
+  const styleDesc = VISUAL_STYLE_PRESETS[visualStyle] || DEFAULT_VISUAL_STYLE;
+  const projectRules = getProjectTypeRules(projectType);
+  const langName = OUTPUT_LANGUAGE_NAMES[outputLanguage] || 'Bahasa Indonesia';
   const flags = buildConditionalContext(prompt, referenceImages);
 
   const contextStr = clipsToKeep.length > 0
@@ -507,6 +623,9 @@ ${productRefs.length > 0 ? `EVERY clip's product field MUST reference: ${product
   const systemPrompt = `You are a world-class AI video director continuing an existing ad storyboard.
 Generate clips that naturally continue the narrative, maintaining visual and brand consistency.
 ${clipDuration}s per clip, ${arLabel} aspect ratio, independently generated.
+VISUAL STYLE (apply to every clip): ${styleDesc}
+All voScript/audioDimension text in ${langName}; all other fields in English.
+${projectRules}
 ${refCtx}
 ${audio.rules}
 Same quality standards: specific actions, detailed settings, proper audio dimension, proper conditional fields only.`;
@@ -632,4 +751,77 @@ function parseClipsFromResponse(raw, expectedCount, startNumber = 1, arLabel = '
   });
 }
 
-module.exports = { buildStoryboard, refreshFromIndex };
+// ── A/B Hook Variants generator ───────────────────────────────────────────────
+/**
+ * Generate 5 alternative hook variations for clip 1 of an ad.
+ * Each hook has a different psychological angle.
+ *
+ * @param {object} params
+ * @param {string} params.brief - The original ad brief
+ * @param {string} params.projectType - 'story' | 'product_promo' | 'digital_human' | 'default'
+ * @param {string} params.voType - VO type for the hook
+ * @param {string} params.outputLanguage - Language code e.g. 'id', 'en'
+ * @param {string} params.visualStyle - visual style preset key
+ * @param {number} params.clipDuration - seconds per clip
+ * @returns {Promise<Array<{ type, label, voScript, opening, angle }>>}
+ */
+async function generateHookVariants({ brief, projectType = 'default', voType = 'narration', outputLanguage = 'id', visualStyle = 'premium_3d', clipDuration = 10 }) {
+  const langName = OUTPUT_LANGUAGE_NAMES[outputLanguage] || 'Bahasa Indonesia';
+  const audio = getAudioRules(voType, clipDuration);
+  const sentences = audio.sentenceCount || 3;
+  const wordRange = audio.wordRange || '38–52';
+
+  const systemPrompt = `You are a world-class ad copywriter and video director specializing in viral social media hooks.
+Generate 5 distinctly different opening hooks for the first clip of an ad video.
+Each hook uses a different psychological angle to capture attention in the first 3 seconds.
+All VO scripts must be in ${langName}.`;
+
+  const userPrompt = `Ad Brief: "${brief}"
+Project Type: ${projectType}
+VO Style: ${voType}
+Clip Duration: ${clipDuration}s (hook must fill exactly ${sentences} sentences, ${wordRange} words)
+
+Generate exactly 5 hook variants. Each must be fundamentally different in approach.
+
+Required hook types:
+1. PROBLEM HOOK: Opens with the audience's pain point ("Capek dengan...?" / "Tired of...?")
+2. CURIOSITY HOOK: Opens with a surprising claim or unexpected fact
+3. SOCIAL_PROOF HOOK: Opens with results, numbers, or testimonial angle ("Ribuan orang sudah..." / "10,000 people...")
+4. DIRECT HOOK: Opens by immediately naming the product/benefit (no lead-up)
+5. EMOTIONAL HOOK: Opens with a relatable emotional moment or story beat
+
+Return ONLY valid JSON array with exactly 5 objects:
+[
+  {
+    "type": "problem",
+    "label": "Problem Hook",
+    "voScript": "<${sentences} connected sentences in ${langName}, ${wordRange} words — hook must be the opening ${clipDuration}s of a full ad>",
+    "opening": "<first 8-10 words only — the actual opening line>",
+    "angle": "<1 sentence describing the psychological angle used>"
+  },
+  ... (5 total)
+]`;
+
+  const raw = await chatCompletion({
+    model: MODEL,
+    messages: [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: userPrompt },
+    ],
+    maxTokens: 1500,
+    temperature: 0.9,
+  });
+
+  const match = raw.match(/\[[\s\S]*\]/);
+  if (!match) throw new Error('Failed to generate hook variants: no JSON array found');
+
+  try {
+    const hooks = JSON.parse(match[0]);
+    if (!Array.isArray(hooks) || hooks.length === 0) throw new Error('Empty hooks array');
+    return hooks;
+  } catch (e) {
+    throw new Error(`Hook variant parsing failed: ${e.message}`);
+  }
+}
+
+module.exports = { buildStoryboard, refreshFromIndex, generateHookVariants };

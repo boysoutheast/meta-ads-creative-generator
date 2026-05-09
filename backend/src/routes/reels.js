@@ -77,7 +77,7 @@ function saveReferenceImages(sessionId, rawImages) {
 const {
   createSession, saveSession, getSession, auditLog, cleanupOldSessions,
 } = require('../services/sessionStore');
-const { buildStoryboard, refreshFromIndex } = require('../services/storyboardBuilder');
+const { buildStoryboard, refreshFromIndex, generateHookVariants } = require('../services/storyboardBuilder');
 const { generateSceneImages } = require('../services/sceneImageService');
 const {
   cleanupAll, sweepExpiredMerged,
@@ -96,6 +96,9 @@ const VALID_CLIP_DURATIONS = [6, 10, 15];
 const VALID_ASPECT_RATIOS = ['portrait', 'landscape', 'square', 'vertical', 'horizontal'];
 const VALID_RESOLUTIONS = ['480p', '720p'];
 const VALID_VO_TYPES = ['narration', 'dialogue', 'asmr', 'demo', 'story'];
+const VALID_VISUAL_STYLES = ['premium_3d', 'realistic', 'anime', 'cinematic', 'cartoon', 'ghibli', 'makoto_shinkai', 'chibi', 'pixel_art', 'chinese_cg'];
+const VALID_PROJECT_TYPES = ['default', 'story', 'product_promo', 'digital_human'];
+const VALID_OUTPUT_LANGUAGES = ['id', 'en', 'th', 'vi', 'zh', 'hi', 'es', 'pt', 'ar', 'ko', 'ja'];
 
 // ── SSE helper ────────────────────────────────────────────────────────────────
 
@@ -122,6 +125,10 @@ router.post('/build-storyboard', async (req, res) => {
     resolution = '720p',
     clipDuration = 10,
     voType = 'narration',
+    visualStyle = 'premium_3d',
+    projectType = 'default',
+    outputLanguage = 'id',
+    scriptText = null,
     referenceImages: rawRefImages = [],
   } = req.body;
 
@@ -134,6 +141,10 @@ router.post('/build-storyboard', async (req, res) => {
   const ar = VALID_ASPECT_RATIOS.includes(aspectRatio) ? aspectRatio : 'portrait';
   const res_ = VALID_RESOLUTIONS.includes(resolution) ? resolution : '720p';
   const vt = VALID_VO_TYPES.includes(voType) ? voType : 'narration';
+  const vs = VALID_VISUAL_STYLES.includes(visualStyle) ? visualStyle : 'premium_3d';
+  const pt = VALID_PROJECT_TYPES.includes(projectType) ? projectType : 'default';
+  const lang = VALID_OUTPUT_LANGUAGES.includes(outputLanguage) ? outputLanguage : 'id';
+  const st = (scriptText && typeof scriptText === 'string' && scriptText.trim()) ? scriptText.trim() : null;
 
   // Validate referenceImages count upfront
   if (!Array.isArray(rawRefImages)) {
@@ -145,8 +156,8 @@ router.post('/build-storyboard', async (req, res) => {
     });
   }
 
-  const session = createSession({ prompt: prompt.trim(), mode, duration: dur, aspectRatio: ar, resolution: res_, clipDuration: clipDur, voType: vt });
-  auditLog(session, 'info', 'SESSION_CREATED', { prompt: prompt.trim(), mode, duration: dur, aspectRatio: ar, resolution: res_, clipDuration: clipDur, voType: vt });
+  const session = createSession({ prompt: prompt.trim(), mode, duration: dur, aspectRatio: ar, resolution: res_, clipDuration: clipDur, voType: vt, visualStyle: vs, projectType: pt, outputLanguage: lang, scriptText: st });
+  auditLog(session, 'info', 'SESSION_CREATED', { prompt: prompt.trim(), mode, duration: dur, aspectRatio: ar, resolution: res_, clipDuration: clipDur, voType: vt, visualStyle: vs, projectType: pt, outputLanguage: lang, hasScript: !!st });
 
   // Save session immediately so crash recovery can find it
   await saveSession(session);
@@ -174,6 +185,10 @@ router.post('/build-storyboard', async (req, res) => {
       aspectRatio: ar,
       clipDuration: clipDur,
       voType: vt,
+      visualStyle: vs,
+      projectType: pt,
+      outputLanguage: lang,
+      scriptText: st,
     });
 
     session.storyboard = storyboard;
@@ -231,6 +246,9 @@ router.post('/refresh-clips', async (req, res) => {
       aspectRatio: session.aspectRatio || 'portrait',
       clipDuration: session.clipDuration || 10,
       voType: session.voType || 'narration',
+      visualStyle: session.visualStyle || 'premium_3d',
+      projectType: session.projectType || 'default',
+      outputLanguage: session.outputLanguage || 'id',
     });
 
     session.storyboard = newStoryboard;
@@ -255,6 +273,46 @@ router.post('/refresh-clips', async (req, res) => {
     console.error('[reels/refresh-clips]', err.message);
     auditLog(session, 'error', 'REFRESH_ERROR', { error: err.message });
     await saveSession(session);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// ── POST /generate-hooks ─────────────────────────────────────────────────────
+// Generate 5 A/B hook variants for clip 1 of an ad.
+
+router.post('/generate-hooks', async (req, res) => {
+  const { sessionId, brief } = req.body;
+
+  if (!sessionId && !brief) {
+    return res.status(400).json({ error: 'sessionId or brief required' });
+  }
+
+  let resolvedBrief = brief;
+  let sessionParams = { projectType: 'default', voType: 'narration', outputLanguage: 'id', visualStyle: 'premium_3d', clipDuration: 10 };
+
+  // If sessionId provided, pull context from session
+  if (sessionId) {
+    const session = await getSession(sessionId);
+    if (!session) return res.status(404).json({ error: 'Session not found' });
+    resolvedBrief = resolvedBrief || session.prompt;
+    sessionParams = {
+      projectType: session.projectType || 'default',
+      voType: session.voType || 'narration',
+      outputLanguage: session.outputLanguage || 'id',
+      visualStyle: session.visualStyle || 'premium_3d',
+      clipDuration: session.clipDuration || 10,
+    };
+  }
+
+  if (!resolvedBrief || !resolvedBrief.trim()) {
+    return res.status(400).json({ error: 'brief is required' });
+  }
+
+  try {
+    const hooks = await generateHookVariants({ brief: resolvedBrief, ...sessionParams });
+    return res.json({ hooks });
+  } catch (err) {
+    console.error('[reels/generate-hooks]', err.message);
     return res.status(500).json({ error: err.message });
   }
 });
@@ -391,6 +449,7 @@ router.get('/session/:sessionId', async (req, res) => {
     resolution: session.resolution || '720p',
     clipDuration: session.clipDuration || 10,
     voType: session.voType || 'narration',
+    visualStyle: session.visualStyle || 'premium_3d',
     storyboard: publicStoryboard,
     clips: session.clips.map(c => ({
       index: c.index,
@@ -448,6 +507,44 @@ router.get('/download/:sessionId', async (req, res) => {
 
   stream.on('error', (err) => {
     console.error('[reels/download] stream error:', err.message);
+  });
+});
+
+// ── POST /edit-clip ───────────────────────────────────────────────────────────
+// Inline edits a storyboard clip's text fields — visualSummary and/or voScript.
+// Does NOT regenerate via GPT-4o — just overwrites the stored text in session.
+
+router.post('/edit-clip', async (req, res) => {
+  const { sessionId, clipIndex, visualSummary, voScript } = req.body;
+
+  if (!sessionId) return res.status(400).json({ error: 'sessionId required' });
+  if (typeof clipIndex !== 'number' || clipIndex < 0) {
+    return res.status(400).json({ error: 'clipIndex must be a non-negative number' });
+  }
+
+  const session = await getSession(sessionId);
+  if (!session) return res.status(404).json({ error: 'Session not found or expired' });
+
+  const clip = session.storyboard[clipIndex];
+  if (!clip) {
+    return res.status(404).json({ error: `No clip at index ${clipIndex}` });
+  }
+
+  // Apply edits — only update fields that were sent
+  if (typeof visualSummary === 'string') clip.visualSummary = visualSummary.trim();
+  if (typeof voScript === 'string') clip.voScript = voScript.trim();
+
+  auditLog(session, 'info', `CLIP_${clipIndex + 1}_EDITED`, {
+    hasVisualSummary: typeof visualSummary === 'string',
+    hasVoScript: typeof voScript === 'string',
+  });
+
+  await saveSession(session);
+
+  return res.json({
+    clipNumber: clip.clipNumber,
+    visualSummary: clip.visualSummary,
+    voScript: clip.voScript,
   });
 });
 

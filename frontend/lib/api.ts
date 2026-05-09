@@ -190,6 +190,9 @@ export type ReelsAspectRatio = 'portrait' | 'landscape' | 'square' | 'vertical' 
 export type ReelsResolution = '480p' | '720p'
 export type ReelsClipDuration = 6 | 10 | 15
 export type ReelsVoType = 'narration' | 'dialogue' | 'asmr' | 'demo' | 'story'
+export type ReelsVisualStyle = 'premium_3d' | 'realistic' | 'anime' | 'cinematic' | 'cartoon' | 'ghibli' | 'makoto_shinkai' | 'chibi' | 'pixel_art' | 'chinese_cg'
+export type ReelsProjectType = 'default' | 'story' | 'product_promo' | 'digital_human'
+export type ReelsOutputLanguage = 'id' | 'en' | 'th' | 'vi' | 'zh' | 'hi' | 'es' | 'pt' | 'ar' | 'ko' | 'ja'
 
 /** Step 1 — GPT-4o builds storyboard, creates session */
 export async function buildStoryboard(payload: {
@@ -200,6 +203,10 @@ export async function buildStoryboard(payload: {
   resolution?: ReelsResolution
   clipDuration?: ReelsClipDuration
   voType?: ReelsVoType
+  visualStyle?: ReelsVisualStyle
+  projectType?: ReelsProjectType
+  outputLanguage?: ReelsOutputLanguage
+  scriptText?: string | null
   referenceImages?: ReferenceImageInput[]
 }): Promise<{
   sessionId: string
@@ -228,6 +235,34 @@ export async function refreshClips(payload: {
   hint?: string
 }): Promise<{ storyboard: PublicClip[] }> {
   const res = await api.post('/reels/refresh-clips', payload)
+  return res.data
+}
+
+/** Inline edit a storyboard clip's text fields (no regeneration) */
+export async function editClip(payload: {
+  sessionId: string
+  clipIndex: number
+  visualSummary?: string
+  voScript?: string
+}): Promise<{ clipNumber: number; visualSummary: string; voScript: string }> {
+  const res = await api.post('/reels/edit-clip', payload)
+  return res.data
+}
+
+/** Generate 5 A/B hook variants for clip 1 */
+export async function generateHooks(payload: {
+  sessionId?: string
+  brief?: string
+}): Promise<{
+  hooks: Array<{
+    type: string
+    label: string
+    voScript: string
+    opening: string
+    angle: string
+  }>
+}> {
+  const res = await api.post('/reels/generate-hooks', payload)
   return res.data
 }
 

@@ -155,7 +155,7 @@ async function deleteSession(sessionId) {
 
 // ── factory ───────────────────────────────────────────────────────────────────
 
-function createSession({ prompt, mode, duration, aspectRatio = 'portrait', resolution = '720p', clipDuration = 10, voType = 'narration' }) {
+function createSession({ prompt, mode, duration, aspectRatio = 'portrait', resolution = '720p', clipDuration = 10, voType = 'narration', visualStyle = 'premium_3d', projectType = 'default', outputLanguage = 'id', scriptText = null }) {
   return {
     sessionId: uuidv4(),
     createdAt: new Date().toISOString(),
@@ -171,6 +171,10 @@ function createSession({ prompt, mode, duration, aspectRatio = 'portrait', resol
     resolution,     // 480p | 720p
     clipDuration,   // 6 | 10 | 15 seconds per clip
     voType,         // narration | dialogue | asmr | demo | story
+    visualStyle,    // premium_3d | realistic | anime | cinematic | cartoon | ghibli | makoto_shinkai | chibi | pixel_art | chinese_cg
+    projectType,    // default | story | product_promo | digital_human
+    outputLanguage, // id | en | th | vi | zh | hi | es | pt | ar | ko | ja
+    scriptText,     // null (brief mode) | string (adapt existing script)
     storyboard: [],          // { clipNumber, visualSummary, voScript, grokPrompt, sceneImageUrl, technicalConfig }
     referenceImageUrls: [],  // { tag, label, url } — user-uploaded reference images
     clips: [],               // { index, status, uuid, videoUrl, thumbnailUrl, attempts, completedAt, error }

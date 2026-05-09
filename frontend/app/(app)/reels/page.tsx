@@ -13,9 +13,10 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select'
 import {
-  buildStoryboard, refreshClips, generateSceneImages,
+  buildStoryboard, refreshClips, generateSceneImages, editClip, generateHooks,
   type PublicClip, type ReferenceImageInput,
-  type ReelsAspectRatio, type ReelsResolution, type ReelsClipDuration, type ReelsVoType,
+  type ReelsAspectRatio, type ReelsResolution, type ReelsClipDuration, type ReelsVoType, type ReelsVisualStyle,
+  type ReelsProjectType, type ReelsOutputLanguage,
 } from '@/lib/api'
 import { pushStoredSession } from '@/lib/reels-sessions'
 import { StoryboardClipCard } from '@/components/reels/StoryboardClipCard'
@@ -69,6 +70,40 @@ const VO_TYPE_OPTIONS: { value: ReelsVoType; label: string; desc: string; icon: 
   { value: 'story',     label: 'Emotional Story', desc: 'Narrative arc — connect, then convert', icon: '✨' },
 ]
 
+const VISUAL_STYLE_OPTIONS: { value: ReelsVisualStyle; label: string; desc: string; icon: string; hot?: boolean }[] = [
+  { value: 'premium_3d',     label: '3D Premium',       desc: 'Glossy 3D semi-cartoon, volumetric light', icon: '💎' },
+  { value: 'realistic',      label: 'Realistic',        desc: 'Live-action cinematic, RED camera look',   icon: '🎬' },
+  { value: 'anime',          label: 'Anime JP/KR',      desc: 'Japanese anime, vibrant saturated colors', icon: '⛩️', hot: true },
+  { value: 'cinematic',      label: 'Cinematic',        desc: 'Anamorphic lens, golden hour grade',       icon: '🎞️' },
+  { value: 'cartoon',        label: 'Pixar 3D',         desc: 'Pixar-style 3D, bright rounded shapes',   icon: '🎨' },
+  { value: 'ghibli',         label: 'Ghibli',           desc: 'Watercolor backgrounds, Ghibli magic',    icon: '🌿' },
+  { value: 'makoto_shinkai', label: 'Shinkai Film',     desc: 'Hyperdetailed cityscape, lens flare',      icon: '🌆' },
+  { value: 'chibi',          label: 'Chibi Cute',       desc: 'Super-deformed kawaii, pastel colors',     icon: '🌸' },
+  { value: 'pixel_art',      label: 'Pixel Art',        desc: 'Retro 16-bit aesthetic, chunky sprites',   icon: '👾' },
+  { value: 'chinese_cg',     label: 'Donghua 3D',       desc: 'Chinese 3D animation, wuxia aesthetic',   icon: '🐉' },
+]
+
+const PROJECT_TYPE_OPTIONS: { value: ReelsProjectType; label: string; desc: string; icon: string }[] = [
+  { value: 'product_promo', label: 'Product Promo',    desc: 'Commercial ad — product always center stage, ends with CTA', icon: '📦' },
+  { value: 'story',         label: 'Story Video',      desc: 'Narrative film — emotional arc, product appears naturally',   icon: '🎭' },
+  { value: 'digital_human', label: 'Digital Human Ad', desc: 'AI presenter talks to camera, showcases product',             icon: '🤖' },
+  { value: 'default',       label: 'General',          desc: 'Balanced creative — good for any brief',                     icon: '✨' },
+]
+
+const OUTPUT_LANGUAGE_OPTIONS: { value: ReelsOutputLanguage; label: string; flag: string }[] = [
+  { value: 'id', label: 'Bahasa Indonesia', flag: '🇮🇩' },
+  { value: 'en', label: 'English',          flag: '🇬🇧' },
+  { value: 'th', label: 'Thai',             flag: '🇹🇭' },
+  { value: 'vi', label: 'Vietnamese',       flag: '🇻🇳' },
+  { value: 'zh', label: 'Mandarin',         flag: '🇨🇳' },
+  { value: 'ko', label: 'Korean',           flag: '🇰🇷' },
+  { value: 'ja', label: 'Japanese',         flag: '🇯🇵' },
+  { value: 'hi', label: 'Hindi',            flag: '🇮🇳' },
+  { value: 'es', label: 'Spanish',          flag: '🇪🇸' },
+  { value: 'pt', label: 'Portuguese',       flag: '🇵🇹' },
+  { value: 'ar', label: 'Arabic',           flag: '🇸🇦' },
+]
+
 // ─── types ───────────────────────────────────────────────────────────────────
 
 type Step = 'input' | 'storyboard'
@@ -106,7 +141,18 @@ export default function ReelsPage() {
   const [resolution, setResolution] = useState<ReelsResolution>('720p')
   const [clipDuration, setClipDuration] = useState<ReelsClipDuration>(10)
   const [voType, setVoType] = useState<ReelsVoType>('narration')
+  const [visualStyle, setVisualStyle] = useState<ReelsVisualStyle>('premium_3d')
+  const [projectType, setProjectType] = useState<ReelsProjectType>('product_promo')
+  const [outputLanguage, setOutputLanguage] = useState<ReelsOutputLanguage>('id')
+  // Script mode: paste existing ad script instead of free-form brief
+  const [scriptMode, setScriptMode] = useState(false)
+  const [scriptText, setScriptText] = useState('')
   const [building, setBuilding] = useState(false)
+  // Hook generator
+  const [hookPanelOpen, setHookPanelOpen] = useState(false)
+  const [hooksLoading, setHooksLoading] = useState(false)
+  const [generatedHooks, setGeneratedHooks] = useState<Array<{ type: string; label: string; voScript: string; opening: string; angle: string }>>([])
+  const [selectedHookIdx, setSelectedHookIdx] = useState<number | null>(null)
 
   // reference images
   const [refImages, setRefImages] = useState<RefImage[]>([])
@@ -180,7 +226,7 @@ export default function ReelsPage() {
         label: r.label,
         dataUrl: r.dataUrl,
       }))
-      const data = await buildStoryboard({ prompt: prompt.trim(), mode, duration, aspectRatio, resolution, clipDuration, voType, referenceImages })
+      const data = await buildStoryboard({ prompt: prompt.trim(), mode, duration, aspectRatio, resolution, clipDuration, voType, visualStyle, projectType, outputLanguage, scriptText: scriptMode && scriptText.trim() ? scriptText.trim() : null, referenceImages })
       setSessionId(data.sessionId)
       setStoryboard(data.storyboard)
       setSessionRefLabels(data.referenceImageUrls || [])
@@ -226,6 +272,34 @@ export default function ReelsPage() {
     }
   }
 
+  // ── Hook generator ────────────────────────────────────────────────────────
+
+  async function handleGenerateHooks() {
+    if (!sessionId && !prompt.trim()) return
+    setHooksLoading(true)
+    setGeneratedHooks([])
+    setSelectedHookIdx(null)
+    try {
+      const data = await generateHooks({ sessionId: sessionId || undefined, brief: prompt.trim() || undefined })
+      setGeneratedHooks(data.hooks)
+      setHookPanelOpen(true)
+    } catch (err: any) {
+      setError(err.message || 'Failed to generate hooks')
+    } finally {
+      setHooksLoading(false)
+    }
+  }
+
+  function applyHookToClip1(hookIdx: number) {
+    const hook = generatedHooks[hookIdx]
+    if (!hook || !storyboard.length) return
+    setSelectedHookIdx(hookIdx)
+    // Apply hook's voScript to clip 1
+    if (sessionId) {
+      handleEditClip(0, storyboard[0].visualSummary, hook.voScript)
+    }
+  }
+
   // ── Step 2: refresh clips ──────────────────────────────────────────────────
 
   async function handleRefresh(fromIndex: number) {
@@ -252,6 +326,16 @@ export default function ReelsPage() {
       setError(err.message || 'Refresh failed')
       setRefreshingFrom(null)
     }
+  }
+
+  // ── Step 2b: inline edit clip ─────────────────────────────────────────────
+
+  async function handleEditClip(idx: number, visualSummary: string, voScript: string) {
+    if (!sessionId) return
+    const updated = await editClip({ sessionId, clipIndex: idx, visualSummary, voScript })
+    setStoryboard(prev => prev.map((c, i) =>
+      i === idx ? { ...c, visualSummary: updated.visualSummary, voScript: updated.voScript } : c
+    ))
   }
 
   // ── Step 2 → redirect to Results Reels ────────────────────────────────────
@@ -306,6 +390,30 @@ export default function ReelsPage() {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
+            {/* Project Type selector — shown prominently at top */}
+            <div className="space-y-1.5">
+              <Label>Project Type</Label>
+              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+                {PROJECT_TYPE_OPTIONS.map(o => (
+                  <button
+                    key={o.value}
+                    type="button"
+                    disabled={building}
+                    onClick={() => setProjectType(o.value)}
+                    className={`flex flex-col items-start rounded-lg border px-3 py-2.5 text-left transition-colors disabled:opacity-50 ${
+                      projectType === o.value
+                        ? 'border-primary bg-primary/5 ring-1 ring-primary/30'
+                        : 'border-border/60 bg-background hover:border-primary/40 hover:bg-muted/30'
+                    }`}
+                  >
+                    <span className="text-lg mb-0.5">{o.icon}</span>
+                    <span className="text-xs font-semibold leading-tight">{o.label}</span>
+                    <span className="text-[10px] text-muted-foreground leading-tight mt-0.5">{o.desc}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
             <div className="space-y-1.5">
               <Label htmlFor="prompt">What's this reel about?</Label>
               <textarea
@@ -382,6 +490,82 @@ export default function ReelsPage() {
                   </button>
                 ))}
               </div>
+            </div>
+
+            {/* Row 1c: Visual Style Presets */}
+            <div className="space-y-1.5">
+              <Label>Visual Style</Label>
+              <p className="text-xs text-muted-foreground">Render style applied consistently across all clips.</p>
+              <div className="grid gap-2 sm:grid-cols-4 lg:grid-cols-5">
+                {VISUAL_STYLE_OPTIONS.map(o => (
+                  <button
+                    key={o.value}
+                    type="button"
+                    disabled={building}
+                    onClick={() => setVisualStyle(o.value)}
+                    className={`relative flex flex-col items-start rounded-lg border px-3 py-2 text-left transition-colors disabled:opacity-50 ${
+                      visualStyle === o.value
+                        ? 'border-primary bg-primary/5 ring-1 ring-primary/30'
+                        : 'border-border/60 bg-background hover:border-primary/40 hover:bg-muted/30'
+                    }`}
+                  >
+                    {o.hot && (
+                      <span className="absolute top-1.5 right-1.5 rounded-full bg-orange-500/90 px-1 py-px text-[8px] font-bold text-white leading-none">HOT</span>
+                    )}
+                    <span className="text-base mb-0.5">{o.icon}</span>
+                    <span className="text-xs font-semibold leading-tight">{o.label}</span>
+                    <span className="text-[10px] text-muted-foreground leading-tight mt-0.5">{o.desc}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Output Language */}
+            <div className="space-y-1.5">
+              <Label>Output Language</Label>
+              <p className="text-xs text-muted-foreground">Language for all voiceover scripts and on-screen text.</p>
+              <Select value={outputLanguage} onValueChange={v => setOutputLanguage(v as ReelsOutputLanguage)} disabled={building}>
+                <SelectTrigger className="w-full sm:w-64">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {OUTPUT_LANGUAGE_OPTIONS.map(o => (
+                    <SelectItem key={o.value} value={o.value}>
+                      <span className="mr-2">{o.flag}</span>{o.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Script Mode toggle */}
+            <div className="rounded-md border border-border/50 bg-muted/20 px-3 py-2.5 space-y-2">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium">Use Existing Script</p>
+                  <p className="text-xs text-muted-foreground">Paste your ad script — AI breaks it into clips instead of writing from scratch.</p>
+                </div>
+                <button
+                  type="button"
+                  disabled={building}
+                  onClick={() => setScriptMode(p => !p)}
+                  className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus-visible:outline-none disabled:opacity-50 ${
+                    scriptMode ? 'bg-primary' : 'bg-input'
+                  }`}
+                >
+                  <span className={`pointer-events-none inline-block h-4 w-4 rounded-full bg-background shadow-lg ring-0 transition-transform ${scriptMode ? 'translate-x-4' : 'translate-x-0'}`} />
+                </button>
+              </div>
+              {scriptMode && (
+                <textarea
+                  value={scriptText}
+                  onChange={e => setScriptText(e.target.value)}
+                  placeholder="Paste your full ad script here — dialogue, narration, or bullet points. AI will distribute it across clips and build matching visuals."
+                  rows={5}
+                  disabled={building}
+                  className="w-full resize-none rounded-md border bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
+                />
+              )}
             </div>
 
             {/* Row 2: Aspect Ratio + Resolution + Total Duration */}
@@ -499,11 +683,16 @@ export default function ReelsPage() {
             </div>
 
             <div className="rounded-md bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
-              AI will generate {Math.ceil(duration / clipDuration)} clip{Math.ceil(duration / clipDuration) > 1 ? 's' : ''} × {clipDuration}s
+              {PROJECT_TYPE_OPTIONS.find(p => p.value === projectType)?.icon}{' '}
+              {PROJECT_TYPE_OPTIONS.find(p => p.value === projectType)?.label}
+              {' · '}{Math.ceil(duration / clipDuration)} clip{Math.ceil(duration / clipDuration) > 1 ? 's' : ''} × {clipDuration}s
               {' · '}{resolution} {ASPECT_RATIO_OPTIONS.find(a => a.value === aspectRatio)?.label || aspectRatio}
               {' · '}{VO_TYPE_OPTIONS.find(v => v.value === voType)?.icon} {VO_TYPE_OPTIONS.find(v => v.value === voType)?.label}
+              {' · '}{VISUAL_STYLE_OPTIONS.find(s => s.value === visualStyle)?.icon} {VISUAL_STYLE_OPTIONS.find(s => s.value === visualStyle)?.label}
+              {' · '}{OUTPUT_LANGUAGE_OPTIONS.find(l => l.value === outputLanguage)?.flag} {OUTPUT_LANGUAGE_OPTIONS.find(l => l.value === outputLanguage)?.label}
               {' · '}Mode: {mode}
-              {refImages.length > 0 && ` · ${refImages.length} reference image${refImages.length > 1 ? 's' : ''}`}
+              {scriptMode && scriptText.trim() && ' · 📝 From script'}
+              {refImages.length > 0 && ` · ${refImages.length} ref img${refImages.length > 1 ? 's' : ''}`}
             </div>
 
             <Button
@@ -539,9 +728,11 @@ export default function ReelsPage() {
 
           {/* Prompt summary */}
           <div className="rounded-md bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
-            <span className="font-medium text-foreground">Brief:</span> {prompt.slice(0, 120)}{prompt.length > 120 ? '…' : ''}
-            {' · '}<span className="font-medium text-foreground">Mode:</span> {mode}
-            {' · '}<span className="font-medium text-foreground">{storyboard.length} clips · {storyboard.length * 10}s</span>
+            <span className="font-medium text-foreground">Brief:</span> {prompt.slice(0, 100)}{prompt.length > 100 ? '…' : ''}
+            {' · '}<span className="font-medium text-foreground">{PROJECT_TYPE_OPTIONS.find(p => p.value === projectType)?.icon} {PROJECT_TYPE_OPTIONS.find(p => p.value === projectType)?.label}</span>
+            {' · '}<span className="font-medium text-foreground">{VISUAL_STYLE_OPTIONS.find(s => s.value === visualStyle)?.icon} {VISUAL_STYLE_OPTIONS.find(s => s.value === visualStyle)?.label}</span>
+            {' · '}<span className="font-medium text-foreground">{OUTPUT_LANGUAGE_OPTIONS.find(l => l.value === outputLanguage)?.flag} {OUTPUT_LANGUAGE_OPTIONS.find(l => l.value === outputLanguage)?.label}</span>
+            {' · '}<span className="font-medium text-foreground">{storyboard.length} clips × {clipDuration}s</span>
           </div>
 
           {/* Reference image legend — only shown if session has refs */}
@@ -557,6 +748,58 @@ export default function ReelsPage() {
             </div>
           )}
 
+          {/* 🎯 A/B Hook Generator */}
+          <div className="rounded-md border border-orange-500/30 bg-orange-500/5 px-3 py-2.5">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-sm font-semibold text-orange-600 dark:text-orange-400">🎯 A/B Hook Generator</p>
+                <p className="text-xs text-muted-foreground">Generate 5 different opening hooks for Clip 1 — pick the one most likely to convert.</p>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleGenerateHooks}
+                disabled={hooksLoading}
+                className="shrink-0 border-orange-500/40 text-orange-600 hover:bg-orange-500/10 dark:text-orange-400"
+              >
+                {hooksLoading ? <><Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />Generating…</> : '⚡ Generate Hooks'}
+              </Button>
+            </div>
+
+            {/* Hook variants panel */}
+            {hookPanelOpen && generatedHooks.length > 0 && (
+              <div className="mt-3 space-y-2">
+                <p className="text-xs font-medium text-muted-foreground">Select a hook to apply to Clip 1:</p>
+                {generatedHooks.map((hook, i) => (
+                  <button
+                    key={hook.type}
+                    type="button"
+                    onClick={() => applyHookToClip1(i)}
+                    className={`w-full rounded-lg border px-3 py-2.5 text-left transition-colors ${
+                      selectedHookIdx === i
+                        ? 'border-orange-500/60 bg-orange-500/10 ring-1 ring-orange-500/30'
+                        : 'border-border/50 bg-background hover:border-orange-500/30 hover:bg-orange-500/5'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="text-[10px] font-bold uppercase tracking-wider rounded bg-muted px-1.5 py-0.5 text-muted-foreground">{hook.label}</span>
+                      {selectedHookIdx === i && <span className="text-[10px] text-orange-600 font-semibold dark:text-orange-400">✓ Applied</span>}
+                    </div>
+                    <p className="text-xs font-medium text-foreground">"{hook.opening}…"</p>
+                    <p className="text-[10px] text-muted-foreground mt-0.5">{hook.angle}</p>
+                  </button>
+                ))}
+                <button
+                  type="button"
+                  onClick={() => setHookPanelOpen(false)}
+                  className="text-[11px] text-muted-foreground hover:text-foreground"
+                >
+                  ↑ Collapse
+                </button>
+              </div>
+            )}
+          </div>
+
           {/* Clip cards */}
           <div className="space-y-3">
             {storyboard.map((clip, idx) => (
@@ -569,6 +812,7 @@ export default function ReelsPage() {
                 hint={hints[idx] || ''}
                 onHintChange={v => setHints(prev => ({ ...prev, [idx]: v }))}
                 onRefresh={() => handleRefresh(idx)}
+                onEdit={sessionId ? handleEditClip : undefined}
                 isRefreshing={refreshingFrom === idx}
                 isStale={refreshingFrom !== null && idx > refreshingFrom}
                 refLabels={sessionRefLabels}
@@ -583,7 +827,7 @@ export default function ReelsPage() {
             size="lg"
           >
             <Sparkles className="mr-2 h-4 w-4" />
-            Generate Reel ({storyboard.length} clips · {storyboard.length * 10}s) →
+            Generate Reel ({storyboard.length} clips · {storyboard.length * clipDuration}s) →
           </Button>
         </div>
       )}
