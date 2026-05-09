@@ -140,7 +140,14 @@ async function callGemini(parts, onProgress = NOOP) {
 function buildGeminiPrompt() {
   return `You are a video creative director analyzing a winning ad for Meta/TikTok advertising.
 Watch this video — analyze both the visuals AND audio/speech.
-Return ONLY valid JSON (no markdown, no backticks):
+
+CRITICAL OUTPUT RULES:
+- Return ONLY a single valid JSON object — no \`\`\`json code fences, no markdown, no commentary.
+- Escape every double-quote inside string values with backslash.
+- No literal newlines inside string values; use spaces instead.
+- Start your response with { and end with }.
+
+Schema:
 {
   "transcript": "full spoken words, empty string if no speech",
   "hookWords": "first 8-10 spoken words or on-screen hook text",
@@ -161,17 +168,104 @@ Return ONLY valid JSON (no markdown, no backticks):
 }`;
 }
 
+// Robust JSON extractor — handles Gemini wrapping in ```json ... ``` markdown,
+// trailing commas, unescaped newlines in strings. Falls back to per-field regex
+// extraction so we always recover SOMETHING usable.
+function extractBalancedJson(text) {
+  // Strip markdown code fences first
+  let s = text;
+  const fenceMatch = s.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  if (fenceMatch) s = fenceMatch[1];
+
+  // Find balanced { ... } via depth counter
+  const startIdx = s.indexOf('{');
+  if (startIdx === -1) return null;
+  let depth = 0;
+  let endIdx = -1;
+  let inString = false;
+  let escape = false;
+  for (let i = startIdx; i < s.length; i++) {
+    const ch = s[i];
+    if (escape) { escape = false; continue; }
+    if (ch === '\\') { escape = true; continue; }
+    if (ch === '"') { inString = !inString; continue; }
+    if (inString) continue;
+    if (ch === '{') depth++;
+    else if (ch === '}') {
+      depth--;
+      if (depth === 0) { endIdx = i; break; }
+    }
+  }
+  if (endIdx === -1) return null;
+  return s.slice(startIdx, endIdx + 1);
+}
+
+function regexExtractField(json, key) {
+  const re = new RegExp(`"${key}"\\s*:\\s*"((?:[^"\\\\]|\\\\.)*)"`);
+  const m = json.match(re);
+  if (!m) return '';
+  return m[1].replace(/\\"/g, '"').replace(/\\n/g, ' ').replace(/\\\\/g, '\\').trim();
+}
+
+function regexExtractArray(json, key) {
+  const re = new RegExp(`"${key}"\\s*:\\s*\\[([^\\]]*)\\]`);
+  const m = json.match(re);
+  if (!m) return [];
+  // Pull strings out of the array body
+  const items = [];
+  const itemRe = /"((?:[^"\\]|\\.)*)"/g;
+  let mm;
+  while ((mm = itemRe.exec(m[1])) !== null) items.push(mm[1].replace(/\\"/g, '"'));
+  return items;
+}
+
 function parseGeminiResponse(raw) {
-  try {
-    const m = raw.match(/\{[\s\S]*\}/);
-    if (m) {
-      const parsed = JSON.parse(m[0]);
+  const jsonStr = extractBalancedJson(raw);
+  if (jsonStr) {
+    // 1. Strict parse
+    try {
+      const parsed = JSON.parse(jsonStr);
       const { transcript = '', ...analysis } = parsed;
       return { analysis, transcript };
+    } catch (e1) {
+      // 2. Repair common issues: trailing commas, smart quotes, unescaped newlines in strings
+      const repaired = jsonStr
+        .replace(/,(\s*[}\]])/g, '$1')         // trailing commas
+        .replace(/[“”]/g, '"')       // smart quotes → straight
+        .replace(/[‘’]/g, "'")
+        .replace(/(:\s*"[^"]*?)\n([^"]*?")/g, '$1 $2'); // newlines inside strings
+      try {
+        const parsed = JSON.parse(repaired);
+        const { transcript = '', ...analysis } = parsed;
+        console.info('[Gemini] JSON parsed via repaired pass');
+        return { analysis, transcript };
+      } catch (e2) {
+        // 3. Last resort: regex-extract every field individually
+        console.warn('[Gemini] JSON parse failed, using regex fallback:', e2.message);
+        const transcript = regexExtractField(jsonStr, 'transcript');
+        return {
+          analysis: {
+            hookWords: regexExtractField(jsonStr, 'hookWords'),
+            overallStyle: regexExtractField(jsonStr, 'overallStyle') || 'Visual analysis (parser fallback)',
+            pacing: regexExtractField(jsonStr, 'pacing') || 'varied',
+            hookType: regexExtractField(jsonStr, 'hookType') || 'visual hook',
+            colorPalette: regexExtractArray(jsonStr, 'colorPalette'),
+            cameraMovement: regexExtractField(jsonStr, 'cameraMovement') || 'mixed',
+            emotionArc: regexExtractField(jsonStr, 'emotionArc') || 'engagement → desire → action',
+            musicVibe: regexExtractField(jsonStr, 'musicVibe') || 'uplifting',
+            scriptStructure: regexExtractField(jsonStr, 'scriptStructure') || 'inferred',
+            toneOfVoice: regexExtractField(jsonStr, 'toneOfVoice') || 'unknown',
+            keyMessages: regexExtractArray(jsonStr, 'keyMessages'),
+            scenes: [],
+            recommendedDuration: 30,
+          },
+          transcript,
+        };
+      }
     }
-  } catch (e) {
-    console.warn('[videoUrlAnalyzer] Gemini JSON parse failed:', e.message);
   }
+  // No JSON object found at all
+  console.warn('[Gemini] No JSON object found in response');
   return {
     analysis: {
       scenes: [], overallStyle: raw.slice(0, 200) || 'Analysis unavailable',
