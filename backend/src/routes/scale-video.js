@@ -1,7 +1,17 @@
 const express = require('express');
 const router = express.Router();
 const fs = require('fs');
+const crypto = require('crypto');
 const upload = require('../middleware/upload');
+
+// ─── In-memory job store for URL analysis polling ────────────────────────────
+// Key: jobId (UUID), Value: { status, log[], result, error, createdAt }
+// TTL: 30 minutes — cleaned up after client reads a completed job
+const URL_JOBS = new Map();
+const URL_JOB_TTL_MS = 30 * 60 * 1000;
+function cleanupUrlJob(jobId) {
+  setTimeout(() => URL_JOBS.delete(jobId), URL_JOB_TTL_MS);
+}
 const { analyzeVideoReference } = require('../services/videoAnalyzer');
 const {
   SCALING_ANGLES,
@@ -263,14 +273,12 @@ router.get('/remake/:remakeId', (req, res) => {
 });
 
 /**
- * POST /api/scale-video/analyze-from-url  (SSE)
- * Streams live progress events while downloading + analyzing a social media URL.
- * Body: { url: string, mode?: 'audio'|'full' }
+ * POST /api/scale-video/analyze-from-url
+ * Starts a background URL analysis job. Returns { jobId } immediately.
+ * Poll GET /analyze-from-url-status/:jobId for live log + result.
  *
- * SSE event types:
- *   { type: 'phase', phase: '...', message: '...', detail?: '...' }  ← live log
- *   { type: 'done', payload: { analysis, framesAnalyzed, filename, platform, transcript, mode, availableAngles } }
- *   { type: 'error', message: '...' }
+ * WHY POLLING: Railway's nginx proxy buffers small SSE writes regardless of
+ * X-Accel-Buffering header, breaking live streaming. Polling is reliable on any proxy.
  */
 router.post('/analyze-from-url', async (req, res) => {
   const { url, mode = 'full' } = req.body || {};
@@ -278,91 +286,58 @@ router.post('/analyze-from-url', async (req, res) => {
     return res.status(400).json({ error: 'url is required and must start with http' });
   }
 
-  // SSE setup
-  res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache, no-transform');
-  res.setHeader('Connection', 'keep-alive');
-  res.setHeader('X-Accel-Buffering', 'no');
-  res.flushHeaders();
+  const jobId = crypto.randomUUID();
+  const job = { status: 'running', log: [], result: null, error: null, createdAt: Date.now() };
+  URL_JOBS.set(jobId, job);
 
-  let clientGone = false;
-  req.on('close', () => { clientGone = true; });
-
-  const send = (data) => {
-    if (!res.writableEnded && !clientGone) {
-      try {
-        res.write(`data: ${JSON.stringify(data)}\n\n`);
-        if (typeof res.flush === 'function') res.flush();
-      } catch (_) { /* ignore write-after-close race */ }
+  // Run analysis in background — DO NOT await
+  (async () => {
+    const onProgress = (evt) => {
+      job.log.push({ ts: Date.now(), ...evt });
+    };
+    try {
+      onProgress({ phase: 'start', message: `Menerima URL: ${url.slice(0, 80)}` });
+      const { analysis, frames, transcript, platform, mode: usedMode } = await analyzeVideoFromUrl(url, mode, onProgress);
+      const availableAngles = Object.entries(SCALING_ANGLES).map(([key, val]) => ({
+        key, label: val.label, hook: val.hook,
+      }));
+      onProgress({ phase: 'finalizing', message: 'Analisis selesai ✓' });
+      job.result = { analysis, framesAnalyzed: frames, filename: `${platform}: ${url.slice(-50)}`, platform, transcript, mode: usedMode, availableAngles };
+      job.status = 'done';
+    } catch (err) {
+      const msg = err.message || 'Gagal menganalisis URL';
+      const isYtdlpMissing =
+        msg.includes('yt-dlp: command not found') || msg.includes("yt-dlp' is not recognized") ||
+        msg.includes('yt-dlp tidak terinstall') || (msg.includes('ENOENT') && msg.includes('yt-dlp')) ||
+        (err.code === 'ENOENT' && String(err.path || '').includes('yt-dlp'));
+      job.error = isYtdlpMissing
+        ? 'yt-dlp tidak tersedia. Untuk Instagram/TikTok gunakan Upload File manual, atau coba YouTube URL.'
+        : msg;
+      job.status = 'error';
     }
-  };
+  })();
 
-  // 5s pings — keeps Railway/nginx proxy alive (was 20s, too long for some proxies)
-  const ping = setInterval(() => {
-    if (!res.writableEnded && !clientGone) {
-      try { res.write(': ping\n\n'); } catch (_) {}
-    }
-  }, 5_000);
+  res.json({ jobId });
+});
 
-  const onProgress = (evt) => {
-    send({ type: 'phase', ts: Date.now(), ...evt });
-  };
+/**
+ * GET /api/scale-video/analyze-from-url-status/:jobId
+ * Poll for analysis job status + live log.
+ * Returns: { status: 'running'|'done'|'error', log: [], result?, error? }
+ */
+router.get('/analyze-from-url-status/:jobId', (req, res) => {
+  const job = URL_JOBS.get(req.params.jobId);
+  if (!job) return res.status(404).json({ error: 'Job not found or expired' });
 
-  // 5-minute hard guard — emits error event before Railway kills the connection (~6 min limit)
-  const GUARD_MS = 5 * 60 * 1000;
-  let guardFired = false;
-  const guardTimeout = setTimeout(() => {
-    guardFired = true;
-    send({ type: 'error', message: 'Analisis melebihi batas waktu 5 menit. Coba mode Audio atau upload file manual.' });
-    if (!res.writableEnded) res.end();
-  }, GUARD_MS);
+  res.json({
+    status: job.status,
+    log: job.log,
+    result: job.result,
+    error: job.error,
+  });
 
-  try {
-    onProgress({ phase: 'start', message: `Menerima URL: ${url.slice(0, 80)}` });
-
-    const { analysis, frames, transcript, platform, mode: usedMode } = await analyzeVideoFromUrl(url, mode, onProgress);
-
-    if (guardFired) return; // guard already closed the response
-
-    const availableAngles = Object.entries(SCALING_ANGLES).map(([key, val]) => ({
-      key,
-      label: val.label,
-      hook: val.hook,
-    }));
-
-    onProgress({ phase: 'finalizing', message: 'Menyiapkan response...' });
-
-    send({
-      type: 'done',
-      payload: {
-        analysis,
-        framesAnalyzed: frames,
-        filename: `${platform}: ${url.slice(-50)}`,
-        platform,
-        transcript,
-        mode: usedMode,
-        availableAngles,
-      },
-    });
-    res.end();
-  } catch (err) {
-    if (guardFired) return;
-    const msg = err.message || 'Gagal menganalisis URL';
-    const isYtdlpMissing =
-      msg.includes('yt-dlp: command not found') ||
-      msg.includes("yt-dlp' is not recognized") ||
-      msg.includes('yt-dlp tidak terinstall') ||
-      (msg.includes('ENOENT') && msg.includes('yt-dlp')) ||
-      (err.code === 'ENOENT' && String(err.path || '').includes('yt-dlp'));
-    const friendly = isYtdlpMissing
-      ? 'yt-dlp tidak tersedia. Untuk Instagram/TikTok gunakan Upload File manual, atau coba YouTube URL.'
-      : msg;
-    send({ type: 'error', message: friendly });
-    if (!res.writableEnded) res.end();
-  } finally {
-    clearTimeout(guardTimeout);
-    clearInterval(ping);
-  }
+  // Schedule cleanup once job is terminal
+  if (job.status !== 'running') cleanupUrlJob(req.params.jobId);
 });
 
 /**

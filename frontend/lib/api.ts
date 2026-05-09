@@ -556,74 +556,58 @@ export async function analyzeWinningVideoFromUrl(
   mode: 'audio' | 'full' = 'full',
   onEvent?: (evt: AnalyzeUrlEvent) => void,
 ): Promise<AnalyzeUrlDonePayload> {
-  // 6-minute client-side abort guard (server has 5-min guard; this is the safety net)
-  const controller = new AbortController()
-  const abortId = setTimeout(() => controller.abort(), 6 * 60 * 1000)
-
-  let response: Response
-  try {
-    response = await fetch(`${API_URL}/scale-video/analyze-from-url`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url, mode }),
-      signal: controller.signal,
-    })
-  } catch (fetchErr: any) {
-    if (fetchErr?.name === 'AbortError') throw new Error('Analisis timeout (>6 menit). Coba mode Audio atau upload file manual.')
-    throw fetchErr
-  } finally {
-    clearTimeout(abortId)
+  // Step 1: Start background job — returns { jobId } in < 100ms
+  const startRes = await fetch(`${API_URL}/scale-video/analyze-from-url`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url, mode }),
+  })
+  if (!startRes.ok) {
+    const errText = await startRes.text().catch(() => '')
+    throw new Error(`HTTP ${startRes.status}: ${errText}`)
   }
+  const { jobId } = await startRes.json() as { jobId: string }
 
-  if (!response.ok) throw new Error(`HTTP ${response.status}`)
+  // Step 2: Poll GET /analyze-from-url-status/:jobId every 2s
+  // Max 10 minutes of polling (300 × 2s)
+  const MAX_POLLS = 300
+  let seenLogCount = 0
+  let polls = 0
 
-  const reader = response.body!.getReader()
-  const decoder = new TextDecoder()
-  let buffer = ''
-  let donePayload: AnalyzeUrlDonePayload | null = null
+  while (polls < MAX_POLLS) {
+    await new Promise<void>((r) => setTimeout(r, 2000))
+    polls++
 
-  /** Process a single SSE block (lines separated by \n) */
-  const processBlock = (block: string) => {
-    for (const line of block.split('\n')) {
-      if (!line.startsWith('data: ')) continue
-      try {
-        const evt = JSON.parse(line.slice(6)) as AnalyzeUrlEvent
-        onEvent?.(evt)
-        if (evt.type === 'done') donePayload = evt.payload
-        if (evt.type === 'error') throw new Error(evt.message)
-      } catch (parseErr) {
-        // Only re-throw non-JSON errors (JSON parse failures are non-fatal)
-        if ((parseErr as Error).message && !(parseErr as Error).message.includes('JSON')) throw parseErr
-      }
+    let statusData: { status: string; log: any[]; result: AnalyzeUrlDonePayload | null; error: string | null }
+    try {
+      const statusRes = await fetch(`${API_URL}/scale-video/analyze-from-url-status/${jobId}`)
+      if (statusRes.status === 404) throw new Error('Job tidak ditemukan. Coba analisis ulang.')
+      if (!statusRes.ok) throw new Error(`Poll error HTTP ${statusRes.status}`)
+      statusData = await statusRes.json()
+    } catch (pollErr: any) {
+      // Network blip — retry silently (don't abort on transient failure)
+      if (polls < MAX_POLLS - 5) continue
+      throw pollErr
+    }
+
+    // Emit new log events to live UI
+    for (let i = seenLogCount; i < statusData.log.length; i++) {
+      const entry = statusData.log[i]
+      onEvent?.({ type: 'phase', ts: entry.ts, phase: entry.phase, message: entry.message, detail: entry.detail })
+    }
+    seenLogCount = statusData.log.length
+
+    if (statusData.status === 'done' && statusData.result) {
+      onEvent?.({ type: 'done', payload: statusData.result })
+      return statusData.result
+    }
+
+    if (statusData.status === 'error') {
+      throw new Error(statusData.error || 'Analisis gagal')
     }
   }
 
-  try {
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
-      buffer += decoder.decode(value, { stream: true })
-      // SSE messages are separated by \n\n — keep incomplete tail in buffer
-      const parts = buffer.split('\n\n')
-      buffer = parts.pop() ?? ''
-      for (const part of parts) processBlock(part)
-    }
-
-    // Flush decoder and process any leftover bytes that arrived without trailing \n\n
-    // (can happen when server closes the TCP connection immediately after the last write)
-    buffer += decoder.decode() // flush multi-byte chars
-    if (buffer.trim()) processBlock(buffer)
-  } finally {
-    reader.releaseLock()
-  }
-
-  if (!donePayload) {
-    throw new Error(
-      'Stream berakhir tanpa hasil. Kemungkinan: koneksi terputus, video terlalu panjang, atau server timeout. ' +
-      'Coba lagi atau gunakan mode Audio.'
-    )
-  }
-  return donePayload
+  throw new Error('Analisis timeout (>10 menit). Coba mode Audio atau upload file manual.')
 }
 
 /** Sprint 3 v2 — Translate winning-ad analysis + user intent → tailored GeminiGen video prompt */
