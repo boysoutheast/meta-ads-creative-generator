@@ -127,14 +127,28 @@ async function callGemini(parts, onProgress = NOOP) {
   onProgress({ phase: 'gemini_call', message: 'Mengirim ke Gemini 2.5 Flash...' });
   const { data } = await axios.post(
     GEMINI_ENDPOINT,
-    { contents: [{ role: 'user', parts }], generationConfig: { maxOutputTokens: 2048 } },
+    {
+      contents: [{ role: 'user', parts }],
+      // 8192 tokens > previous 2048 — schema requires ~600-800 tokens but transcripts can push it
+      generationConfig: {
+        maxOutputTokens: 8192,
+        temperature: 0.4,
+        responseMimeType: 'application/json',
+      },
+    },
     {
       headers: { Authorization: `Bearer ${config.apimart.apiKey}`, 'Content-Type': 'application/json' },
       timeout: 120000,
     }
   );
-  onProgress({ phase: 'gemini_done', message: 'Gemini selesai analisis ✓' });
-  return data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+  const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+  const finishReason = data?.candidates?.[0]?.finishReason || 'unknown';
+  onProgress({
+    phase: 'gemini_done',
+    message: `Gemini selesai (${text.length} chars, finish=${finishReason}) ✓`,
+    detail: text.slice(0, 120),
+  });
+  return text;
 }
 
 function buildGeminiPrompt() {
@@ -169,15 +183,22 @@ Schema:
 }
 
 // Robust JSON extractor — handles Gemini wrapping in ```json ... ``` markdown,
-// trailing commas, unescaped newlines in strings. Falls back to per-field regex
-// extraction so we always recover SOMETHING usable.
+// trailing commas, unescaped newlines in strings, AND truncated responses
+// (auto-pads missing closing braces). Returns extracted JSON string or null.
 function extractBalancedJson(text) {
-  // Strip markdown code fences first
   let s = text;
-  const fenceMatch = s.match(/```(?:json)?\s*([\s\S]*?)```/i);
-  if (fenceMatch) s = fenceMatch[1];
+  // 1. Strip markdown code fences (with or without closing fence)
+  const fenceWithClose = s.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  if (fenceWithClose) {
+    s = fenceWithClose[1];
+  } else {
+    // Truncated case: opening fence only, no closing
+    const fenceOpenOnly = s.match(/```(?:json)?\s*([\s\S]*)$/i);
+    if (fenceOpenOnly) s = fenceOpenOnly[1];
+  }
+  s = s.trim();
 
-  // Find balanced { ... } via depth counter
+  // 2. Find first { and walk to balanced } (string-aware so quotes inside don't confuse)
   const startIdx = s.indexOf('{');
   if (startIdx === -1) return null;
   let depth = 0;
@@ -196,8 +217,23 @@ function extractBalancedJson(text) {
       if (depth === 0) { endIdx = i; break; }
     }
   }
-  if (endIdx === -1) return null;
-  return s.slice(startIdx, endIdx + 1);
+
+  // 3. If we found balanced JSON, return it
+  if (endIdx !== -1) return s.slice(startIdx, endIdx + 1);
+
+  // 4. Truncated response: pad with closing braces equal to remaining depth
+  if (depth > 0) {
+    let recovered = s.slice(startIdx);
+    // If we ended inside a string, close it first
+    if (inString) recovered += '"';
+    // Trim a trailing comma if present
+    recovered = recovered.replace(/,\s*$/, '');
+    // Add missing closing braces
+    recovered += '}'.repeat(depth);
+    return recovered;
+  }
+
+  return null;
 }
 
 function regexExtractField(json, key) {
