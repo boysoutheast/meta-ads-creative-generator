@@ -130,41 +130,177 @@ async function verifyClips(sessionId, clipCount) {
   return verified;
 }
 
+// Feature 9: resolution scale map
+const SCALE_MAP = { '720p': '1280:720', '1080p': '1920:1080', '4k': '3840:2160' };
+
+// Feature 13: transition filters supported via xfade
+const VALID_TRANSITIONS = ['cut', 'fade', 'dissolve', 'wipeleft', 'zoom'];
+
 /**
- * FFmpeg concat all clips → merged.mp4
- * Returns outputPath
+ * Mix per-clip TTS audio onto each clip BEFORE merging.
+ * Returns array of dubbed clip paths (or original if no TTS for that clip).
+ *
+ * @param {string} sessionId
+ * @param {number} clipCount
+ * @param {Array<string|null>} ttsAudioPaths — aligned to clip indices
  */
-async function mergeClips(sessionId, clipCount, onProgress) {
+async function dubClipsWithTTS(sessionId, clipCount, ttsAudioPaths) {
+  if (!Array.isArray(ttsAudioPaths)) return Array.from({ length: clipCount }, (_, i) => clipPath(sessionId, i));
+
+  const dubbedPaths = [];
+  for (let i = 0; i < clipCount; i++) {
+    const original = clipPath(sessionId, i);
+    const tts = ttsAudioPaths[i];
+    if (!tts || !fs.existsSync(tts)) {
+      dubbedPaths.push(original);
+      continue;
+    }
+    const dubbed = path.join(sessionDir(sessionId), `clip-${i}-dubbed.mp4`);
+    await new Promise((resolve, reject) => {
+      ffmpeg()
+        .input(original)
+        .input(tts)
+        .outputOptions([
+          '-map', '0:v:0',
+          '-map', '1:a:0',
+          '-c:v', 'copy',
+          '-c:a', 'aac',
+          '-shortest',
+        ])
+        .output(dubbed)
+        .on('end', resolve)
+        .on('error', reject)
+        .run();
+    });
+    dubbedPaths.push(dubbed);
+  }
+  return dubbedPaths;
+}
+
+/**
+ * FFmpeg concat or xfade all clips → merged.mp4
+ *
+ * @param {string} sessionId
+ * @param {number} clipCount
+ * @param {function} onProgress
+ * @param {object} options
+ * @param {string} options.exportResolution — '720p' | '1080p' | '4k'
+ * @param {object} options.transitions — { [afterClipIndex: number]: 'fade'|'dissolve'|... }
+ * @param {Array<string|null>} options.ttsAudioPaths — per-clip TTS mp3 paths
+ * @param {number} options.clipDuration — seconds per clip (needed for xfade offset calc)
+ */
+async function mergeClips(sessionId, clipCount, onProgress, options = {}) {
   ensureDir(sessionId);
   const output = mergedPath(sessionId);
+  const exportResolution = options.exportResolution || '720p';
+  const transitions = options.transitions || {};
+  const ttsAudioPaths = options.ttsAudioPaths || null;
+  const clipDuration = Number(options.clipDuration) || 10;
 
-  // Build concat file for FFmpeg
-  const concatFile = path.join(sessionDir(sessionId), 'concat.txt');
-  const lines = [];
-  for (let i = 0; i < clipCount; i++) {
-    lines.push(`file '${clipPath(sessionId, i)}'`);
+  // Step A: dub clips with TTS first if requested (writes clip-N-dubbed.mp4)
+  let inputPaths;
+  if (ttsAudioPaths && ttsAudioPaths.some((p) => p)) {
+    onProgress && onProgress({ phase: 'merging', progress: 5 });
+    inputPaths = await dubClipsWithTTS(sessionId, clipCount, ttsAudioPaths);
+  } else {
+    inputPaths = Array.from({ length: clipCount }, (_, i) => clipPath(sessionId, i));
   }
-  fs.writeFileSync(concatFile, lines.join('\n'), 'utf8');
 
-  onProgress && onProgress({ phase: 'merging', progress: 0 });
+  // Decide path: any non-cut transition + non-default resolution requires re-encode.
+  const hasTransitions = Object.values(transitions).some((t) => t && t !== 'cut' && VALID_TRANSITIONS.includes(t));
+  const hasUpscale = exportResolution !== '720p';
+  const hasDub = !!(ttsAudioPaths && ttsAudioPaths.some((p) => p));
+  const needsReencode = hasTransitions || hasUpscale || hasDub;
 
+  onProgress && onProgress({ phase: 'merging', progress: 10 });
+
+  if (!needsReencode) {
+    // Fast path: concat demuxer with stream copy (current behavior)
+    const concatFile = path.join(sessionDir(sessionId), 'concat.txt');
+    const lines = inputPaths.map((p) => `file '${p}'`);
+    fs.writeFileSync(concatFile, lines.join('\n'), 'utf8');
+
+    return new Promise((resolve, reject) => {
+      ffmpeg()
+        .input(concatFile)
+        .inputOptions(['-f', 'concat', '-safe', '0'])
+        .outputOptions(['-c', 'copy'])
+        .output(output)
+        .on('progress', (info) => {
+          onProgress && onProgress({ phase: 'merging', progress: info.percent || 0 });
+        })
+        .on('end', () => {
+          try { fs.unlinkSync(concatFile); } catch (e) {}
+          resolve(output);
+        })
+        .on('error', (err) => reject(new Error(`FFmpeg merge failed: ${err.message}`)))
+        .run();
+    });
+  }
+
+  // Slow path: filter_complex with xfade transitions and/or scale upscale.
   return new Promise((resolve, reject) => {
-    ffmpeg()
-      .input(concatFile)
-      .inputOptions(['-f', 'concat', '-safe', '0'])
-      .outputOptions(['-c', 'copy'])
+    const cmd = ffmpeg();
+    inputPaths.forEach((p) => cmd.input(p));
+
+    const scaleFilter = SCALE_MAP[exportResolution] || SCALE_MAP['720p'];
+    const filters = [];
+
+    // Pre-scale every input to target resolution to keep xfade dimensions compatible.
+    for (let i = 0; i < clipCount; i++) {
+      filters.push(`[${i}:v]scale=${scaleFilter}:force_original_aspect_ratio=decrease,pad=${scaleFilter}:(ow-iw)/2:(oh-ih)/2,setsar=1[v${i}]`);
+    }
+
+    // Build xfade chain or concat
+    let lastVideo = 'v0';
+    let cumulativeOffset = clipDuration;
+    if (hasTransitions && clipCount > 1) {
+      for (let i = 1; i < clipCount; i++) {
+        const tType = transitions[i - 1] && transitions[i - 1] !== 'cut' ? transitions[i - 1] : null;
+        const outLabel = i === clipCount - 1 ? 'vout' : `vx${i}`;
+        if (tType && VALID_TRANSITIONS.includes(tType) && tType !== 'cut') {
+          // xfade — overlap the last 0.5s of prev clip with start of next
+          const offset = Math.max(0.1, cumulativeOffset - 0.5);
+          filters.push(`[${lastVideo}][v${i}]xfade=transition=${tType}:duration=0.5:offset=${offset}[${outLabel}]`);
+          cumulativeOffset = cumulativeOffset - 0.5 + clipDuration;
+        } else {
+          filters.push(`[${lastVideo}][v${i}]concat=n=2:v=1:a=0[${outLabel}]`);
+          cumulativeOffset += clipDuration;
+        }
+        lastVideo = outLabel;
+      }
+    } else {
+      // Pure concat with optional scale only
+      const concatInputs = Array.from({ length: clipCount }, (_, i) => `[v${i}]`).join('');
+      filters.push(`${concatInputs}concat=n=${clipCount}:v=1:a=0[vout]`);
+      lastVideo = 'vout';
+    }
+
+    // Audio handling — keep silent unless TTS dub provided
+    const audioInputs = Array.from({ length: clipCount }, (_, i) => `[${i}:a]`).join('');
+    let mapAudio = false;
+    if (hasDub) {
+      filters.push(`${audioInputs}concat=n=${clipCount}:v=0:a=1[aout]`);
+      mapAudio = true;
+    }
+
+    cmd
+      .complexFilter(filters)
+      .outputOptions([
+        '-map', `[${lastVideo}]`,
+        ...(mapAudio ? ['-map', '[aout]'] : []),
+        '-c:v', 'libx264',
+        '-preset', 'medium',
+        '-crf', '23',
+        '-pix_fmt', 'yuv420p',
+        ...(mapAudio ? ['-c:a', 'aac', '-b:a', '192k'] : ['-an']),
+      ])
       .output(output)
       .on('progress', (info) => {
         onProgress && onProgress({ phase: 'merging', progress: info.percent || 0 });
       })
-      .on('end', () => {
-        // Clean up concat file
-        try { fs.unlinkSync(concatFile); } catch (e) {}
-        resolve(output);
-      })
-      .on('error', (err) => {
-        reject(new Error(`FFmpeg merge failed: ${err.message}`));
-      })
+      .on('end', () => resolve(output))
+      .on('error', (err) => reject(new Error(`FFmpeg merge (re-encode) failed: ${err.message}`)))
       .run();
   });
 }

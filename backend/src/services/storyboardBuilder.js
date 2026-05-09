@@ -441,7 +441,16 @@ function buildClipSchema(arLabel, clipDuration, flags, referenceImages, audioRul
 
 // ── build full storyboard from scratch ───────────────────────────────────────
 
-async function buildStoryboard({ prompt, mode, duration, referenceImages = [], aspectRatio = 'portrait', clipDuration = 10, voType = 'narration', visualStyle = 'premium_3d', scriptText = null, projectType = 'default', outputLanguage = 'id' }) {
+async function buildStoryboard({
+  prompt, mode, duration, referenceImages = [],
+  aspectRatio = 'portrait', clipDuration = 10,
+  voType = 'narration', visualStyle = 'premium_3d',
+  scriptText = null, projectType = 'default', outputLanguage = 'id',
+  // Feature 4: pinned character image — every clip must keep this person consistent
+  pinnedCharacterImageUrl = null,
+  // Feature 8: angle instruction for batch variants (emotional/benefits/social-proof)
+  additionalInstruction = '',
+}) {
   const totalClips = Math.ceil(duration / clipDuration);
   const arLabel = ASPECT_RATIO_LABELS[aspectRatio] || '9:16';
   const audio = getAudioRules(voType, clipDuration);
@@ -451,6 +460,8 @@ async function buildStoryboard({ prompt, mode, duration, referenceImages = [], a
   // When scriptText is provided, also use it as the brief context for conditional detection
   const contextForDetection = scriptText ? `${prompt}\n${scriptText}` : prompt;
   const flags = buildConditionalContext(contextForDetection, referenceImages);
+  // Feature 4: when a pinned character is set, force needsCharacter so [CHARACTER] always renders
+  if (pinnedCharacterImageUrl) flags.needsCharacter = true;
 
   // Reference images context — classify each image and build enforcement rules
   let refCtx = '';
@@ -500,6 +511,16 @@ FORMAT CONTEXT:
 - All voScript/audioDimension text in ${langName}; all other fields in English
 - VISUAL STYLE (apply to every clip): ${styleDesc}
 ${projectRules}
+${pinnedCharacterImageUrl ? `
+PINNED CHARACTER (MANDATORY):
+- A reference image of the main character is attached to every clip generation.
+- The character in EVERY clip must match this reference EXACTLY: same face, hair, outfit, body type.
+- Set "character" field in EVERY clip to describe this person and end with "must match reference image exactly — do NOT alter appearance".
+` : ''}
+${additionalInstruction ? `
+CREATIVE ANGLE (this variant):
+${additionalInstruction}
+` : ''}
 ${refCtx}
 ${audio.rules}
 

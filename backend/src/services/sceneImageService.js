@@ -127,4 +127,27 @@ async function generateSingleSceneImage(clip) {
   }
 }
 
-module.exports = { generateSceneImages, generateSingleSceneImage, buildSceneImagePrompt };
+/**
+ * Generate a single scene image directly from a free-text prompt string.
+ * Used by conversational shot editing — when a clip is rewritten, regenerate its preview.
+ * @param {string} promptText
+ * @returns {Promise<string|null>} URL of generated image (or null on failure)
+ */
+async function generateSceneImage(promptText) {
+  if (!promptText || typeof promptText !== 'string') return null;
+  try {
+    const images = await generateImage({
+      prompt: promptText,
+      size: PORTRAIT_SIZE,
+      model: SCENE_IMAGE_MODEL,
+      pollIntervalMs: 2000,
+      timeoutMs: 90000,
+    });
+    return images?.[0]?.url || null;
+  } catch (e) {
+    console.warn('[SceneImage] generateSceneImage failed:', e.message);
+    return null;
+  }
+}
+
+module.exports = { generateSceneImages, generateSingleSceneImage, generateSceneImage, buildSceneImagePrompt };

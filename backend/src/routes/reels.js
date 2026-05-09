@@ -78,11 +78,16 @@ const {
   createSession, saveSession, getSession, auditLog, cleanupOldSessions,
 } = require('../services/sessionStore');
 const { buildStoryboard, refreshFromIndex, generateHookVariants } = require('../services/storyboardBuilder');
-const { generateSceneImages } = require('../services/sceneImageService');
+const { generateSceneImages, generateSceneImage } = require('../services/sceneImageService');
 const {
   cleanupAll, sweepExpiredMerged,
 } = require('../services/reelsMerger');
 const { runGeneration } = require('../services/reelsGenerator');
+const { scrapeProduct } = require('../services/productScraper');
+const { generateSRT } = require('../services/subtitleService');
+const { reviewGeneratedClips } = require('../services/reviewAgent');
+const { chatCompletion } = require('../services/apimart');
+const { VOICES: TTS_VOICES } = require('../services/ttsService');
 
 // Run session cleanup + merged-file sweep on startup
 cleanupOldSessions().catch(() => {});
@@ -99,6 +104,8 @@ const VALID_VO_TYPES = ['narration', 'dialogue', 'asmr', 'demo', 'story'];
 const VALID_VISUAL_STYLES = ['premium_3d', 'realistic', 'anime', 'cinematic', 'cartoon', 'ghibli', 'makoto_shinkai', 'chibi', 'pixel_art', 'chinese_cg'];
 const VALID_PROJECT_TYPES = ['default', 'story', 'product_promo', 'digital_human'];
 const VALID_OUTPUT_LANGUAGES = ['id', 'en', 'th', 'vi', 'zh', 'hi', 'es', 'pt', 'ar', 'ko', 'ja'];
+const VALID_EXPORT_RESOLUTIONS = ['720p', '1080p', '4k'];
+const VALID_TRANSITIONS = ['cut', 'fade', 'dissolve', 'wipeleft', 'zoom'];
 
 // ── SSE helper ────────────────────────────────────────────────────────────────
 
@@ -130,6 +137,13 @@ router.post('/build-storyboard', async (req, res) => {
     outputLanguage = 'id',
     scriptText = null,
     referenceImages: rawRefImages = [],
+    // Feature 4 — pin first reference as main character (frontend sends index)
+    pinnedCharacterIndex = null,
+    // Feature 7 — TTS dub config
+    enableTTS = false,
+    ttsVoice = 'nova',
+    // Feature 9 — export resolution
+    exportResolution = '720p',
   } = req.body;
 
   if (!prompt || typeof prompt !== 'string' || !prompt.trim()) {
@@ -145,6 +159,9 @@ router.post('/build-storyboard', async (req, res) => {
   const pt = VALID_PROJECT_TYPES.includes(projectType) ? projectType : 'default';
   const lang = VALID_OUTPUT_LANGUAGES.includes(outputLanguage) ? outputLanguage : 'id';
   const st = (scriptText && typeof scriptText === 'string' && scriptText.trim()) ? scriptText.trim() : null;
+  const expRes = VALID_EXPORT_RESOLUTIONS.includes(exportResolution) ? exportResolution : '720p';
+  const tts = !!enableTTS;
+  const ttsVoiceClean = (TTS_VOICES.includes(ttsVoice)) ? ttsVoice : 'nova';
 
   // Validate referenceImages count upfront
   if (!Array.isArray(rawRefImages)) {
@@ -156,8 +173,20 @@ router.post('/build-storyboard', async (req, res) => {
     });
   }
 
-  const session = createSession({ prompt: prompt.trim(), mode, duration: dur, aspectRatio: ar, resolution: res_, clipDuration: clipDur, voType: vt, visualStyle: vs, projectType: pt, outputLanguage: lang, scriptText: st });
-  auditLog(session, 'info', 'SESSION_CREATED', { prompt: prompt.trim(), mode, duration: dur, aspectRatio: ar, resolution: res_, clipDuration: clipDur, voType: vt, visualStyle: vs, projectType: pt, outputLanguage: lang, hasScript: !!st });
+  const session = createSession({
+    prompt: prompt.trim(), mode, duration: dur,
+    aspectRatio: ar, resolution: res_, clipDuration: clipDur,
+    voType: vt, visualStyle: vs, projectType: pt, outputLanguage: lang,
+    scriptText: st,
+    enableTTS: tts, ttsVoice: ttsVoiceClean,
+    exportResolution: expRes,
+  });
+  auditLog(session, 'info', 'SESSION_CREATED', {
+    prompt: prompt.trim(), mode, duration: dur, aspectRatio: ar, resolution: res_,
+    clipDuration: clipDur, voType: vt, visualStyle: vs, projectType: pt,
+    outputLanguage: lang, hasScript: !!st, enableTTS: tts, ttsVoice: ttsVoiceClean,
+    exportResolution: expRes,
+  });
 
   // Save session immediately so crash recovery can find it
   await saveSession(session);
@@ -169,9 +198,16 @@ router.post('/build-storyboard', async (req, res) => {
       auditLog(session, 'info', 'REF_IMAGES_SAVE_START', { count: rawRefImages.length });
       savedRefs = saveReferenceImages(session.sessionId, rawRefImages);
       session.referenceImageUrls = savedRefs;
+      // Feature 4: pin one of the uploaded refs as main character
+      if (typeof pinnedCharacterIndex === 'number'
+          && pinnedCharacterIndex >= 0
+          && pinnedCharacterIndex < savedRefs.length) {
+        session.pinnedCharacterImageUrl = savedRefs[pinnedCharacterIndex].url;
+      }
       auditLog(session, 'info', 'REF_IMAGES_SAVED', {
         count: savedRefs.length,
         tags: savedRefs.map(r => r.tag),
+        pinnedCharacterIndex: typeof pinnedCharacterIndex === 'number' ? pinnedCharacterIndex : null,
       });
     }
 
@@ -189,6 +225,7 @@ router.post('/build-storyboard', async (req, res) => {
       projectType: pt,
       outputLanguage: lang,
       scriptText: st,
+      pinnedCharacterImageUrl: session.pinnedCharacterImageUrl || null,
     });
 
     session.storyboard = storyboard;
@@ -561,6 +598,337 @@ router.get('/audit/:sessionId', async (req, res) => {
     updatedAt: session.updatedAt,
     sessionHash: session._hash,
     audit: session.audit,
+  });
+});
+
+// ── FEATURE 3 — POST /scrape-product ─────────────────────────────────────────
+// Paste product URL → auto-fill ad brief + product image
+router.post('/scrape-product', async (req, res) => {
+  const { url } = req.body || {};
+  if (!url || typeof url !== 'string') return res.status(400).json({ error: 'url is required' });
+  try {
+    const result = await scrapeProduct(url);
+    res.json(result);
+  } catch (e) {
+    console.error('[reels/scrape-product]', e.message);
+    res.status(500).json({ error: `Scraping failed: ${e.message}` });
+  }
+});
+
+// ── FEATURE 5 — POST /expand-script ──────────────────────────────────────────
+// Take a brief logline and expand it into a full scene-by-scene script.
+router.post('/expand-script', async (req, res) => {
+  const { brief, projectType = 'product_promo', clipCount = 5, outputLanguage = 'en' } = req.body || {};
+  if (!brief || typeof brief !== 'string') return res.status(400).json({ error: 'brief is required' });
+
+  const langName = {
+    en: 'English', id: 'Bahasa Indonesia', th: 'Thai', vi: 'Vietnamese',
+    zh: 'Mandarin Chinese', es: 'Spanish', pt: 'Portuguese', ar: 'Arabic',
+    ko: 'Korean', ja: 'Japanese', hi: 'Hindi',
+  }[outputLanguage] || 'English';
+
+  const cc = Math.max(2, Math.min(12, parseInt(clipCount) || 5));
+
+  try {
+    const response = await chatCompletion({
+      model: 'gpt-4o',
+      messages: [
+        { role: 'system', content: 'You are a professional screenwriter specializing in short-form video ads.' },
+        {
+          role: 'user',
+          content: `Write the script in ${langName}.
+Expand this brief into a ${cc}-scene video ad script.
+Brief: "${brief}"
+Project type: ${projectType}
+
+For each scene return EXACTLY this format:
+SCENE [N]:
+Setting: [location + atmosphere]
+Action: [what happens visually]
+VO/Dialogue: [what is said — max 2 sentences]
+Camera: [shot type: close-up/wide/medium/drone]
+Emotion: [dominant emotion for viewer]
+
+Make scene 1 a strong hook. Make last scene a clear CTA.`,
+        },
+      ],
+      maxTokens: 1500,
+      temperature: 0.8,
+    });
+    res.json({ expandedScript: response, clipCount: cc });
+  } catch (e) {
+    console.error('[reels/expand-script]', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ── FEATURE 6 — GET /:sessionId/subtitles ────────────────────────────────────
+// Generate SRT subtitle download from session storyboard's voScripts.
+router.get('/:sessionId/subtitles', async (req, res) => {
+  const session = await getSession(req.params.sessionId);
+  if (!session) return res.status(404).json({ error: 'Session not found' });
+
+  const clipDur = session.clipDuration || 10;
+  const clipsForSrt = (session.storyboard || []).map(c => ({
+    voScript: c.voScript || c.technicalConfig?.voScript || '',
+    clipDuration: clipDur,
+  }));
+  const srt = generateSRT(clipsForSrt);
+
+  res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="reel-${req.params.sessionId.slice(0, 8)}.srt"`);
+  res.send(srt);
+});
+
+// ── FEATURE 8 — POST /build-storyboard-variants ──────────────────────────────
+// Generate 3 storyboard variants with different creative angles.
+router.post('/build-storyboard-variants', async (req, res) => {
+  const {
+    prompt, mode = 'normal', duration = 30,
+    aspectRatio = 'portrait', resolution = '720p', clipDuration = 10,
+    voType = 'narration', visualStyle = 'premium_3d',
+    projectType = 'default', outputLanguage = 'id',
+    scriptText = null, referenceImages: rawRefImages = [],
+  } = req.body || {};
+
+  if (!prompt || typeof prompt !== 'string') return res.status(400).json({ error: 'prompt is required' });
+
+  const angles = [
+    { label: 'Emotional Story',   key: 'emotional', angleInstruction: 'Focus on emotional connection and storytelling. Use personal transformation narrative. Make viewers feel something.' },
+    { label: 'Benefits & Features', key: 'benefits', angleInstruction: 'Focus on product features, specs, and measurable benefits. Lead with the #1 unique benefit. Use numbers and facts.' },
+    { label: 'Social Proof',      key: 'social',   angleInstruction: 'Focus on credibility: testimonials, user count, reviews, awards, before/after results. Build trust first.' },
+  ];
+
+  // Normalise scalar params
+  const dur = VALID_DURATIONS.includes(Number(duration)) ? Number(duration) : 30;
+  const clipDur = VALID_CLIP_DURATIONS.includes(Number(clipDuration)) ? Number(clipDuration) : 10;
+  const ar = VALID_ASPECT_RATIOS.includes(aspectRatio) ? aspectRatio : 'portrait';
+  const res_ = VALID_RESOLUTIONS.includes(resolution) ? resolution : '720p';
+  const vt = VALID_VO_TYPES.includes(voType) ? voType : 'narration';
+  const vs = VALID_VISUAL_STYLES.includes(visualStyle) ? visualStyle : 'premium_3d';
+  const pt = VALID_PROJECT_TYPES.includes(projectType) ? projectType : 'default';
+  const lang = VALID_OUTPUT_LANGUAGES.includes(outputLanguage) ? outputLanguage : 'id';
+
+  // Build all 3 variants in parallel — each gets its own session so user can pick one to proceed
+  const built = await Promise.allSettled(angles.map(async (angle) => {
+    const session = createSession({
+      prompt: prompt.trim(), mode, duration: dur,
+      aspectRatio: ar, resolution: res_, clipDuration: clipDur,
+      voType: vt, visualStyle: vs, projectType: pt, outputLanguage: lang,
+      scriptText: (scriptText && scriptText.trim()) || null,
+    });
+    auditLog(session, 'info', 'VARIANT_SESSION_CREATED', { angle: angle.key });
+
+    let savedRefs = [];
+    if (Array.isArray(rawRefImages) && rawRefImages.length > 0) {
+      try { savedRefs = saveReferenceImages(session.sessionId, rawRefImages); session.referenceImageUrls = savedRefs; } catch {}
+    }
+
+    const storyboard = await buildStoryboard({
+      prompt: prompt.trim(), mode, duration: dur, referenceImages: savedRefs,
+      aspectRatio: ar, clipDuration: clipDur, voType: vt, visualStyle: vs,
+      projectType: pt, outputLanguage: lang,
+      scriptText: (scriptText && scriptText.trim()) || null,
+      additionalInstruction: angle.angleInstruction,
+    });
+    session.storyboard = storyboard;
+    session.status = 'reviewing';
+    await saveSession(session);
+
+    return {
+      label: angle.label,
+      key: angle.key,
+      sessionId: session.sessionId,
+      storyboard: storyboard.map(c => ({
+        clipNumber: c.clipNumber,
+        visualSummary: c.visualSummary,
+        voScript: c.voScript,
+        grokPrompt: c.grokPrompt,
+        sceneImageUrl: c.sceneImageUrl,
+        technicalConfig: c.technicalConfig,
+      })),
+    };
+  }));
+
+  const variants = built
+    .filter(r => r.status === 'fulfilled')
+    .map(r => r.value);
+  const errors = built
+    .filter(r => r.status === 'rejected')
+    .map(r => ({ error: r.reason?.message || 'Unknown error' }));
+
+  if (variants.length === 0) {
+    return res.status(500).json({ error: 'All variants failed to build', errors });
+  }
+  res.json({ variants, errors });
+});
+
+// ── FEATURE 10 — POST /:sessionId/clip-references ────────────────────────────
+// Override reference images for a specific clip index.
+router.post('/:sessionId/clip-references', async (req, res) => {
+  const { clipIndex, imageUrls } = req.body || {};
+  if (typeof clipIndex !== 'number' || clipIndex < 0) {
+    return res.status(400).json({ error: 'clipIndex must be a non-negative number' });
+  }
+  if (!Array.isArray(imageUrls)) {
+    return res.status(400).json({ error: 'imageUrls must be an array of strings' });
+  }
+  const session = await getSession(req.params.sessionId);
+  if (!session) return res.status(404).json({ error: 'Session not found' });
+
+  if (!session.clipReferenceOverrides) session.clipReferenceOverrides = {};
+  if (imageUrls.length === 0) {
+    delete session.clipReferenceOverrides[clipIndex];
+  } else {
+    session.clipReferenceOverrides[clipIndex] = imageUrls.filter(u => typeof u === 'string' && u);
+  }
+  auditLog(session, 'info', `CLIP_${clipIndex + 1}_REFS_OVERRIDE`, { count: imageUrls.length });
+  await saveSession(session);
+  res.json({ ok: true, clipReferenceOverrides: session.clipReferenceOverrides });
+});
+
+// ── FEATURE 11 — POST /:sessionId/review ─────────────────────────────────────
+// Run self-review agent on generated clips → returns issues + score.
+router.post('/:sessionId/review', async (req, res) => {
+  const session = await getSession(req.params.sessionId);
+  if (!session) return res.status(404).json({ error: 'Session not found' });
+
+  const clipsForReview = (session.clips || []).map((c, i) => ({
+    clipIndex: c.index ?? i,
+    thumbnailUrl: c.thumbnailUrl || null,
+    voScript: session.storyboard?.[c.index ?? i]?.voScript || '',
+  }));
+
+  try {
+    const review = await reviewGeneratedClips(clipsForReview, session.prompt || '');
+    session.review = { ...review, reviewedAt: new Date().toISOString() };
+    auditLog(session, 'info', 'REVIEW_DONE', {
+      score: review.overallScore,
+      issueCount: (review.issues || []).length,
+    });
+    await saveSession(session);
+    res.json(review);
+  } catch (e) {
+    console.error('[reels/review]', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ── FEATURE 12 — POST /:sessionId/edit-clip-ai ───────────────────────────────
+// Conversational shot editing — natural language modifies a clip's prompt+config.
+// Note: distinct path from existing POST /edit-clip (which is plain inline text edit).
+router.post('/:sessionId/edit-clip-ai', async (req, res) => {
+  const { clipIndex, instruction } = req.body || {};
+  if (typeof clipIndex !== 'number' || clipIndex < 0) {
+    return res.status(400).json({ error: 'clipIndex must be a non-negative number' });
+  }
+  if (!instruction || typeof instruction !== 'string') {
+    return res.status(400).json({ error: 'instruction is required' });
+  }
+
+  const session = await getSession(req.params.sessionId);
+  if (!session) return res.status(404).json({ error: 'Session not found' });
+
+  const clip = session.storyboard?.[clipIndex];
+  if (!clip) return res.status(404).json({ error: `Clip ${clipIndex} not found` });
+
+  try {
+    const response = await chatCompletion({
+      model: 'gpt-4o',
+      messages: [
+        {
+          role: 'system',
+          content: 'You are a video director. Modify the given clip spec based on the instruction. Return the FULL updated clip as JSON only (no markdown), preserving all fields not mentioned in the instruction.',
+        },
+        {
+          role: 'user',
+          content: `Current clip spec:
+${JSON.stringify(clip, null, 2)}
+
+User instruction: "${instruction}"
+
+Return the updated clip JSON only. Preserve structure. Update grokPrompt, voScript, visualSummary, and technicalConfig fields to reflect the instruction.`,
+        },
+      ],
+      maxTokens: 2000,
+      temperature: 0.7,
+    });
+
+    let updatedClip = clip;
+    try {
+      const match = response.match(/\{[\s\S]*\}/);
+      if (match) updatedClip = { ...clip, ...JSON.parse(match[0]) };
+    } catch (e) {
+      console.warn('[reels/edit-clip-ai] parse failed, keeping original:', e.message);
+    }
+
+    // Regenerate scene image (non-blocking)
+    try {
+      const sceneImageUrl = await generateSceneImage(updatedClip.grokPrompt || '');
+      if (sceneImageUrl) updatedClip.sceneImageUrl = sceneImageUrl;
+    } catch {}
+
+    session.storyboard[clipIndex] = updatedClip;
+    auditLog(session, 'info', `CLIP_${clipIndex + 1}_EDIT_AI`, { instruction: instruction.slice(0, 100) });
+    await saveSession(session);
+
+    res.json({ clip: updatedClip, clipIndex });
+  } catch (e) {
+    console.error('[reels/edit-clip-ai]', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ── FEATURE 13 — POST /:sessionId/transitions ────────────────────────────────
+// Set per-position transition types between clips (cut/fade/dissolve/etc).
+router.post('/:sessionId/transitions', async (req, res) => {
+  const { transitions } = req.body || {};
+  if (!transitions || typeof transitions !== 'object') {
+    return res.status(400).json({ error: 'transitions object required' });
+  }
+  const session = await getSession(req.params.sessionId);
+  if (!session) return res.status(404).json({ error: 'Session not found' });
+
+  const cleaned = {};
+  for (const [k, v] of Object.entries(transitions)) {
+    if (VALID_TRANSITIONS.includes(v)) cleaned[k] = v;
+  }
+  session.transitions = cleaned;
+  auditLog(session, 'info', 'TRANSITIONS_SET', { count: Object.keys(cleaned).length });
+  await saveSession(session);
+  res.json({ ok: true, transitions: session.transitions });
+});
+
+// ── FEATURE 9 — POST /:sessionId/export-settings ─────────────────────────────
+// Update export resolution + TTS toggle without rebuilding storyboard.
+router.post('/:sessionId/export-settings', async (req, res) => {
+  const { exportResolution, enableTTS, ttsVoice } = req.body || {};
+  const session = await getSession(req.params.sessionId);
+  if (!session) return res.status(404).json({ error: 'Session not found' });
+
+  if (exportResolution !== undefined) {
+    if (!VALID_EXPORT_RESOLUTIONS.includes(exportResolution)) {
+      return res.status(400).json({ error: `exportResolution must be one of ${VALID_EXPORT_RESOLUTIONS.join(', ')}` });
+    }
+    session.exportResolution = exportResolution;
+  }
+  if (enableTTS !== undefined) session.enableTTS = !!enableTTS;
+  if (ttsVoice !== undefined) {
+    if (!TTS_VOICES.includes(ttsVoice)) {
+      return res.status(400).json({ error: `ttsVoice must be one of ${TTS_VOICES.join(', ')}` });
+    }
+    session.ttsVoice = ttsVoice;
+  }
+  auditLog(session, 'info', 'EXPORT_SETTINGS_UPDATED', {
+    exportResolution: session.exportResolution,
+    enableTTS: session.enableTTS,
+    ttsVoice: session.ttsVoice,
+  });
+  await saveSession(session);
+  res.json({
+    exportResolution: session.exportResolution,
+    enableTTS: session.enableTTS,
+    ttsVoice: session.ttsVoice,
   });
 });
 

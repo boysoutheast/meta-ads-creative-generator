@@ -193,6 +193,9 @@ export type ReelsVoType = 'narration' | 'dialogue' | 'asmr' | 'demo' | 'story'
 export type ReelsVisualStyle = 'premium_3d' | 'realistic' | 'anime' | 'cinematic' | 'cartoon' | 'ghibli' | 'makoto_shinkai' | 'chibi' | 'pixel_art' | 'chinese_cg'
 export type ReelsProjectType = 'default' | 'story' | 'product_promo' | 'digital_human'
 export type ReelsOutputLanguage = 'id' | 'en' | 'th' | 'vi' | 'zh' | 'hi' | 'es' | 'pt' | 'ar' | 'ko' | 'ja'
+export type ReelsExportResolution = '720p' | '1080p' | '4k'
+export type ReelsTTSVoice = 'alloy' | 'echo' | 'fable' | 'onyx' | 'nova' | 'shimmer'
+export type ReelsTransition = 'cut' | 'fade' | 'dissolve' | 'wipeleft' | 'zoom'
 
 /** Step 1 — GPT-4o builds storyboard, creates session */
 export async function buildStoryboard(payload: {
@@ -208,6 +211,13 @@ export async function buildStoryboard(payload: {
   outputLanguage?: ReelsOutputLanguage
   scriptText?: string | null
   referenceImages?: ReferenceImageInput[]
+  // Feature 4: pin one of the uploaded refs (by index) as main character
+  pinnedCharacterIndex?: number | null
+  // Feature 7: TTS auto-dub
+  enableTTS?: boolean
+  ttsVoice?: ReelsTTSVoice
+  // Feature 9: export resolution
+  exportResolution?: ReelsExportResolution
 }): Promise<{
   sessionId: string
   storyboard: PublicClip[]
@@ -264,6 +274,105 @@ export async function generateHooks(payload: {
 }> {
   const res = await api.post('/reels/generate-hooks', payload)
   return res.data
+}
+
+// ─── Feature 3 — Product URL scraper ────────────────────────────────────────
+export async function scrapeProductUrl(url: string): Promise<{
+  product: {
+    productName?: string
+    brand?: string
+    price?: string
+    currency?: string
+    features?: string[]
+    description?: string
+    targetAudience?: string
+  }
+  brief: string
+  imageUrl: string | null
+}> {
+  const res = await api.post('/reels/scrape-product', { url })
+  return res.data
+}
+
+// ─── Feature 5 — AI Script Expander ─────────────────────────────────────────
+export async function expandScript(payload: {
+  brief: string
+  projectType?: ReelsProjectType
+  clipCount?: number
+  outputLanguage?: ReelsOutputLanguage
+}): Promise<{ expandedScript: string; clipCount: number }> {
+  const res = await api.post('/reels/expand-script', payload)
+  return res.data
+}
+
+// ─── Feature 6 — Subtitles SRT download URL ─────────────────────────────────
+export function getSubtitleDownloadUrl(sessionId: string): string {
+  return `${API_URL}/reels/${sessionId}/subtitles`
+}
+
+// ─── Feature 8 — Build 3 storyboard variants ────────────────────────────────
+export async function buildStoryboardVariants(payload: {
+  prompt: string
+  mode?: string
+  duration?: number
+  aspectRatio?: ReelsAspectRatio
+  resolution?: ReelsResolution
+  clipDuration?: ReelsClipDuration
+  voType?: ReelsVoType
+  visualStyle?: ReelsVisualStyle
+  projectType?: ReelsProjectType
+  outputLanguage?: ReelsOutputLanguage
+  scriptText?: string | null
+  referenceImages?: ReferenceImageInput[]
+}): Promise<{
+  variants: Array<{ label: string; key: string; sessionId: string; storyboard: PublicClip[] }>
+  errors?: Array<{ error: string }>
+}> {
+  const res = await api.post('/reels/build-storyboard-variants', payload, { timeout: 240000 })
+  return res.data
+}
+
+// ─── Feature 10 — Per-clip reference override ───────────────────────────────
+export async function setClipReferences(sessionId: string, clipIndex: number, imageUrls: string[]) {
+  const res = await api.post(`/reels/${sessionId}/clip-references`, { clipIndex, imageUrls })
+  return res.data as { ok: boolean; clipReferenceOverrides: Record<string, string[]> }
+}
+
+// ─── Feature 11 — Self-review ───────────────────────────────────────────────
+export async function reviewSession(sessionId: string): Promise<{
+  overallScore: number
+  issues: Array<{ clipIndex: number; severity: 'info' | 'warning' | 'error'; message: string }>
+  summary: string
+  reviewedAt?: string
+}> {
+  const res = await api.post(`/reels/${sessionId}/review`, {})
+  return res.data
+}
+
+// ─── Feature 12 — Conversational shot edit (AI) ─────────────────────────────
+export async function editClipWithAI(sessionId: string, clipIndex: number, instruction: string) {
+  const res = await api.post(`/reels/${sessionId}/edit-clip-ai`, { clipIndex, instruction })
+  return res.data as { clip: PublicClip; clipIndex: number }
+}
+
+// ─── Feature 13 — Set transitions ───────────────────────────────────────────
+export async function setTransitions(sessionId: string, transitions: Record<string, ReelsTransition>) {
+  const res = await api.post(`/reels/${sessionId}/transitions`, { transitions })
+  return res.data as { ok: boolean; transitions: Record<string, ReelsTransition> }
+}
+
+// ─── Feature 9 — Export settings (resolution, TTS) ──────────────────────────
+export async function setExportSettings(sessionId: string, payload: {
+  exportResolution?: ReelsExportResolution
+  enableTTS?: boolean
+  ttsVoice?: ReelsTTSVoice
+}) {
+  const res = await api.post(`/reels/${sessionId}/export-settings`, payload)
+  return res.data as {
+    exportResolution: ReelsExportResolution
+    enableTTS: boolean
+    ttsVoice: ReelsTTSVoice
+  }
 }
 
 /** Step 3 — SSE stream: generate all clips + merge */

@@ -14,9 +14,12 @@ import {
 } from '@/components/ui/select'
 import {
   buildStoryboard, refreshClips, generateSceneImages, editClip, generateHooks,
+  scrapeProductUrl, expandScript, buildStoryboardVariants, getSubtitleDownloadUrl,
+  editClipWithAI, setTransitions as apiSetTransitions, reviewSession,
   type PublicClip, type ReferenceImageInput,
   type ReelsAspectRatio, type ReelsResolution, type ReelsClipDuration, type ReelsVoType, type ReelsVisualStyle,
   type ReelsProjectType, type ReelsOutputLanguage,
+  type ReelsExportResolution, type ReelsTTSVoice, type ReelsTransition,
 } from '@/lib/api'
 import { pushStoredSession } from '@/lib/reels-sessions'
 import { StoryboardClipCard } from '@/components/reels/StoryboardClipCard'
@@ -382,6 +385,36 @@ export default function ReelsPage() {
   const [generatedHooks, setGeneratedHooks] = useState<Array<{ type: string; label: string; voScript: string; opening: string; angle: string }>>([])
   const [selectedHookIdx, setSelectedHookIdx] = useState<number | null>(null)
 
+  // Feature 3 — URL scraper
+  const [productUrl, setProductUrl] = useState('')
+  const [scraping, setScraping] = useState(false)
+
+  // Feature 4 — pinned character (index in refImages)
+  const [pinnedCharacterIndex, setPinnedCharacterIndex] = useState<number | null>(null)
+
+  // Feature 5 — script expander
+  const [expandedScript, setExpandedScript] = useState<string | null>(null)
+  const [expandingScript, setExpandingScript] = useState(false)
+
+  // Feature 7 — TTS
+  const [enableTTS, setEnableTTS] = useState(false)
+  const [ttsVoice, setTtsVoice] = useState<ReelsTTSVoice>('nova')
+
+  // Feature 8 — variants
+  const [generateVariants, setGenerateVariants] = useState(false)
+  const [variants, setVariants] = useState<Array<{ label: string; key: string; sessionId: string; storyboard: PublicClip[] }>>([])
+  const [selectedVariantKey, setSelectedVariantKey] = useState<string | null>(null)
+
+  // Feature 9 — export resolution
+  const [exportResolution, setExportResolution] = useState<ReelsExportResolution>('720p')
+
+  // Feature 13 — transitions between clips (key = afterClipIndex string)
+  const [transitions, setTransitionsState] = useState<Record<string, ReelsTransition>>({})
+
+  // Feature 11 — review (after generation)
+  const [reviewing, setReviewing] = useState(false)
+  const [reviewResult, setReviewResult] = useState<{ overallScore: number; issues: Array<{ clipIndex: number; severity: string; message: string }>; summary: string } | null>(null)
+
   // reference images
   const [refImages, setRefImages] = useState<RefImage[]>([])
   const [refImageError, setRefImageError] = useState<string | null>(null)
@@ -454,7 +487,16 @@ export default function ReelsPage() {
         label: r.label,
         dataUrl: r.dataUrl,
       }))
-      const data = await buildStoryboard({ prompt: prompt.trim(), mode, duration, aspectRatio, resolution, clipDuration, voType, visualStyle, projectType, outputLanguage, scriptText: scriptMode && scriptText.trim() ? scriptText.trim() : null, referenceImages })
+      const data = await buildStoryboard({
+        prompt: prompt.trim(), mode, duration,
+        aspectRatio, resolution, clipDuration,
+        voType, visualStyle, projectType, outputLanguage,
+        scriptText: scriptMode && scriptText.trim() ? scriptText.trim() : null,
+        referenceImages,
+        pinnedCharacterIndex,
+        enableTTS, ttsVoice,
+        exportResolution,
+      })
       setSessionId(data.sessionId)
       setStoryboard(data.storyboard)
       setSessionRefLabels(data.referenceImageUrls || [])
@@ -468,6 +510,108 @@ export default function ReelsPage() {
     } finally {
       setBuilding(false)
     }
+  }
+
+  // ── Feature 3 — URL scraper ──────────────────────────────────────────────
+  async function handleScrapeUrl() {
+    if (!productUrl.trim()) return
+    setScraping(true); setError(null)
+    try {
+      const data = await scrapeProductUrl(productUrl.trim())
+      if (data.brief) setPrompt(data.brief)
+      // If product image was extracted and slot available, add it as reference
+      if (data.imageUrl && refImages.length < MAX_REF_IMAGES) {
+        try {
+          const fetchResp = await fetch(data.imageUrl, { mode: 'cors' })
+          const blob = await fetchResp.blob()
+          const dataUrl = await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader()
+            reader.onload = () => resolve(reader.result as string)
+            reader.onerror = reject
+            reader.readAsDataURL(blob)
+          })
+          setRefImages(prev => [...prev, {
+            id: `${Date.now()}-scraped`,
+            label: (data.product?.productName || 'Product').slice(0, 30),
+            dataUrl,
+            preview: dataUrl,
+            sizeKB: Math.round(blob.size / 1024),
+          }])
+        } catch { /* image fetch is non-blocking */ }
+      }
+    } catch (err: any) {
+      setError(err.response?.data?.error || err.message || 'Failed to scrape product')
+    } finally {
+      setScraping(false)
+    }
+  }
+
+  // ── Feature 5 — Script expander ──────────────────────────────────────────
+  async function handleExpandScript() {
+    if (!prompt.trim()) return
+    setExpandingScript(true); setError(null)
+    try {
+      const data = await expandScript({
+        brief: prompt.trim(),
+        projectType,
+        clipCount: Math.ceil(duration / clipDuration),
+        outputLanguage,
+      })
+      setExpandedScript(data.expandedScript)
+    } catch (err: any) {
+      setError(err.response?.data?.error || err.message || 'Failed to expand script')
+    } finally {
+      setExpandingScript(false)
+    }
+  }
+
+  function applyExpandedScript() {
+    if (!expandedScript) return
+    setScriptMode(true)
+    setScriptText(expandedScript)
+    setExpandedScript(null)
+  }
+
+  // ── Feature 8 — Variants ────────────────────────────────────────────────
+  async function handleBuildVariants() {
+    if (!prompt.trim()) return
+    setBuilding(true); setError(null); setVariants([])
+    try {
+      const referenceImages: ReferenceImageInput[] = refImages.map(r => ({
+        label: r.label,
+        dataUrl: r.dataUrl,
+      }))
+      const data = await buildStoryboardVariants({
+        prompt: prompt.trim(), mode, duration,
+        aspectRatio, resolution, clipDuration,
+        voType, visualStyle, projectType, outputLanguage,
+        scriptText: scriptMode && scriptText.trim() ? scriptText.trim() : null,
+        referenceImages,
+      })
+      setVariants(data.variants)
+      if (data.variants.length > 0) {
+        setSelectedVariantKey(data.variants[0].key)
+        // Show first variant by default
+        setSessionId(data.variants[0].sessionId)
+        setStoryboard(data.variants[0].storyboard)
+        setStep('storyboard')
+        // Auto-generate scene images for the picked variant
+        handleGenerateSceneImages(data.variants[0].sessionId, data.variants[0].storyboard)
+      }
+    } catch (err: any) {
+      setError(err.response?.data?.error || err.message || 'Failed to build variants')
+    } finally {
+      setBuilding(false)
+    }
+  }
+
+  function pickVariant(key: string) {
+    const v = variants.find(x => x.key === key)
+    if (!v) return
+    setSelectedVariantKey(key)
+    setSessionId(v.sessionId)
+    setStoryboard(v.storyboard)
+    handleGenerateSceneImages(v.sessionId, v.storyboard)
   }
 
   // ── Scene image generation ─────────────────────────────────────────────────
@@ -557,6 +701,41 @@ export default function ReelsPage() {
   }
 
   // ── Step 2b: inline edit clip ─────────────────────────────────────────────
+
+  // Feature 12 — AI conversational shot edit
+  async function handleEditClipAI(idx: number, instruction: string) {
+    if (!sessionId) return
+    try {
+      const data = await editClipWithAI(sessionId, idx, instruction)
+      setStoryboard(prev => prev.map((c, i) => (i === idx ? data.clip : c)))
+    } catch (err: any) {
+      setError(err.response?.data?.error || err.message || 'AI edit failed')
+    }
+  }
+
+  // Feature 13 — Transition selector handler
+  async function handleTransitionChange(afterClipIndex: number, type: ReelsTransition) {
+    setTransitionsState(prev => {
+      const next = { ...prev, [String(afterClipIndex)]: type }
+      // Persist to backend (non-blocking)
+      if (sessionId) apiSetTransitions(sessionId, next).catch(() => {})
+      return next
+    })
+  }
+
+  // Feature 11 — Run self-review
+  async function handleRunReview() {
+    if (!sessionId) return
+    setReviewing(true); setReviewResult(null); setError(null)
+    try {
+      const data = await reviewSession(sessionId)
+      setReviewResult(data)
+    } catch (err: any) {
+      setError(err.response?.data?.error || err.message || 'Review failed')
+    } finally {
+      setReviewing(false)
+    }
+  }
 
   async function handleEditClip(idx: number, visualSummary: string, voScript: string) {
     if (!sessionId) return
@@ -650,8 +829,47 @@ export default function ReelsPage() {
               </div>
             </div>
 
+            {/* Feature 3 — Product URL scraper */}
+            <div className="space-y-1.5 rounded-lg border border-orange-300/40 bg-orange-50/40 dark:bg-orange-900/10 px-3 py-2.5">
+              <Label className="text-orange-700 dark:text-orange-400 text-xs">⚡ Quick brief from product URL</Label>
+              <div className="flex gap-2">
+                <input
+                  type="url"
+                  value={productUrl}
+                  onChange={e => setProductUrl(e.target.value)}
+                  placeholder="https://shop.com/product/..."
+                  disabled={building || scraping}
+                  className="flex-1 rounded-md border border-orange-300/50 bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-orange-300 disabled:opacity-50"
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={handleScrapeUrl}
+                  disabled={!productUrl.trim() || scraping || building}
+                  className="border-orange-400/50 text-orange-700 hover:bg-orange-100 dark:text-orange-400"
+                >
+                  {scraping ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : '✨ Auto-fill'}
+                </Button>
+              </div>
+              <p className="text-[10px] text-muted-foreground">Paste a Shopify / Amazon / Tokopedia link — AI scrapes title, features, image and pre-fills your brief.</p>
+            </div>
+
             <div className="space-y-1.5">
-              <Label htmlFor="prompt">What's this reel about?</Label>
+              <div className="flex items-center justify-between">
+                <Label htmlFor="prompt">What's this reel about?</Label>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 text-[11px]"
+                  onClick={handleExpandScript}
+                  disabled={!prompt.trim() || expandingScript || building}
+                >
+                  {expandingScript ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : '✨'}
+                  Expand to Full Script
+                </Button>
+              </div>
               <textarea
                 id="prompt"
                 value={prompt}
@@ -661,6 +879,20 @@ export default function ReelsPage() {
                 disabled={building}
                 className="w-full resize-none rounded-md border bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
               />
+              {expandedScript && (
+                <div className="rounded-lg border border-violet-300/50 bg-violet-50/40 dark:bg-violet-900/10 p-3 space-y-2">
+                  <p className="text-xs font-semibold text-violet-700 dark:text-violet-300">📜 AI-Expanded Script</p>
+                  <pre className="text-[11px] text-foreground/80 whitespace-pre-wrap font-mono max-h-60 overflow-y-auto">{expandedScript}</pre>
+                  <div className="flex gap-2">
+                    <Button type="button" size="sm" onClick={applyExpandedScript} className="h-7 text-[11px]">
+                      Use This Script
+                    </Button>
+                    <Button type="button" variant="ghost" size="sm" onClick={() => setExpandedScript(null)} className="h-7 text-[11px]">
+                      Dismiss
+                    </Button>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Row 1: Mode + Clip Duration */}
@@ -904,6 +1136,18 @@ export default function ReelsPage() {
                         placeholder={`Label @image${i + 1}`}
                         maxLength={30}
                       />
+                      <button
+                        type="button"
+                        onClick={() => setPinnedCharacterIndex(pinnedCharacterIndex === i ? null : i)}
+                        className={`mt-1 w-full rounded px-1.5 py-0.5 text-[10px] font-medium transition-colors ${
+                          pinnedCharacterIndex === i
+                            ? 'bg-amber-500 text-white'
+                            : 'bg-muted text-muted-foreground hover:bg-amber-100 hover:text-amber-700'
+                        }`}
+                        title="Pin as main character — locked across all clips"
+                      >
+                        {pinnedCharacterIndex === i ? '📌 Pinned' : '📌 Pin Character'}
+                      </button>
                       <p className="text-[10px] text-muted-foreground text-right">{img.sizeKB}KB</p>
                     </div>
                   ))}
@@ -939,6 +1183,45 @@ export default function ReelsPage() {
               )}
             </div>
 
+            {/* Feature 7 + 9 — Export & Audio settings */}
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label className="text-xs">Export Resolution</Label>
+                <Select value={exportResolution} onValueChange={v => setExportResolution(v as ReelsExportResolution)} disabled={building}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="720p">720p (Fast • stream copy)</SelectItem>
+                    <SelectItem value="1080p">1080p (HD • re-encode)</SelectItem>
+                    <SelectItem value="4k">4K (Pro • slow re-encode)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs flex items-center justify-between">
+                  <span>🔊 AI Voiceover (TTS)</span>
+                  <button
+                    type="button"
+                    onClick={() => setEnableTTS(p => !p)}
+                    disabled={building}
+                    className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors disabled:opacity-50 ${enableTTS ? 'bg-primary' : 'bg-input'}`}
+                  >
+                    <span className={`pointer-events-none inline-block h-4 w-4 rounded-full bg-background shadow-lg ring-0 transition-transform ${enableTTS ? 'translate-x-4' : 'translate-x-0'}`} />
+                  </button>
+                </Label>
+                <Select value={ttsVoice} onValueChange={v => setTtsVoice(v as ReelsTTSVoice)} disabled={!enableTTS || building}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="nova">Nova (warm female)</SelectItem>
+                    <SelectItem value="alloy">Alloy (neutral)</SelectItem>
+                    <SelectItem value="echo">Echo (deep male)</SelectItem>
+                    <SelectItem value="fable">Fable (storyteller)</SelectItem>
+                    <SelectItem value="onyx">Onyx (resonant male)</SelectItem>
+                    <SelectItem value="shimmer">Shimmer (bright female)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
             <div className="rounded-md bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
               {PROJECT_TYPE_OPTIONS.find(p => p.value === projectType)?.icon}{' '}
               {PROJECT_TYPE_OPTIONS.find(p => p.value === projectType)?.label}
@@ -952,16 +1235,32 @@ export default function ReelsPage() {
               {refImages.length > 0 && ` · ${refImages.length} ref img${refImages.length > 1 ? 's' : ''}`}
             </div>
 
+            {/* Feature 8 — Variants toggle */}
+            <div className="flex items-center gap-2 rounded-md border border-border/50 bg-muted/20 px-3 py-2">
+              <button
+                type="button"
+                onClick={() => setGenerateVariants(p => !p)}
+                disabled={building}
+                className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors disabled:opacity-50 ${generateVariants ? 'bg-primary' : 'bg-input'}`}
+              >
+                <span className={`pointer-events-none inline-block h-4 w-4 rounded-full bg-background shadow-lg ring-0 transition-transform ${generateVariants ? 'translate-x-4' : 'translate-x-0'}`} />
+              </button>
+              <div className="flex-1">
+                <p className="text-xs font-medium">🎯 Generate 3 Variants (A/B test angles)</p>
+                <p className="text-[10px] text-muted-foreground">Build 3 storyboards with different angles: Emotional / Benefits / Social Proof. Pick the strongest.</p>
+              </div>
+            </div>
+
             <Button
-              onClick={handleBuildStoryboard}
+              onClick={generateVariants ? handleBuildVariants : handleBuildStoryboard}
               disabled={building || !prompt.trim()}
               className="w-full"
               size="lg"
             >
               {building ? (
-                <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Building storyboard…</>
+                <><Loader2 className="mr-2 h-4 w-4 animate-spin" />{generateVariants ? 'Building 3 variants…' : 'Building storyboard…'}</>
               ) : (
-                <><Wand2 className="mr-2 h-4 w-4" />Build Storyboard</>
+                <><Wand2 className="mr-2 h-4 w-4" />{generateVariants ? 'Build 3 Variants' : 'Build Storyboard'}</>
               )}
             </Button>
           </CardContent>
@@ -990,7 +1289,47 @@ export default function ReelsPage() {
             {' · '}<span className="font-medium text-foreground">{VISUAL_STYLE_OPTIONS.find(s => s.value === visualStyle)?.icon} {VISUAL_STYLE_OPTIONS.find(s => s.value === visualStyle)?.label}</span>
             {' · '}<span className="font-medium text-foreground">{OUTPUT_LANGUAGE_OPTIONS.find(l => l.value === outputLanguage)?.flag} {OUTPUT_LANGUAGE_OPTIONS.find(l => l.value === outputLanguage)?.label}</span>
             {' · '}<span className="font-medium text-foreground">{storyboard.length} clips × {clipDuration}s</span>
+            {enableTTS && <> · <span className="font-medium text-foreground">🔊 {ttsVoice}</span></>}
+            <> · <span className="font-medium text-foreground">{exportResolution}</span></>
           </div>
+
+          {/* Feature 8 — Variant picker (shown only when 3 variants were built) */}
+          {variants.length > 1 && (
+            <div className="rounded-lg border border-violet-300/40 bg-violet-50/40 dark:bg-violet-900/10 p-3 space-y-2">
+              <p className="text-xs font-semibold text-violet-700 dark:text-violet-300">🎯 Storyboard Variants — pick the angle you want to generate</p>
+              <div className="grid gap-2 sm:grid-cols-3">
+                {variants.map(v => (
+                  <button
+                    key={v.key}
+                    type="button"
+                    onClick={() => pickVariant(v.key)}
+                    className={`rounded-md border px-3 py-2 text-left transition-colors ${
+                      selectedVariantKey === v.key
+                        ? 'border-violet-500 bg-violet-100/60 dark:bg-violet-900/30'
+                        : 'border-border bg-background hover:border-violet-400'
+                    }`}
+                  >
+                    <p className="text-xs font-bold">{v.label}</p>
+                    <p className="text-[10px] text-muted-foreground line-clamp-2 mt-0.5">{v.storyboard[0]?.visualSummary || ''}</p>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Feature 6 — Download subtitles */}
+          {sessionId && (
+            <div className="flex justify-end">
+              <a
+                href={getSubtitleDownloadUrl(sessionId)}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 rounded-md border border-border bg-background px-2.5 py-1 text-[11px] text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+              >
+                📝 Download SRT subtitles
+              </a>
+            </div>
+          )}
 
           {/* Reference image legend — only shown if session has refs */}
           {sessionRefLabels.length > 0 && (
@@ -1060,22 +1399,91 @@ export default function ReelsPage() {
           {/* Clip cards */}
           <div className="space-y-3">
             {storyboard.map((clip, idx) => (
-              <StoryboardClipCard
-                key={clip.clipNumber}
-                clip={clip}
-                idx={idx}
-                totalClips={storyboard.length}
-                clipDuration={clipDuration}
-                hint={hints[idx] || ''}
-                onHintChange={v => setHints(prev => ({ ...prev, [idx]: v }))}
-                onRefresh={() => handleRefresh(idx)}
-                onEdit={sessionId ? handleEditClip : undefined}
-                isRefreshing={refreshingFrom === idx}
-                isStale={refreshingFrom !== null && idx > refreshingFrom}
-                refLabels={sessionRefLabels}
-              />
+              <React.Fragment key={clip.clipNumber}>
+                <StoryboardClipCard
+                  clip={clip}
+                  idx={idx}
+                  totalClips={storyboard.length}
+                  clipDuration={clipDuration}
+                  hint={hints[idx] || ''}
+                  onHintChange={v => setHints(prev => ({ ...prev, [idx]: v }))}
+                  onRefresh={() => handleRefresh(idx)}
+                  onEdit={sessionId ? handleEditClip : undefined}
+                  onEditAI={sessionId ? handleEditClipAI : undefined}
+                  isRefreshing={refreshingFrom === idx}
+                  isStale={refreshingFrom !== null && idx > refreshingFrom}
+                  refLabels={sessionRefLabels}
+                />
+                {/* Feature 13 — Transition selector between adjacent clips */}
+                {idx < storyboard.length - 1 && (
+                  <div className="flex items-center gap-2 pl-4 -my-1">
+                    <div className="h-3 w-px bg-border" />
+                    <span className="text-[10px] uppercase tracking-wider text-muted-foreground">Transition →</span>
+                    <select
+                      value={transitions[String(idx)] || 'cut'}
+                      onChange={e => handleTransitionChange(idx, e.target.value as ReelsTransition)}
+                      disabled={!sessionId}
+                      className="rounded-md border border-border bg-background px-2 py-0.5 text-[11px] focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50"
+                    >
+                      <option value="cut">Cut (instant)</option>
+                      <option value="fade">Fade</option>
+                      <option value="dissolve">Dissolve</option>
+                      <option value="wipeleft">Wipe Left</option>
+                      <option value="zoom">Zoom In</option>
+                    </select>
+                  </div>
+                )}
+              </React.Fragment>
             ))}
           </div>
+
+          {/* Feature 11 — Self-review banner */}
+          {sessionId && (
+            <div className="rounded-lg border border-cyan-300/40 bg-cyan-50/40 dark:bg-cyan-900/10 px-3 py-2.5">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-sm font-semibold text-cyan-700 dark:text-cyan-300">🔍 Self-Review Agent</p>
+                  <p className="text-[11px] text-muted-foreground">After generation, AI reviews clips for quality issues + character consistency.</p>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleRunReview}
+                  disabled={reviewing}
+                  className="shrink-0 border-cyan-400/50 text-cyan-700 hover:bg-cyan-100 dark:text-cyan-400"
+                >
+                  {reviewing ? <><Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />Reviewing…</> : 'Run Review'}
+                </Button>
+              </div>
+              {reviewResult && (
+                <div className="mt-2 rounded-md bg-background border border-border/60 p-2 space-y-1">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold">Score: {reviewResult.overallScore}/100</span>
+                    <span className={`text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded ${
+                      reviewResult.overallScore >= 80 ? 'bg-green-500/15 text-green-700 dark:text-green-400' :
+                      reviewResult.overallScore >= 60 ? 'bg-amber-500/15 text-amber-700 dark:text-amber-400' :
+                      'bg-red-500/15 text-red-700 dark:text-red-400'
+                    }`}>
+                      {reviewResult.overallScore >= 80 ? '✅ Great' : reviewResult.overallScore >= 60 ? '⚠️ OK' : '❌ Needs work'}
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-foreground/80">{reviewResult.summary}</p>
+                  {reviewResult.issues.length > 0 && (
+                    <ul className="space-y-0.5 mt-1.5">
+                      {reviewResult.issues.map((issue, i) => (
+                        <li key={i} className="text-[10px] flex gap-1.5">
+                          <span className={`${issue.severity === 'error' ? 'text-red-600' : issue.severity === 'warning' ? 'text-amber-600' : 'text-muted-foreground'}`}>
+                            Clip {issue.clipIndex + 1}:
+                          </span>
+                          <span className="text-foreground/70">{issue.message}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
 
           <Button
             onClick={handleGenerate}

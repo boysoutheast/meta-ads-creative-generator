@@ -15,11 +15,13 @@
  * @returns {object} mergedInfo - { path, sha256, sizeBytes }
  */
 
+const path = require('path');
 const { generateFirstClip, pollUntilComplete } = require('./geminiGenService');
 const {
   downloadClips, verifyClips, mergeClips, verifyMerged, cleanupClips,
 } = require('./reelsMerger');
 const { auditLog } = require('./sessionStore');
+const { generateClipAudios } = require('./ttsService');
 
 const MAX_CLIP_ATTEMPTS = 3;
 
@@ -62,11 +64,20 @@ async function runGeneration(session, sse, saveSession) {
       return null;
     }
 
-    // Collect image URLs: scene image first, then all user reference images
+    // Collect image URLs in priority order:
+    //   1. Pinned character (Feature 4) — forced into EVERY clip for consistency
+    //   2. Scene preview image — gives Gemini exact composition target
+    //   3. Per-clip reference overrides (Feature 10) when provided, else session-level refs
     const imageUrls = [];
+    if (session.pinnedCharacterImageUrl) imageUrls.push(session.pinnedCharacterImageUrl);
     const sceneImageUrl = storyboard[i]?.sceneImageUrl;
     if (sceneImageUrl) imageUrls.push(sceneImageUrl);
-    (session.referenceImageUrls || []).forEach(r => { if (r.url) imageUrls.push(r.url); });
+    const overrides = session.clipReferenceOverrides && session.clipReferenceOverrides[i];
+    if (Array.isArray(overrides) && overrides.length > 0) {
+      overrides.forEach(u => { if (u) imageUrls.push(u); });
+    } else {
+      (session.referenceImageUrls || []).forEach(r => { if (r.url) imageUrls.push(r.url); });
+    }
 
     let clipDone = false;
 
@@ -165,13 +176,47 @@ async function runGeneration(session, sse, saveSession) {
     auditLog(session, 'info', `CLIP_${v.index + 1}_VERIFIED`, { sha256: v.sha256, sizeBytes: v.sizeBytes });
   });
 
+  // Optional: generate TTS audio for each clip (Feature 7)
+  let ttsAudioPaths = null;
+  if (session.enableTTS) {
+    try {
+      auditLog(session, 'info', 'TTS_START', { voice: session.ttsVoice || 'nova' });
+      sse({ type: 'merge_progress', phase: 'tts', progress: 0 });
+      const ttsDir = path.join('/tmp', 'reels', sessionId, 'tts');
+      const orderedStoryboard = doneClips.map(c => session.storyboard[c.index]).filter(Boolean);
+      ttsAudioPaths = await generateClipAudios(orderedStoryboard, session.ttsVoice || 'nova', ttsDir);
+      auditLog(session, 'info', 'TTS_DONE', {
+        success: ttsAudioPaths.filter(Boolean).length,
+        total: ttsAudioPaths.length,
+      });
+    } catch (e) {
+      console.warn('[reelsGenerator] TTS failed (non-blocking):', e.message);
+      auditLog(session, 'warn', 'TTS_FAILED', { error: e.message });
+      ttsAudioPaths = null;
+    }
+  }
+
   // FFmpeg merge
   sse({ type: 'merge_progress', phase: 'merging', progress: 0 });
-  auditLog(session, 'info', 'FFMPEG_START', {});
-
-  await mergeClips(sessionId, totalClips, ({ phase, progress }) => {
-    sse({ type: 'merge_progress', phase, progress: Math.round(progress) });
+  auditLog(session, 'info', 'FFMPEG_START', {
+    exportResolution: session.exportResolution || '720p',
+    hasTransitions: !!(session.transitions && Object.keys(session.transitions).length),
+    hasTTS: !!ttsAudioPaths,
   });
+
+  await mergeClips(
+    sessionId,
+    totalClips,
+    ({ phase, progress }) => {
+      sse({ type: 'merge_progress', phase, progress: Math.round(progress) });
+    },
+    {
+      exportResolution: session.exportResolution || '720p',
+      transitions: session.transitions || {},
+      ttsAudioPaths,
+      clipDuration: session.clipDuration || 10,
+    }
+  );
 
   // Verify merged + cleanup individual clips
   const mergedInfo = await verifyMerged(sessionId);

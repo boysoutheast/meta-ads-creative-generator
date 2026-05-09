@@ -155,7 +155,15 @@ async function deleteSession(sessionId) {
 
 // ── factory ───────────────────────────────────────────────────────────────────
 
-function createSession({ prompt, mode, duration, aspectRatio = 'portrait', resolution = '720p', clipDuration = 10, voType = 'narration', visualStyle = 'premium_3d', projectType = 'default', outputLanguage = 'id', scriptText = null }) {
+function createSession({
+  prompt, mode, duration,
+  aspectRatio = 'portrait', resolution = '720p', clipDuration = 10,
+  voType = 'narration', visualStyle = 'premium_3d',
+  projectType = 'default', outputLanguage = 'id', scriptText = null,
+  pinnedCharacterImageUrl = null,
+  enableTTS = false, ttsVoice = 'nova',
+  exportResolution = '720p',
+}) {
   return {
     sessionId: uuidv4(),
     createdAt: new Date().toISOString(),
@@ -175,6 +183,17 @@ function createSession({ prompt, mode, duration, aspectRatio = 'portrait', resol
     projectType,    // default | story | product_promo | digital_human
     outputLanguage, // id | en | th | vi | zh | hi | es | pt | ar | ko | ja
     scriptText,     // null (brief mode) | string (adapt existing script)
+    // Feature: Character consistency pinning — same image injected into every clip's refs
+    pinnedCharacterImageUrl,
+    // Feature: TTS auto-dub (apimart tts-1)
+    enableTTS,
+    ttsVoice,
+    // Feature: Export resolution upscale (FFmpeg scale filter)
+    exportResolution, // 720p | 1080p | 4k
+    // Feature: Per-clip reference image overrides — { [clipIndex]: string[] }
+    clipReferenceOverrides: {},
+    // Feature: Scene transitions — { [afterClipIndex]: 'cut'|'fade'|'dissolve'|'wipeleft'|'zoom' }
+    transitions: {},
     storyboard: [],          // { clipNumber, visualSummary, voScript, grokPrompt, sceneImageUrl, technicalConfig }
     referenceImageUrls: [],  // { tag, label, url } — user-uploaded reference images
     clips: [],               // { index, status, uuid, videoUrl, thumbnailUrl, attempts, completedAt, error }
@@ -183,6 +202,8 @@ function createSession({ prompt, mode, duration, aspectRatio = 'portrait', resol
     sizeBytes: null,         // merged file size in bytes — set after FFmpeg, shown in results UI
     downloadReady: false,
     downloadedAt: null,
+    // Feature: Self-review result cache
+    review: null,            // { overallScore, issues, summary, reviewedAt }
     audit: [],
     _hash: null,
   };

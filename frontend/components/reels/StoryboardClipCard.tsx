@@ -4,7 +4,7 @@ import React, { useState } from 'react'
 import {
   Camera, Lightbulb, Clapperboard,
   RefreshCw, Loader2, Sparkles, Palette, Globe, Package, Music2,
-  Pencil, Check, X,
+  Pencil, Check, X, Wand2,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
@@ -21,6 +21,8 @@ export interface StoryboardClipCardProps {
   onHintChange: (v: string) => void
   onRefresh: () => void
   onEdit?: (idx: number, visualSummary: string, voScript: string) => Promise<void>
+  // Feature 12 — AI conversational shot edit
+  onEditAI?: (idx: number, instruction: string) => Promise<void>
   isRefreshing: boolean
   isStale: boolean
   refLabels?: { tag: string; label: string }[]
@@ -45,7 +47,7 @@ const VO_TYPE_LABELS: Record<string, string> = {
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export function StoryboardClipCard({
-  clip, idx, totalClips, clipDuration = 10, hint, onHintChange, onRefresh, onEdit, isRefreshing, isStale, refLabels = [],
+  clip, idx, totalClips, clipDuration = 10, hint, onHintChange, onRefresh, onEdit, onEditAI, isRefreshing, isStale, refLabels = [],
 }: StoryboardClipCardProps) {
   const [showHint, setShowHint] = useState(false)
   const [showDetails, setShowDetails] = useState(false)
@@ -55,6 +57,23 @@ export function StoryboardClipCard({
   const [saving, setSaving] = useState(false)
   const [editVisualSummary, setEditVisualSummary] = useState(clip.visualSummary)
   const [editVoScript, setEditVoScript] = useState(clip.voScript)
+
+  // Feature 12 — AI conversational edit
+  const [aiInstruction, setAiInstruction] = useState('')
+  const [aiEditing, setAiEditing] = useState(false)
+  const [showAiEdit, setShowAiEdit] = useState(false)
+
+  async function handleAiEdit() {
+    if (!onEditAI || !aiInstruction.trim()) return
+    setAiEditing(true)
+    try {
+      await onEditAI(idx, aiInstruction.trim())
+      setAiInstruction('')
+      setShowAiEdit(false)
+    } finally {
+      setAiEditing(false)
+    }
+  }
 
   async function handleSaveEdit() {
     if (!onEdit) return
@@ -338,6 +357,15 @@ export function StoryboardClipCard({
                 </span>
               )}
 
+              {onEditAI && (
+                <button
+                  className="text-xs text-violet-600 dark:text-violet-400 hover:underline flex items-center gap-1"
+                  onClick={() => setShowAiEdit(p => !p)}
+                >
+                  <Wand2 className="h-3 w-3" />
+                  {showAiEdit ? '▲ hide AI edit' : 'AI edit'}
+                </button>
+              )}
               <button
                 className="ml-auto text-xs text-muted-foreground hover:text-foreground"
                 onClick={() => setShowHint(p => !p)}
@@ -345,6 +373,28 @@ export function StoryboardClipCard({
                 {showHint ? '▲ hide hint' : '+ add hint'}
               </button>
             </div>
+
+            {/* Feature 12 — AI conversational edit */}
+            {showAiEdit && onEditAI && (
+              <div className="rounded-md border border-violet-300/40 bg-violet-50/30 dark:bg-violet-900/10 p-2 space-y-1.5">
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-violet-700 dark:text-violet-300">✨ AI Shot Edit</p>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={aiInstruction}
+                    onChange={e => setAiInstruction(e.target.value)}
+                    placeholder='e.g. "make it more dramatic" or "change setting to night"'
+                    disabled={aiEditing}
+                    onKeyDown={e => { if (e.key === 'Enter') handleAiEdit() }}
+                    className="flex-1 rounded-md border bg-background px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-violet-400 disabled:opacity-50"
+                  />
+                  <Button size="sm" onClick={handleAiEdit} disabled={!aiInstruction.trim() || aiEditing} className="h-7 text-xs">
+                    {aiEditing ? <Loader2 className="h-3 w-3 animate-spin" /> : 'Apply'}
+                  </Button>
+                </div>
+                <p className="text-[10px] text-muted-foreground">AI rewrites this clip's prompt + regenerates the scene image.</p>
+              </div>
+            )}
 
             {/* Optional hint */}
             {showHint && (
