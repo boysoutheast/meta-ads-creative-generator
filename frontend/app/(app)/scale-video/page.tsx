@@ -229,7 +229,9 @@ export default function ScaleVideoPage() {
                     className="text-sm"
                   />
                   <p className="text-xs text-muted-foreground">
-                    Support: Instagram Reels, TikTok, YouTube Shorts, Facebook. Video harus publik.
+                    Support: <b>YouTube Shorts</b>, <b>TikTok</b>, <b>Facebook</b>, <b>Instagram</b>*. Video harus publik.
+                    <br />
+                    <span className="text-amber-700 dark:text-amber-400 text-[11px]">*Instagram saat ini wajib login (yt-dlp limitation) — kalau gagal, download manual lalu Upload File.</span>
                   </p>
 
                   {/* Sprint 3 v2 — Analysis mode toggle */}

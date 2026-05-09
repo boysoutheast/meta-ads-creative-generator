@@ -37,21 +37,25 @@ function bytesMb(bytes) {
  * @returns {string} path to the downloaded file
  */
 function ytDlpDownload(url, outFile, { audioOnly = false, onProgress = NOOP } = {}) {
-  const flagsCommon = `--no-playlist --max-filesize 200M --no-warnings --output "${outFile}"`;
+  // Mobile Safari iOS UA — sometimes bypasses IG/TikTok desktop-only checks.
+  // English Accept-Language helps server return predictable content.
+  const ua = '"Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1"';
+  const headers = '--add-header "Accept-Language:en-US,en;q=0.9"';
+  const cookiesFromEnv = process.env.YT_DLP_COOKIES_FILE && require('fs').existsSync(process.env.YT_DLP_COOKIES_FILE)
+    ? `--cookies "${process.env.YT_DLP_COOKIES_FILE}"`
+    : '';
+
+  const flagsCommon = `--no-playlist --max-filesize 200M --no-warnings --retries 2 --user-agent ${ua} ${headers} ${cookiesFromEnv} --output "${outFile}"`;
 
   // Format chains — tried in order until one works
   const chains = audioOnly
     ? [
-        // 1. Modern fallback chain: bestaudio→best→single stream
         '"bestaudio/best"',
         '"best"',
       ]
     : [
-        // 1. Prefer mp4 single stream (works on IG, TikTok, FB)
         '"best[ext=mp4]/best"',
-        // 2. Universal best (any container, any height)
         '"best"',
-        // 3. Try separate video+audio merge (YT, some others)
         '"bestvideo+bestaudio/best"',
       ];
 
@@ -94,12 +98,27 @@ function ytDlpDownload(url, outFile, { audioOnly = false, onProgress = NOOP } = 
     }
   }
 
-  // Detect missing yt-dlp (vs format error)
+  // Categorise error for friendly messaging
   const errMsg = lastErr ? (lastErr.stderr || lastErr.message || '').toString() : 'unknown';
+
   if (errMsg.includes('command not found') || errMsg.includes('ENOENT') || errMsg.includes('not recognized')) {
     throw new Error('yt-dlp tidak terinstall di server (deploy ulang Railway dengan Dockerfile baru)');
   }
-  throw new Error(`Download gagal — semua format selector failed. Detail: ${errMsg.slice(0, 200)}`);
+
+  // Instagram-specific: login wall / rate-limit
+  if (errMsg.includes('rate-limit reached') || errMsg.includes('login required') || errMsg.includes('Restricted Video') || errMsg.includes('Use --cookies')) {
+    throw new Error(
+      'Instagram saat ini wajib login untuk download (yt-dlp limitation 2024+). ' +
+      'Coba: (1) URL TikTok/YouTube/Facebook (gratis tanpa login), atau (2) Download manual dari Instagram lalu pakai tab "Upload File".'
+    );
+  }
+
+  // Private/removed video
+  if (errMsg.includes('Private video') || errMsg.includes('Video unavailable') || errMsg.includes('removed')) {
+    throw new Error('Video private, sudah dihapus, atau region-locked.');
+  }
+
+  throw new Error(`Download gagal — coba upload manual. Detail: ${errMsg.slice(0, 200)}`);
 }
 
 // ─── Gemini helper ────────────────────────────────────────────────────────────
