@@ -1,7 +1,7 @@
 /**
  * sceneImageService.js
  *
- * Generates one preview image per storyboard clip using Gemini Image 2.0.
+ * Generates one preview image per storyboard clip using gpt-image-2 via apimart.
  * These images serve two purposes:
  *   1. User preview — shows what each scene will look like before video generation
  *   2. Video reference — passed as image_urls[] to GeminiGen for fresh clips

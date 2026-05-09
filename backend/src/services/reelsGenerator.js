@@ -104,7 +104,7 @@ async function runGeneration(session, sse, saveSession) {
           type: 'clip_done',
           clipIndex: i,
           totalClips,
-          clip: { uuid: clip.uuid, videoUrl: clip.videoUrl, thumbnailUrl: clip.thumbnailUrl },
+          clip: { uuid: result.uuid, videoUrl: clip.videoUrl, thumbnailUrl: clip.thumbnailUrl },
         });
 
         clipDone = true;
