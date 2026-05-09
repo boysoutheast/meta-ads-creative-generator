@@ -182,6 +182,12 @@ function compileGrokPrompt(fields, arLabel, clipDuration, voType) {
   // [FORMAT] — always first
   parts.push(`[FORMAT] ${arLabel}, ${clipDuration}s, ${fields.visualStyle || '3D semi-cartoon premium skincare, glossy, cinematic, high detail'}`);
 
+  // [REFERENCES] — if reference images exist, list them so GeminiGen knows what @imageN maps to
+  if (fields.referenceImages && fields.referenceImages.length > 0) {
+    const refList = fields.referenceImages.map(r => `${r.tag}="${r.label}" (${classifyRefImage(r)})`).join(', ');
+    parts.push(`\n[REFERENCES] ${refList} — maintain EXACT visual design from these images in every frame`);
+  }
+
   // [WORLD] — conditional: only if world/environment is richly described
   if (fields.world) {
     parts.push(`\n[WORLD] ${fields.world}`);
@@ -258,22 +264,37 @@ function compileGrokPrompt(fields, arLabel, clipDuration, voType) {
 }
 
 // ── brief analysis: detect what conditional sections to include ───────────────
+const CHARACTER_LABEL_RE = /karakter|character|maskot|mascot|person|tokoh|hero|talent|model|artis/i;
+const PRODUCT_LABEL_RE   = /produk|product|cream|serum|lotion|bottle|jar|packaging|skincare|sabun|toner|moisturizer|brand|logo/i;
+
+/**
+ * Classify a reference image's role.
+ * - If label explicitly matches character keywords → 'character'
+ * - If label explicitly matches product keywords → 'product'
+ * - Default: treat as 'product' (most common use-case — brand/packaging shot)
+ */
+function classifyRefImage(r) {
+  const l = r.label.toLowerCase();
+  if (CHARACTER_LABEL_RE.test(l)) return 'character';
+  if (PRODUCT_LABEL_RE.test(l))   return 'product';
+  return 'product'; // fallback: unknown label → assume product reference
+}
+
 function buildConditionalContext(prompt, referenceImages) {
   const lower = prompt.toLowerCase();
   const hasCharacter = /karakter|character|maskot|mascot|kapten|figure|tokoh|hero|villain|persona/.test(lower);
   const hasProduct = /produk|product|cream|serum|lotion|bottle|jar|packaging|skincare|sabun|toner|moisturizer/.test(lower);
   const hasWorld = /kota|city|world|dunia|realm|kingdom|scene|environment|landscape|alam|studio/.test(lower);
   const hasEffects = /glow|cahaya|sparkle|particles|partikel|magic|aura|glitter|shimmer|energi|effect|efek/.test(lower);
-  const hasCharacterRef = referenceImages.some(r =>
-    /karakter|character|maskot|mascot|person|tokoh|hero/.test(r.label.toLowerCase())
-  );
-  const hasProductRef = referenceImages.some(r =>
-    /produk|product|cream|jar|bottle|packaging|skincare/.test(r.label.toLowerCase())
-  );
+
+  // Classify all reference images — anything not explicitly a character defaults to product
+  const hasCharacterRef = referenceImages.some(r => classifyRefImage(r) === 'character');
+  const hasProductRef   = referenceImages.some(r => classifyRefImage(r) === 'product');
 
   return {
     needsCharacter: hasCharacter || hasCharacterRef,
-    needsProduct: hasProduct || hasProductRef,
+    // needsProduct: true if brief mentions a product OR if ANY non-character reference image exists
+    needsProduct:   hasProduct || hasProductRef || (referenceImages.length > 0 && !hasCharacterRef),
     needsWorld: hasWorld,
     needsEffects: hasEffects,
     needsSceneFlow: true, // always useful for 10s ad clips
@@ -289,17 +310,17 @@ function buildClipSchema(arLabel, clipDuration, flags, referenceImages, audioRul
   }
 
   if (flags.needsCharacter) {
-    const refTags = referenceImages
-      .filter(r => /karakter|character|maskot|person|tokoh|hero/.test(r.label.toLowerCase()))
-      .map(r => r.tag).join(', ') || '@image1';
-    conditionalFields.push(`    "character": "<character name> — exact design: outfit colors/material, accessories, distinguishing features; Maintain exact design from ${refTags} — DO NOT alter outfit/face/accessories; Frozen: never change [list specific features]"`);
+    // Use character-classified images, fall back to ALL images if none match
+    const charRefs = referenceImages.filter(r => classifyRefImage(r) === 'character');
+    const refTags = (charRefs.length > 0 ? charRefs : referenceImages).map(r => r.tag).join(', ') || '@image1';
+    conditionalFields.push(`    "character": "<character name> — exact design: outfit colors/material, accessories, distinguishing features; Maintain EXACT design from ${refTags} — DO NOT alter outfit/face/accessories; Frozen: never change [list specific features]"`);
   }
 
   if (flags.needsProduct) {
-    const refTags = referenceImages
-      .filter(r => /produk|product|cream|jar|bottle|packaging/.test(r.label.toLowerCase()))
-      .map(r => r.tag).join(', ') || '@image1';
-    conditionalFields.push(`    "product": "<product name> — Container: [color, material, finish]; Label: [color, exact text/logo]; Content: [color/texture if visible]; Maintain exact product from ${refTags}; Frozen: jar stays [color], label stays [text]"`);
+    // Use product-classified images, fall back to ALL images if none specifically match
+    const prodRefs = referenceImages.filter(r => classifyRefImage(r) === 'product');
+    const refTags = (prodRefs.length > 0 ? prodRefs : referenceImages).map(r => r.tag).join(', ') || '@image1';
+    conditionalFields.push(`    "product": "<product name> — Describe ONLY what you see in ${refTags}; Container: [color, material, finish from image]; Label: [exact text/logo from image]; Content: [color/texture if visible]; MUST reference ${refTags} — Frozen: keep EXACT colors and label from image, never alter"`);
   }
 
   if (flags.needsSceneFlow) {
@@ -345,15 +366,33 @@ async function buildStoryboard({ prompt, mode, duration, referenceImages = [], a
   const audio = getAudioRules(voType, clipDuration);
   const flags = buildConditionalContext(prompt, referenceImages);
 
-  // Reference images context
-  const refCtx = referenceImages.length > 0
-    ? `
-USER REFERENCE IMAGES (${referenceImages.length} uploaded — assign relevant @imageN in character/product fields):
-${referenceImages.map(r => `  ${r.tag} = "${r.label}"`).join('\n')}
-- Use @imageN tags in character/product fields for visual freeze
-- Reference the SAME tags in restrictions as freeze rules
-`
-    : '';
+  // Reference images context — classify each image and build enforcement rules
+  let refCtx = '';
+  if (referenceImages.length > 0) {
+    const classified = referenceImages.map(r => ({
+      ...r,
+      role: classifyRefImage(r),
+    }));
+    const productRefs  = classified.filter(r => r.role === 'product');
+    const characterRefs = classified.filter(r => r.role === 'character');
+
+    refCtx = `
+⚠️ REFERENCE IMAGES — CRITICAL ENFORCEMENT (${referenceImages.length} uploaded):
+${classified.map(r => `  ${r.tag} = "${r.label}" [${r.role.toUpperCase()} reference]`).join('\n')}
+${productRefs.length > 0 ? `
+PRODUCT REFERENCE (${productRefs.map(r => r.tag).join(', ')}):
+- The product's visual design comes EXCLUSIVELY from these images
+- EVERY clip's "product" field MUST include "${productRefs.map(r => r.tag).join(', ')}"
+- DO NOT invent product colors, labels, or packaging — describe ONLY what is in the image
+- Frozen: product appearance must stay 100% identical across ALL clips` : ''}
+${characterRefs.length > 0 ? `
+CHARACTER REFERENCE (${characterRefs.map(r => r.tag).join(', ')}):
+- Character design comes EXCLUSIVELY from these images
+- EVERY clip's "character" field MUST include "${characterRefs.map(r => r.tag).join(', ')}"
+- DO NOT alter outfit, face, accessories from what is shown` : ''}
+- Include "${classified.map(r => r.tag).join(', ')}" in the restrictions field of EVERY clip as freeze rules
+`;
+  }
 
   const clipSchema = buildClipSchema(arLabel, clipDuration, flags, referenceImages, audio, totalClips);
 
@@ -428,7 +467,7 @@ ${clipSchema}`;
     temperature: 0.8,
   });
 
-  return parseClipsFromResponse(raw, totalClips, 1, arLabel, clipDuration, voType);
+  return parseClipsFromResponse(raw, totalClips, 1, arLabel, clipDuration, voType, referenceImages);
 }
 
 // ── refresh from a specific clip index ───────────────────────────────────────
@@ -453,9 +492,15 @@ async function refreshFromIndex({ prompt, mode, existingClips, fromIndex, totalC
 
   const hintStr = hint ? `\nCreative direction: "${hint}"\n` : '';
 
-  const refCtx = referenceImages.length > 0
-    ? `\nReference images: ${referenceImages.map(r => `${r.tag}="${r.label}"`).join(', ')}\n`
-    : '';
+  let refCtx = '';
+  if (referenceImages.length > 0) {
+    const classified = referenceImages.map(r => ({ ...r, role: classifyRefImage(r) }));
+    const productRefs = classified.filter(r => r.role === 'product');
+    refCtx = `\n⚠️ REFERENCE IMAGES (CRITICAL — use @imageN in every clip):
+${classified.map(r => `  ${r.tag} = "${r.label}" [${r.role}]`).join('\n')}
+${productRefs.length > 0 ? `EVERY clip's product field MUST reference: ${productRefs.map(r => r.tag).join(', ')}` : ''}
+`;
+  }
 
   const clipSchema = buildClipSchema(arLabel, clipDuration, flags, referenceImages, audio, totalClips);
 
@@ -490,13 +535,13 @@ ${clipSchema}`;
     temperature: 0.8,
   });
 
-  const newClips = parseClipsFromResponse(raw, clipsToGenerate, fromIndex + 1, arLabel, clipDuration, voType);
+  const newClips = parseClipsFromResponse(raw, clipsToGenerate, fromIndex + 1, arLabel, clipDuration, voType, referenceImages);
   return [...clipsToKeep, ...newClips];
 }
 
 // ── parse helper + compile grokPrompt from JSON fields ───────────────────────
 
-function parseClipsFromResponse(raw, expectedCount, startNumber = 1, arLabel = '9:16', clipDuration = 10, voType = 'narration') {
+function parseClipsFromResponse(raw, expectedCount, startNumber = 1, arLabel = '9:16', clipDuration = 10, voType = 'narration', referenceImages = []) {
   const match = raw.match(/\[[\s\S]*\]/);
   if (!match) throw new Error('GPT-4o returned invalid storyboard: no JSON array found');
 
@@ -544,6 +589,7 @@ function parseClipsFromResponse(raw, expectedCount, startNumber = 1, arLabel = '
       product:        f.product        || null,
       sceneFlow:      f.sceneFlow      || null,
       effects:        f.effects        || null,
+      referenceImages,  // pass through so [REFERENCES] section is compiled
       audioDimension: {
         voiceType:    ad.voiceType    || '',
         voScript:     ad.voScript     || c.voScript || '',
