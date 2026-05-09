@@ -556,11 +556,25 @@ export async function analyzeWinningVideoFromUrl(
   mode: 'audio' | 'full' = 'full',
   onEvent?: (evt: AnalyzeUrlEvent) => void,
 ): Promise<AnalyzeUrlDonePayload> {
-  const response = await fetch(`${API_URL}/scale-video/analyze-from-url`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ url, mode }),
-  })
+  // 6-minute client-side abort guard (server has 5-min guard; this is the safety net)
+  const controller = new AbortController()
+  const abortId = setTimeout(() => controller.abort(), 6 * 60 * 1000)
+
+  let response: Response
+  try {
+    response = await fetch(`${API_URL}/scale-video/analyze-from-url`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url, mode }),
+      signal: controller.signal,
+    })
+  } catch (fetchErr: any) {
+    if (fetchErr?.name === 'AbortError') throw new Error('Analisis timeout (>6 menit). Coba mode Audio atau upload file manual.')
+    throw fetchErr
+  } finally {
+    clearTimeout(abortId)
+  }
+
   if (!response.ok) throw new Error(`HTTP ${response.status}`)
 
   const reader = response.body!.getReader()
@@ -568,28 +582,47 @@ export async function analyzeWinningVideoFromUrl(
   let buffer = ''
   let donePayload: AnalyzeUrlDonePayload | null = null
 
-  while (true) {
-    const { done, value } = await reader.read()
-    if (done) break
-    buffer += decoder.decode(value, { stream: true })
-    const parts = buffer.split('\n\n')
-    buffer = parts.pop() ?? ''
-    for (const part of parts) {
-      for (const line of part.split('\n')) {
-        if (!line.startsWith('data: ')) continue
-        try {
-          const evt = JSON.parse(line.slice(6)) as AnalyzeUrlEvent
-          onEvent?.(evt)
-          if (evt.type === 'done') donePayload = evt.payload
-          if (evt.type === 'error') throw new Error(evt.message)
-        } catch (parseErr) {
-          if ((parseErr as Error).message && !(parseErr as Error).message.includes('JSON')) throw parseErr
-        }
+  /** Process a single SSE block (lines separated by \n) */
+  const processBlock = (block: string) => {
+    for (const line of block.split('\n')) {
+      if (!line.startsWith('data: ')) continue
+      try {
+        const evt = JSON.parse(line.slice(6)) as AnalyzeUrlEvent
+        onEvent?.(evt)
+        if (evt.type === 'done') donePayload = evt.payload
+        if (evt.type === 'error') throw new Error(evt.message)
+      } catch (parseErr) {
+        // Only re-throw non-JSON errors (JSON parse failures are non-fatal)
+        if ((parseErr as Error).message && !(parseErr as Error).message.includes('JSON')) throw parseErr
       }
     }
   }
 
-  if (!donePayload) throw new Error('Stream ended without a result')
+  try {
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+      // SSE messages are separated by \n\n — keep incomplete tail in buffer
+      const parts = buffer.split('\n\n')
+      buffer = parts.pop() ?? ''
+      for (const part of parts) processBlock(part)
+    }
+
+    // Flush decoder and process any leftover bytes that arrived without trailing \n\n
+    // (can happen when server closes the TCP connection immediately after the last write)
+    buffer += decoder.decode() // flush multi-byte chars
+    if (buffer.trim()) processBlock(buffer)
+  } finally {
+    reader.releaseLock()
+  }
+
+  if (!donePayload) {
+    throw new Error(
+      'Stream berakhir tanpa hasil. Kemungkinan: koneksi terputus, video terlalu panjang, atau server timeout. ' +
+      'Coba lagi atau gunakan mode Audio.'
+    )
+  }
   return donePayload
 }
 

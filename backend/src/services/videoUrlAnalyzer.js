@@ -133,7 +133,7 @@ async function callGemini(parts, onProgress = NOOP) {
       {
         contents: [{ role: 'user', parts }],
         generationConfig: {
-          maxOutputTokens: 4096,
+          maxOutputTokens: 8192,
           temperature: 0.3,
           // NOTE: responseMimeType:'application/json' is intentionally omitted —
           // it is incompatible with video/inline-data input and causes Gemini to
@@ -142,7 +142,7 @@ async function callGemini(parts, onProgress = NOOP) {
       },
       {
         headers: { Authorization: `Bearer ${config.apimart.apiKey}`, 'Content-Type': 'application/json' },
-        timeout: 120000,
+        timeout: 180000, // 3 min — Gemini can be slow on long videos
       }
     );
     data = resp.data;

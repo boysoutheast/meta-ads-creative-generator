@@ -285,22 +285,45 @@ router.post('/analyze-from-url', async (req, res) => {
   res.setHeader('X-Accel-Buffering', 'no');
   res.flushHeaders();
 
+  let clientGone = false;
+  req.on('close', () => { clientGone = true; });
+
   const send = (data) => {
-    if (!res.writableEnded) {
-      res.write(`data: ${JSON.stringify(data)}\n\n`);
-      if (typeof res.flush === 'function') res.flush();
+    if (!res.writableEnded && !clientGone) {
+      try {
+        res.write(`data: ${JSON.stringify(data)}\n\n`);
+        if (typeof res.flush === 'function') res.flush();
+      } catch (_) { /* ignore write-after-close race */ }
     }
   };
-  const ping = setInterval(() => { if (!res.writableEnded) res.write(': ping\n\n'); }, 20_000);
+
+  // 5s pings — keeps Railway/nginx proxy alive (was 20s, too long for some proxies)
+  const ping = setInterval(() => {
+    if (!res.writableEnded && !clientGone) {
+      try { res.write(': ping\n\n'); } catch (_) {}
+    }
+  }, 5_000);
 
   const onProgress = (evt) => {
     send({ type: 'phase', ts: Date.now(), ...evt });
   };
 
+  // 5-minute hard guard — emits error event before Railway kills the connection (~6 min limit)
+  const GUARD_MS = 5 * 60 * 1000;
+  let guardFired = false;
+  const guardTimeout = setTimeout(() => {
+    guardFired = true;
+    send({ type: 'error', message: 'Analisis melebihi batas waktu 5 menit. Coba mode Audio atau upload file manual.' });
+    if (!res.writableEnded) res.end();
+  }, GUARD_MS);
+
   try {
     onProgress({ phase: 'start', message: `Menerima URL: ${url.slice(0, 80)}` });
 
     const { analysis, frames, transcript, platform, mode: usedMode } = await analyzeVideoFromUrl(url, mode, onProgress);
+
+    if (guardFired) return; // guard already closed the response
+
     const availableAngles = Object.entries(SCALING_ANGLES).map(([key, val]) => ({
       key,
       label: val.label,
@@ -323,6 +346,7 @@ router.post('/analyze-from-url', async (req, res) => {
     });
     res.end();
   } catch (err) {
+    if (guardFired) return;
     const msg = err.message || 'Gagal menganalisis URL';
     const isYtdlpMissing =
       msg.includes('yt-dlp: command not found') ||
@@ -334,8 +358,9 @@ router.post('/analyze-from-url', async (req, res) => {
       ? 'yt-dlp tidak tersedia. Untuk Instagram/TikTok gunakan Upload File manual, atau coba YouTube URL.'
       : msg;
     send({ type: 'error', message: friendly });
-    res.end();
+    if (!res.writableEnded) res.end();
   } finally {
+    clearTimeout(guardTimeout);
     clearInterval(ping);
   }
 });
