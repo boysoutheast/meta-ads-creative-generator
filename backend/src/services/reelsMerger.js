@@ -138,17 +138,22 @@ const VALID_TRANSITIONS = ['cut', 'fade', 'dissolve', 'wipeleft', 'zoom'];
 
 /**
  * Mix per-clip TTS audio onto each clip BEFORE merging.
- * Returns array of dubbed clip paths (or original if no TTS for that clip).
+ * Returns array of dubbed clip paths in the requested order (defaults to natural order).
  *
  * @param {string} sessionId
  * @param {number} clipCount
- * @param {Array<string|null>} ttsAudioPaths — aligned to clip indices
+ * @param {Array<string|null>} ttsAudioPaths — aligned to ORIGINAL clip indices
+ * @param {number[]} [clipOrder] — optional rendering order (original indices); defaults [0..clipCount-1]
  */
-async function dubClipsWithTTS(sessionId, clipCount, ttsAudioPaths) {
-  if (!Array.isArray(ttsAudioPaths)) return Array.from({ length: clipCount }, (_, i) => clipPath(sessionId, i));
+async function dubClipsWithTTS(sessionId, clipCount, ttsAudioPaths, clipOrder) {
+  const order = Array.isArray(clipOrder) && clipOrder.length === clipCount
+    ? clipOrder
+    : Array.from({ length: clipCount }, (_, i) => i);
+
+  if (!Array.isArray(ttsAudioPaths)) return order.map((i) => clipPath(sessionId, i));
 
   const dubbedPaths = [];
-  for (let i = 0; i < clipCount; i++) {
+  for (const i of order) {
     const original = clipPath(sessionId, i);
     const tts = ttsAudioPaths[i];
     if (!tts || !fs.existsSync(tts)) {
@@ -156,22 +161,24 @@ async function dubClipsWithTTS(sessionId, clipCount, ttsAudioPaths) {
       continue;
     }
     const dubbed = path.join(sessionDir(sessionId), `clip-${i}-dubbed.mp4`);
-    await new Promise((resolve, reject) => {
-      ffmpeg()
-        .input(original)
-        .input(tts)
-        .outputOptions([
-          '-map', '0:v:0',
-          '-map', '1:a:0',
-          '-c:v', 'copy',
-          '-c:a', 'aac',
-          '-shortest',
-        ])
-        .output(dubbed)
-        .on('end', resolve)
-        .on('error', reject)
-        .run();
-    });
+    if (!fs.existsSync(dubbed)) {
+      await new Promise((resolve, reject) => {
+        ffmpeg()
+          .input(original)
+          .input(tts)
+          .outputOptions([
+            '-map', '0:v:0',
+            '-map', '1:a:0',
+            '-c:v', 'copy',
+            '-c:a', 'aac',
+            '-shortest',
+          ])
+          .output(dubbed)
+          .on('end', resolve)
+          .on('error', reject)
+          .run();
+      });
+    }
     dubbedPaths.push(dubbed);
   }
   return dubbedPaths;
@@ -196,14 +203,18 @@ async function mergeClips(sessionId, clipCount, onProgress, options = {}) {
   const transitions = options.transitions || {};
   const ttsAudioPaths = options.ttsAudioPaths || null;
   const clipDuration = Number(options.clipDuration) || 10;
+  // Feature A: optional custom clip order (Timeline Editor)
+  const clipOrder = Array.isArray(options.clipOrder) && options.clipOrder.length === clipCount
+    ? options.clipOrder
+    : Array.from({ length: clipCount }, (_, i) => i);
 
   // Step A: dub clips with TTS first if requested (writes clip-N-dubbed.mp4)
   let inputPaths;
   if (ttsAudioPaths && ttsAudioPaths.some((p) => p)) {
     onProgress && onProgress({ phase: 'merging', progress: 5 });
-    inputPaths = await dubClipsWithTTS(sessionId, clipCount, ttsAudioPaths);
+    inputPaths = await dubClipsWithTTS(sessionId, clipCount, ttsAudioPaths, clipOrder);
   } else {
-    inputPaths = Array.from({ length: clipCount }, (_, i) => clipPath(sessionId, i));
+    inputPaths = clipOrder.map((i) => clipPath(sessionId, i));
   }
 
   // Decide path: any non-cut transition + non-default resolution requires re-encode.

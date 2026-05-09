@@ -361,6 +361,51 @@ export async function setTransitions(sessionId: string, transitions: Record<stri
   return res.data as { ok: boolean; transitions: Record<string, ReelsTransition> }
 }
 
+// ─── Sprint 2 / Feature A — Timeline Editor: re-merge in custom order ───────
+export type MergeCustomEvent =
+  | { type: 'merge_start'; clipCount: number; order: number[] }
+  | { type: 'merge_progress'; phase: string; progress: number }
+  | { type: 'ready'; sessionId: string; downloadUrl: string; sizeBytes: number; mergedHash: string }
+  | { type: 'error'; message: string; resumable?: boolean }
+
+export async function mergeCustomOrder(
+  sessionId: string,
+  clipOrder: number[],
+  onEvent: (evt: MergeCustomEvent) => void,
+  exportResolution?: ReelsExportResolution,
+): Promise<void> {
+  const response = await fetch(`${API_URL}/reels/${sessionId}/merge-custom`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ clipOrder, exportResolution }),
+  })
+  if (!response.ok) throw new Error(`Merge failed: HTTP ${response.status}`)
+
+  const reader = response.body!.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    const parts = buffer.split('\n\n')
+    buffer = parts.pop() ?? ''
+    for (const part of parts) {
+      for (const line of part.split('\n')) {
+        if (!line.startsWith('data: ')) continue
+        try {
+          const evt = JSON.parse(line.slice(6)) as MergeCustomEvent
+          onEvent(evt)
+          if (evt.type === 'error') throw new Error(evt.message)
+        } catch (parseErr) {
+          if ((parseErr as Error).message && !(parseErr as Error).message.includes('JSON')) throw parseErr
+        }
+      }
+    }
+  }
+}
+
 // ─── Feature 9 — Export settings (resolution, TTS) ──────────────────────────
 export async function setExportSettings(sessionId: string, payload: {
   exportResolution?: ReelsExportResolution

@@ -932,4 +932,100 @@ router.post('/:sessionId/export-settings', async (req, res) => {
   });
 });
 
+// ── FEATURE A — POST /:sessionId/merge-custom (Timeline Editor) ──────────────
+// Re-merges existing downloaded clips in a custom order (drag-drop reorder).
+// Uses SSE so the frontend can stream merge progress back to the user.
+router.post('/:sessionId/merge-custom', async (req, res) => {
+  const { sessionId } = req.params;
+  const { clipOrder, exportResolution } = req.body || {};
+
+  const session = await getSession(sessionId);
+  if (!session) return res.status(404).json({ error: 'Session not found' });
+  if (!session.downloadReady && !(session.clips && session.clips.length)) {
+    return res.status(400).json({ error: 'Clips not generated yet' });
+  }
+
+  const clipCount = (session.storyboard && session.storyboard.length) || (session.clips && session.clips.length) || 0;
+  if (!clipCount) return res.status(400).json({ error: 'No clips found' });
+
+  // Validate clipOrder — must be a permutation of [0..clipCount-1]
+  let order = Array.from({ length: clipCount }, (_, i) => i);
+  if (Array.isArray(clipOrder) && clipOrder.length === clipCount) {
+    const valid = clipOrder.every(n => Number.isInteger(n) && n >= 0 && n < clipCount)
+      && new Set(clipOrder).size === clipCount;
+    if (valid) order = clipOrder;
+  }
+
+  // SSE setup
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
+  res.flushHeaders();
+
+  const send = (data) => {
+    if (!res.writableEnded) {
+      res.write(`data: ${JSON.stringify(data)}\n\n`);
+      if (typeof res.flush === 'function') res.flush();
+    }
+  };
+  const ping = setInterval(() => { if (!res.writableEnded) res.write(': ping\n\n'); }, 20_000);
+
+  try {
+    send({ type: 'merge_start', clipCount, order });
+    const { mergeClips, getMergedPath } = require('../services/reelsMerger');
+    const fs = require('fs');
+    const crypto = require('crypto');
+
+    const expRes = ['720p', '1080p', '4k'].includes(exportResolution)
+      ? exportResolution
+      : (session.exportResolution || '720p');
+
+    await mergeClips(
+      sessionId,
+      clipCount,
+      ({ phase, progress }) => send({ type: 'merge_progress', phase, progress: Math.round(progress || 0) }),
+      {
+        clipOrder: order,
+        exportResolution: expRes,
+        transitions: session.transitions || {},
+        clipDuration: session.clipDuration || 10,
+        // TTS already mixed during initial merge — don't re-mix on re-order
+        ttsAudioPaths: null,
+      }
+    );
+
+    const mergedFilePath = getMergedPath(sessionId);
+    if (!fs.existsSync(mergedFilePath)) throw new Error('Merged file missing after re-merge');
+
+    const stat = fs.statSync(mergedFilePath);
+    const buf = fs.readFileSync(mergedFilePath);
+    const hash = crypto.createHash('sha256').update(buf).digest('hex');
+
+    session.downloadReady = true;
+    session.mergedPath = mergedFilePath;
+    session.mergedHash = hash;
+    session.sizeBytes = stat.size;
+    session.clipOrder = order;
+    session.exportResolution = expRes;
+    auditLog(session, 'info', 'CUSTOM_MERGE_DONE', { order, exportResolution: expRes, sizeBytes: stat.size });
+    await saveSession(session);
+
+    send({
+      type: 'ready',
+      sessionId,
+      downloadUrl: `/api/reels/download/${sessionId}`,
+      sizeBytes: stat.size,
+      mergedHash: hash,
+    });
+    res.end();
+  } catch (e) {
+    console.error('[reels/merge-custom]', e.message);
+    send({ type: 'error', message: e.message, resumable: true });
+    res.end();
+  } finally {
+    clearInterval(ping);
+  }
+});
+
 module.exports = router;

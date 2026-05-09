@@ -125,48 +125,67 @@ export default function LibraryPage() {
         </div>
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {items.map((item) => (
-            <Card key={item.id} className="overflow-hidden">
-              <div className="relative aspect-square bg-muted">
-                {item.imageUrl ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={item.imageUrl} alt={item.title} className="h-full w-full object-cover" />
-                ) : (
-                  <div className="flex h-full w-full items-center justify-center text-muted-foreground">
-                    <ImageIcon className="h-8 w-8" />
-                  </div>
-                )}
-                {item.angle && (
-                  <div className="absolute left-2 top-2"><Badge>{item.angle}</Badge></div>
-                )}
-              </div>
-              <CardContent className="space-y-2 p-3">
-                <p className="truncate text-sm font-semibold" title={item.title}>{item.title}</p>
-                <p className="text-xs text-muted-foreground">{new Date(item.createdAt).toLocaleString('id-ID')}</p>
-                <div className="flex gap-2 pt-1">
-                  {item.imageUrl && (
+          {items.map((item) => {
+            const isVideo = item.type === 'video' || !!item.videoUrl
+            const downloadUrl = item.videoUrl || item.imageUrl
+            const downloadExt = isVideo ? 'mp4' : 'png'
+            return (
+              <Card key={item.id} className="overflow-hidden">
+                <div className="relative aspect-square bg-muted">
+                  {isVideo && item.videoUrl ? (
+                    <video
+                      src={item.videoUrl}
+                      controls
+                      playsInline
+                      className="h-full w-full object-cover"
+                    />
+                  ) : item.imageUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={item.imageUrl} alt={item.title} className="h-full w-full object-cover" />
+                  ) : (
+                    <div className="flex h-full w-full items-center justify-center text-muted-foreground">
+                      <ImageIcon className="h-8 w-8" />
+                    </div>
+                  )}
+                  {item.angle && (
+                    <div className="absolute left-2 top-2"><Badge>{item.angle}</Badge></div>
+                  )}
+                  {isVideo && (
+                    <div className="absolute right-2 top-2">
+                      <Badge variant="secondary" className="bg-black/60 text-white border-none text-xs">
+                        Video
+                      </Badge>
+                    </div>
+                  )}
+                </div>
+                <CardContent className="space-y-2 p-3">
+                  <p className="truncate text-sm font-semibold" title={item.title}>{item.title}</p>
+                  <p className="text-xs text-muted-foreground">{new Date(item.createdAt).toLocaleString('id-ID')}</p>
+                  <div className="flex gap-2 pt-1">
+                    {downloadUrl && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="flex-1"
+                        onClick={() => downloadFromUrl(downloadUrl, `${item.title.replace(/\s+/g, '-')}.${downloadExt}`)}
+                      >
+                        <Download className="h-4 w-4" /> Download
+                      </Button>
+                    )}
                     <Button
                       size="sm"
-                      variant="outline"
-                      className="flex-1"
-                      onClick={() => downloadFromUrl(item.imageUrl!, `${item.title.replace(/\s+/g, '-')}.png`)}
+                      variant="ghost"
+                      onClick={() => handleDelete(item)}
+                      disabled={deletingId === item.id}
+                      aria-label="Delete"
                     >
-                      <Download className="h-4 w-4" /> Download
+                      {deletingId === item.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4 text-destructive" />}
                     </Button>
-                  )}
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    onClick={() => handleDelete(item)}
-                    disabled={deletingId === item.id}
-                    aria-label="Delete"
-                  >
-                    {deletingId === item.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4 text-destructive" />}
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-          ))}
+                  </div>
+                </CardContent>
+              </Card>
+            )
+          })}
         </div>
       )}
     </div>

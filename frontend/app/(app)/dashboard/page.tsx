@@ -1,13 +1,25 @@
 'use client'
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
-import { ArrowRight, Image as ImageIcon, Wand2, Film, DollarSign, ChevronRight, Loader2 } from 'lucide-react'
+import {
+  ArrowRight, Image as ImageIcon, Wand2, Film, DollarSign,
+  ChevronRight, Loader2, Layers, Video, Palette,
+} from 'lucide-react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useAuthStore } from '@/lib/auth'
 import { getLibraryStats } from '@/lib/api-auth'
+
+const QUICK_ACTIONS = [
+  { href: '/reels',                  icon: Film,      label: 'Create AI Reels',     desc: 'Text → multi-clip video ad',     gradient: 'from-purple-500 to-pink-500' },
+  { href: '/scale',                  icon: Layers,    label: 'Scale Winning Image', desc: 'Multiply best ad to 20 angles',  gradient: 'from-orange-500 to-red-500' },
+  { href: '/scale-video',            icon: Video,     label: 'Scale Winning Video', desc: 'Generate video variations',       gradient: 'from-blue-500 to-cyan-500' },
+  { href: '/remake',                 icon: Wand2,     label: 'Video Remake',        desc: 'Remake any video with AI',        gradient: 'from-emerald-500 to-teal-500' },
+  { href: '/create',                 icon: Palette,   label: 'Create w/ Reference', desc: 'Upload ref → generate ad',        gradient: 'from-amber-500 to-orange-500' },
+  { href: '/generate/single-image',  icon: ImageIcon, label: 'Single Image',        desc: 'Quick one-shot ad image',         gradient: 'from-slate-500 to-zinc-500' },
+] as const
 
 export default function DashboardPage() {
   const user = useAuthStore((s) => s.user)
@@ -59,6 +71,29 @@ export default function DashboardPage() {
           icon={<DollarSign className="h-4 w-4" />}
           loading={loading}
         />
+      </section>
+
+      {/* Sprint 2 — Quick Actions */}
+      <section className="space-y-3">
+        <h2 className="text-base font-semibold tracking-tight">Quick Actions</h2>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {QUICK_ACTIONS.map(({ href, icon: Icon, label, desc, gradient }) => (
+            <Link
+              key={href}
+              href={href}
+              className="group relative flex items-center gap-3 overflow-hidden rounded-xl border bg-background p-3 transition-all hover:border-primary hover:shadow-md"
+            >
+              <div className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br ${gradient} text-white shadow-md`}>
+                <Icon className="h-5 w-5 drop-shadow" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="truncate font-semibold text-sm">{label}</p>
+                <p className="truncate text-xs text-muted-foreground">{desc}</p>
+              </div>
+              <ArrowRight className="h-4 w-4 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5 group-hover:text-primary" />
+            </Link>
+          ))}
+        </div>
       </section>
 
       <section>

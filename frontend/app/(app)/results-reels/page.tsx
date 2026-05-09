@@ -4,13 +4,15 @@ import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   Film, Download, CheckCircle2, AlertCircle, Loader2,
-  Clock, RefreshCw, Trash2, Plus, ChevronDown, ChevronRight,
-  Clapperboard, Play,
+  Clock, RefreshCw, Trash2, Plus, ChevronDown, ChevronRight, ChevronUp,
+  Clapperboard, Play, GripVertical, Save,
 } from 'lucide-react'
+import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
-import { getReelSession, startReelGeneration, type ReelsSSEEvent } from '@/lib/api'
+import { getReelSession, startReelGeneration, mergeCustomOrder, type ReelsSSEEvent, type MergeCustomEvent } from '@/lib/api'
+import { saveToLibrary } from '@/lib/api-auth'
 import {
   type StoredSession,
   loadStoredSessions,
@@ -164,6 +166,15 @@ function SessionCard({ stored, onRemove }: { stored: StoredSession; onRemove: ()
   const [expanded, setExpanded] = useState(true)
   const sseStarted = useRef(false)
 
+  // Sprint 2 — Timeline editor (drag-drop reorder)
+  const [clipOrder, setClipOrder] = useState<number[]>([])
+  const [showTimeline, setShowTimeline] = useState(false)
+  const [remerging, setRemerging] = useState(false)
+  const [remergeProgress, setRemergeProgress] = useState(0)
+
+  // Sprint 2 — Save to Library
+  const [savingToLibrary, setSavingToLibrary] = useState(false)
+
   const handleSSE = useCallback((evt: ReelsSSEEvent) => {
     switch (evt.type) {
       case 'start':
@@ -217,6 +228,8 @@ function SessionCard({ stored, onRemove }: { stored: StoredSession; onRemove: ()
         setDownloadReady(true)
         setMergedHash(evt.mergedHash || null)
         setSizeBytes(evt.sizeBytes || null)
+        // Init Timeline Editor order to natural [0..n-1]
+        setClipOrder(Array.from({ length: n }, (_, i) => i))
         break
       case 'error':
         setStatus('error')
@@ -254,6 +267,9 @@ function SessionCard({ stored, onRemove }: { stored: StoredSession; onRemove: ()
           setMergePhase('done')
           setSizeBytes(s.sizeBytes ?? null)
           setMergedHash(s.mergedHash ?? null)
+          // Initialize clipOrder from saved server state (if user re-merged earlier) or natural order
+          const savedOrder = Array.isArray(s.clipOrder) && s.clipOrder.length === n ? s.clipOrder : Array.from({ length: n }, (_, i) => i)
+          setClipOrder(savedOrder)
           return
         }
 
@@ -294,6 +310,56 @@ function SessionCard({ stored, onRemove }: { stored: StoredSession; onRemove: ()
       setStatus('error')
       setError(err.message)
     })
+  }
+
+  // Sprint 2 — Timeline Editor: re-merge with new clip order
+  async function handleRemerge() {
+    if (remerging || clipOrder.length === 0) return
+    setRemerging(true)
+    setRemergeProgress(0)
+    setError(null)
+    try {
+      await mergeCustomOrder(stored.sessionId, clipOrder, (evt: MergeCustomEvent) => {
+        if (evt.type === 'merge_progress') setRemergeProgress(evt.progress || 0)
+        else if (evt.type === 'ready') {
+          setMergedHash(evt.mergedHash || null)
+          setSizeBytes(evt.sizeBytes ?? null)
+          setDownloadReady(true)
+          toast.success('Re-merged in custom order ✓')
+        } else if (evt.type === 'error') {
+          throw new Error(evt.message)
+        }
+      })
+    } catch (e: any) {
+      setError(e.message || 'Re-merge failed')
+      toast.error(e.message || 'Re-merge failed')
+    } finally {
+      setRemerging(false)
+    }
+  }
+
+  // Sprint 2 — Save to Library
+  async function handleSaveToLibrary() {
+    if (savingToLibrary) return
+    setSavingToLibrary(true)
+    try {
+      await saveToLibrary({
+        type: 'video',
+        title: stored.prompt?.slice(0, 80) || `Reel ${new Date().toLocaleDateString()}`,
+        videoUrl: `${API_URL}/api/reels/download/${stored.sessionId}`,
+        metadata: {
+          sessionId: stored.sessionId,
+          mode: stored.mode,
+          duration: stored.duration,
+          totalClips: stored.totalClips,
+        },
+      } as any)
+      toast.success('Saved to Library ✓')
+    } catch (e: any) {
+      toast.error(e?.response?.data?.error || e.message || 'Failed to save')
+    } finally {
+      setSavingToLibrary(false)
+    }
   }
 
   return (
@@ -346,14 +412,27 @@ function SessionCard({ stored, onRemove }: { stored: StoredSession; onRemove: ()
               </Button>
             )}
             {downloadReady && (
-              <Button
-                size="sm"
-                className="h-8 bg-green-600 hover:bg-green-700 text-xs"
-                onClick={() => window.open(`${API_URL}/api/reels/download/${stored.sessionId}`, '_blank')}
-              >
-                <Download className="mr-1.5 h-3.5 w-3.5" />
-                Download
-              </Button>
+              <>
+                <Button
+                  size="sm"
+                  className="h-8 bg-green-600 hover:bg-green-700 text-xs"
+                  onClick={() => window.open(`${API_URL}/api/reels/download/${stored.sessionId}`, '_blank')}
+                >
+                  <Download className="mr-1.5 h-3.5 w-3.5" />
+                  Download
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-8 text-xs"
+                  onClick={handleSaveToLibrary}
+                  disabled={savingToLibrary}
+                  title="Save reel to your Library"
+                >
+                  {savingToLibrary ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Save className="mr-1.5 h-3.5 w-3.5" />}
+                  Save
+                </Button>
+              </>
             )}
             <Button
               variant="ghost" size="icon"
@@ -430,6 +509,81 @@ function SessionCard({ stored, onRemove }: { stored: StoredSession; onRemove: ()
                 </span>
               </div>
               <p className="text-xs text-muted-foreground">Re-downloadable for 48h · Clips deleted after merge</p>
+            </div>
+          )}
+
+          {/* Sprint 2 — Timeline Editor (drag-drop reorder + re-merge) */}
+          {downloadReady && clipOrder.length > 1 && (
+            <div className="mt-4 rounded-lg border border-border/50 bg-muted/20 p-3">
+              <button
+                type="button"
+                className="flex items-center gap-2 text-sm font-medium hover:text-primary transition-colors"
+                onClick={() => setShowTimeline(v => !v)}
+              >
+                <GripVertical className="h-4 w-4" />
+                Reorder Clips (Timeline Editor)
+                {showTimeline ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+              </button>
+              {showTimeline && (
+                <div className="mt-3 space-y-2">
+                  <p className="text-xs text-muted-foreground">
+                    Drag clip thumbnails to reorder. Click <span className="font-semibold">Merge in This Order</span> to re-render.
+                  </p>
+                  <div className="flex gap-2 overflow-x-auto pb-2">
+                    {clipOrder.map((originalIdx, position) => {
+                      const c = genClips.find(x => x.index === originalIdx)
+                      return (
+                        <div
+                          key={`${originalIdx}-${position}`}
+                          draggable={!remerging}
+                          onDragStart={(e) => e.dataTransfer.setData('text/plain', String(position))}
+                          onDragOver={(e) => e.preventDefault()}
+                          onDrop={(e) => {
+                            e.preventDefault()
+                            const fromPos = parseInt(e.dataTransfer.getData('text/plain'))
+                            if (Number.isNaN(fromPos) || fromPos === position) return
+                            const next = [...clipOrder]
+                            const [moved] = next.splice(fromPos, 1)
+                            next.splice(position, 0, moved)
+                            setClipOrder(next)
+                          }}
+                          className={`relative shrink-0 w-24 rounded-md border-2 bg-background p-1.5 text-center text-xs transition-colors ${
+                            remerging ? 'cursor-not-allowed opacity-50' : 'cursor-grab hover:border-primary border-border/60'
+                          }`}
+                          title={`Originally clip #${originalIdx + 1}`}
+                        >
+                          <div className="font-bold text-muted-foreground text-[10px] uppercase tracking-wider">Pos #{position + 1}</div>
+                          <div className="text-[11px] font-semibold mt-0.5">Clip {originalIdx + 1}</div>
+                          {c?.status === 'done' && (
+                            <div className="mt-1.5 h-1 w-full rounded-full bg-green-500/60" />
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      size="sm"
+                      onClick={handleRemerge}
+                      disabled={remerging || JSON.stringify(clipOrder) === JSON.stringify(Array.from({ length: n }, (_, i) => i))}
+                      className="h-8 text-xs"
+                    >
+                      {remerging
+                        ? <><Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />Re-merging… {Math.round(remergeProgress)}%</>
+                        : <><RefreshCw className="mr-1.5 h-3.5 w-3.5" />Merge in This Order</>}
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => setClipOrder(Array.from({ length: n }, (_, i) => i))}
+                      disabled={remerging}
+                      className="h-8 text-xs"
+                    >
+                      Reset Order
+                    </Button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
