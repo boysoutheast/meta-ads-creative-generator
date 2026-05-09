@@ -13,6 +13,7 @@ const axios = require('axios');
 const { analyzeImage, uploadImageToApimart } = require('../services/apimart');
 const { startRemakeJob, getJob } = require('../services/videoRemakeService');
 const { analyzeVideoFromUrl } = require('../services/videoUrlAnalyzer');
+const { translateVideoPrompt } = require('../services/translatePromptService');
 
 /**
  * POST /api/scale-video/analyze
@@ -55,6 +56,7 @@ router.post('/generate', async (req, res) => {
     aspectRatio = '9:16',
     productPhotoBase64 = null,
     productPhotoMime = 'image/jpeg',
+    customVideoPrompt = null,
   } = req.body;
 
   if (!videoAnalysis || !productName) {
@@ -105,8 +107,11 @@ router.post('/generate', async (req, res) => {
     angles,
     productName,
     productVisualDescription,
-    {},
-    null
+    {},      // productPricing
+    null,    // masterImagePrompt
+    null,    // productDescription
+    null,    // onStatus
+    customVideoPrompt || null  // override video prompt with refined version when provided
   );
 
   // Step 5: Batch generate 10-second GeminiGen grok-3 videos for every variation
@@ -226,13 +231,13 @@ router.get('/remake/:remakeId', (req, res) => {
  * Returns: same format as /analyze endpoint + { platform, transcript }
  */
 router.post('/analyze-from-url', async (req, res) => {
-  const { url } = req.body || {};
+  const { url, mode = 'full' } = req.body || {};
   if (!url || typeof url !== 'string' || !url.startsWith('http')) {
     return res.status(400).json({ error: 'url is required and must start with http' });
   }
 
   try {
-    const { analysis, frames, transcript, platform } = await analyzeVideoFromUrl(url);
+    const { analysis, frames, transcript, platform, mode: usedMode } = await analyzeVideoFromUrl(url, mode);
     const availableAngles = Object.entries(SCALING_ANGLES).map(([key, val]) => ({
       key,
       label: val.label,
@@ -244,6 +249,7 @@ router.post('/analyze-from-url', async (req, res) => {
       filename: `${platform}: ${url.slice(-50)}`,
       platform,
       transcript,
+      mode: usedMode,
       availableAngles,
     });
   } catch (err) {
@@ -252,6 +258,25 @@ router.post('/analyze-from-url', async (req, res) => {
       return res.status(500).json({ error: 'yt-dlp tidak tersedia. Silakan upload file manual.' });
     }
     res.status(500).json({ error: msg });
+  }
+});
+
+/**
+ * POST /api/scale-video/translate-prompt
+ * Given video analysis + user intent, generate a tailored GeminiGen video prompt.
+ * Body: { videoAnalysis, userIntent, productName, productDescription? }
+ * Returns: { videoPrompt, hookVariants, scriptOutline }
+ */
+router.post('/translate-prompt', async (req, res) => {
+  const { videoAnalysis, userIntent, productName, productDescription = '' } = req.body || {};
+  if (!videoAnalysis || !userIntent || !productName) {
+    return res.status(400).json({ error: 'videoAnalysis, userIntent, and productName are required' });
+  }
+  try {
+    const result = await translateVideoPrompt({ videoAnalysis, userIntent, productName, productDescription });
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message || 'Gagal generate prompt' });
   }
 });
 

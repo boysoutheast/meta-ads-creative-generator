@@ -1033,12 +1033,17 @@ ${quality}`;
 // masterImagePrompt: when provided (from analyze step), used as base; angle-specific
 // layers are appended on top rather than using the hardcoded template switch.
 
-async function generateVariationPrompts(winningAnalysis, angles, productName, productVisualDescription = null, productPricing = {}, masterImagePrompt = null, productDescription = null, onStatus = null) {
+async function generateVariationPrompts(winningAnalysis, angles, productName, productVisualDescription = null, productPricing = {}, masterImagePrompt = null, productDescription = null, onStatus = null, customVideoPromptOverride = null) {
   const result = [];
   for (const angle of angles) {
     const label = angle.label || (angle.angle || '').replace(/_/g, ' ');
     onStatus?.(`Menyusun prompt: ${label}`);
-    const imagePrompt = buildAngleImagePrompt(angle, winningAnalysis, productName, productVisualDescription, productPricing, masterImagePrompt, productDescription);
+    let imagePrompt = buildAngleImagePrompt(angle, winningAnalysis, productName, productVisualDescription, productPricing, masterImagePrompt, productDescription);
+    // Sprint 3 v2: when user has refined a custom video prompt via translate-prompt,
+    // use that as the base for every angle (overrides the auto-generated one).
+    if (customVideoPromptOverride) {
+      imagePrompt = customVideoPromptOverride;
+    }
     result.push({ ...angle, imagePrompt });
   }
   return result;

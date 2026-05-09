@@ -535,17 +535,29 @@ export async function analyzeWinningVideo(file: File) {
   return res.data as { analysis: any; framesAnalyzed: number; filename: string; availableAngles: import('./types').ScalingAngle[] }
 }
 
-/** Sprint 3 — Analyze winning video directly from a social media URL (yt-dlp + Whisper) */
-export async function analyzeWinningVideoFromUrl(url: string) {
-  const res = await api.post('/scale-video/analyze-from-url', { url }, { timeout: 240000 })
+/** Sprint 3 — Analyze winning video directly from a social media URL (yt-dlp + Whisper or Gemini full) */
+export async function analyzeWinningVideoFromUrl(url: string, mode: 'audio' | 'full' = 'full') {
+  const res = await api.post('/scale-video/analyze-from-url', { url, mode }, { timeout: 240000 })
   return res.data as {
     analysis: any
     framesAnalyzed: number
     filename: string
     platform?: string
     transcript?: string
+    mode?: 'audio' | 'full'
     availableAngles: import('./types').ScalingAngle[]
   }
+}
+
+/** Sprint 3 v2 — Translate winning-ad analysis + user intent → tailored GeminiGen video prompt */
+export async function translateVideoPrompt(payload: {
+  videoAnalysis: any
+  userIntent: string
+  productName: string
+  productDescription?: string
+}): Promise<{ videoPrompt: string; hookVariants: string[]; scriptOutline: string }> {
+  const res = await api.post('/scale-video/translate-prompt', payload, { timeout: 60000 })
+  return res.data
 }
 
 export interface ScaleVideoGenerateResponse {
@@ -564,6 +576,8 @@ export async function generateScaleVideoJob(payload: {
   aspectRatio?: string
   productPhotoBase64?: string
   productPhotoMime?: string
+  /** Sprint 3 v2 — when set, every variation uses this prompt instead of the auto-built one */
+  customVideoPrompt?: string | null
 }): Promise<ScaleVideoGenerateResponse> {
   // Videos take longer — 10s each × N angles × GeminiGen grok-3 queue time = up to 10 min
   const res = await api.post('/scale-video/generate', payload, { timeout: 600000 })

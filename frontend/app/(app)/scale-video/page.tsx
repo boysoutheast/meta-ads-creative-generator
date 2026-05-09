@@ -1,9 +1,10 @@
 'use client'
 import { useEffect, useState } from 'react'
-import { Loader2, AlertCircle, Video, Sparkles, Play, Download, Link2 } from 'lucide-react'
+import { Loader2, AlertCircle, Video, Sparkles, Play, Download, Link2, Wand2, ChevronRight } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
 import {
@@ -19,6 +20,7 @@ import { AngleSelector } from '@/components/ads/AngleSelector'
 import {
   analyzeWinningVideo,
   analyzeWinningVideoFromUrl,
+  translateVideoPrompt,
   generateScaleVideoJob,
   getProducts,
   type Product,
@@ -58,6 +60,17 @@ export default function ScaleVideoPage() {
   const [inputMode, setInputMode] = useState<'file' | 'url'>('file')
   const [urlInput, setUrlInput] = useState('')
 
+  // Sprint 3 v2 — analysis mode for URL input
+  const [analyzeMode, setAnalyzeMode] = useState<'audio' | 'full'>('full')
+
+  // Sprint 3 v2 — Intent-to-prompt step
+  const [userIntent, setUserIntent] = useState('')
+  const [translating, setTranslating] = useState(false)
+  const [refinedPrompt, setRefinedPrompt] = useState<string>('')
+  const [hookVariants, setHookVariants] = useState<string[]>([])
+  const [scriptOutline, setScriptOutline] = useState('')
+  const [showIntentStep, setShowIntentStep] = useState(false)
+
   useEffect(() => {
     getProducts()
       .then((list) => {
@@ -78,17 +91,45 @@ export default function ScaleVideoPage() {
     setSelectedAngles([])
     try {
       const resp = inputMode === 'url'
-        ? await analyzeWinningVideoFromUrl(urlInput.trim())
+        ? await analyzeWinningVideoFromUrl(urlInput.trim(), analyzeMode)
         : await analyzeWinningVideo(file!)
       setVideoAnalysis(resp.analysis)
       if (resp.availableAngles?.length) {
         setAvailableAngles(resp.availableAngles)
         setSelectedAngles(resp.availableAngles.map((a) => a.key))
       }
+      // Reset intent step on every fresh analysis
+      setRefinedPrompt('')
+      setHookVariants([])
+      setScriptOutline('')
+      setUserIntent('')
+      setShowIntentStep(true)
     } catch (e: any) {
       setError(e?.response?.data?.error || e.message || 'Gagal menganalisis video')
     } finally {
       setAnalyzing(false)
+    }
+  }
+
+  // Sprint 3 v2 — Translate analysis + intent → tailored video prompt
+  const handleTranslatePrompt = async () => {
+    if (!userIntent.trim() || !videoAnalysis || !selectedProduct) return
+    setError(null)
+    setTranslating(true)
+    try {
+      const result = await translateVideoPrompt({
+        videoAnalysis,
+        userIntent: userIntent.trim(),
+        productName: selectedProduct.name,
+        productDescription: selectedProduct.description,
+      })
+      setRefinedPrompt(result.videoPrompt || '')
+      setHookVariants(result.hookVariants || [])
+      setScriptOutline(result.scriptOutline || '')
+    } catch (e: any) {
+      setError(e?.response?.data?.error || e.message || 'Gagal generate prompt')
+    } finally {
+      setTranslating(false)
     }
   }
 
@@ -112,6 +153,8 @@ export default function ScaleVideoPage() {
         aspectRatio,
         productPhotoBase64,
         productPhotoMime,
+        // Sprint 3 v2 — when user has refined a prompt via intent-to-prompt, use that for every variation
+        customVideoPrompt: refinedPrompt || undefined,
       })
       setResult(resp)
     } catch (e: any) {
@@ -169,7 +212,7 @@ export default function ScaleVideoPage() {
               {inputMode === 'file' ? (
                 <Dropzone file={file} onChange={setFile} accept="video" />
               ) : (
-                <div className="space-y-2">
+                <div className="space-y-3">
                   <Input
                     type="url"
                     placeholder="https://www.instagram.com/reel/..."
@@ -180,6 +223,36 @@ export default function ScaleVideoPage() {
                   <p className="text-xs text-muted-foreground">
                     Support: Instagram Reels, TikTok, YouTube Shorts, Facebook. Video harus publik.
                   </p>
+
+                  {/* Sprint 3 v2 — Analysis mode toggle */}
+                  <div>
+                    <p className="text-xs font-medium text-muted-foreground mb-1">Mode analisis:</p>
+                    <div className="flex rounded-md border bg-muted/30 p-0.5 gap-0.5">
+                      <button
+                        type="button"
+                        onClick={() => setAnalyzeMode('audio')}
+                        className={`flex-1 rounded px-2 py-1 text-xs font-medium transition-colors ${
+                          analyzeMode === 'audio' ? 'bg-background shadow-sm' : 'text-muted-foreground hover:text-foreground'
+                        }`}
+                      >
+                        🎙 Audio Only
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setAnalyzeMode('full')}
+                        className={`flex-1 rounded px-2 py-1 text-xs font-medium transition-colors ${
+                          analyzeMode === 'full' ? 'bg-background shadow-sm' : 'text-muted-foreground hover:text-foreground'
+                        }`}
+                      >
+                        🎬 Visual + Audio
+                      </button>
+                    </div>
+                    <p className="text-[10px] text-muted-foreground mt-1">
+                      {analyzeMode === 'audio'
+                        ? 'Hanya analisis script/narasi (~15 detik, lebih murah)'
+                        : 'Analisis visual + audio lengkap via Gemini 2.5 Flash (~30-45 detik)'}
+                    </p>
+                  </div>
                 </div>
               )}
 
@@ -341,6 +414,89 @@ export default function ScaleVideoPage() {
                     {videoAnalysis.colorPalette.map((c: string, i: number) => (
                       <Badge key={i} variant="outline" className="text-xs">{c}</Badge>
                     ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Sprint 3 v2 — Step 1.5: Intent to Prompt */}
+          {videoAnalysis && !analyzing && showIntentStep && (
+            <Card className="border-primary/30 bg-primary/5">
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base flex items-center gap-2">
+                  <Wand2 className="h-4 w-4 text-primary" />
+                  Refine Prompt
+                </CardTitle>
+                <CardDescription>
+                  Ceritakan mau dipakai untuk apa — AI akan translate analisis ini jadi video prompt yang spesifik untuk produkmu.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <Textarea
+                  placeholder="Contoh: jual suplemen kolagen untuk wanita 30-45 tahun, target ibu-ibu Jakarta yang aktif, tone: warm dan aspirational"
+                  value={userIntent}
+                  onChange={(e) => setUserIntent(e.target.value)}
+                  rows={3}
+                  className="text-sm resize-none"
+                />
+
+                <Button
+                  className="w-full"
+                  onClick={handleTranslatePrompt}
+                  disabled={!userIntent.trim() || !selectedProduct || translating}
+                >
+                  {translating ? (
+                    <><Loader2 className="h-4 w-4 animate-spin" /> Generating refined prompt…</>
+                  ) : (
+                    <><Wand2 className="h-4 w-4" /> Refine Prompt dengan AI</>
+                  )}
+                </Button>
+
+                {!selectedProduct && (
+                  <p className="text-[11px] text-amber-700 dark:text-amber-400">
+                    ⚠️ Pilih produk dulu di Step 2 (panel kiri) untuk enable refine.
+                  </p>
+                )}
+
+                {refinedPrompt && (
+                  <div className="space-y-3 pt-1">
+                    <div className="space-y-1.5">
+                      <p className="text-xs font-semibold text-primary">Video Prompt (editable):</p>
+                      <Textarea
+                        value={refinedPrompt}
+                        onChange={(e) => setRefinedPrompt(e.target.value)}
+                        rows={6}
+                        className="text-xs font-mono resize-none"
+                      />
+                    </div>
+
+                    {hookVariants.length > 0 && (
+                      <div className="space-y-1.5">
+                        <p className="text-xs font-semibold text-muted-foreground">Hook variants:</p>
+                        <div className="space-y-1">
+                          {hookVariants.map((h, i) => (
+                            <div key={i} className="rounded border bg-background px-2.5 py-1.5 text-xs">
+                              <span className="font-medium text-primary">{i + 1}.</span> {h}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {scriptOutline && (
+                      <details>
+                        <summary className="cursor-pointer text-xs text-muted-foreground hover:text-foreground">Script outline</summary>
+                        <p className="mt-1.5 rounded border bg-muted p-2.5 text-xs leading-relaxed whitespace-pre-wrap">{scriptOutline}</p>
+                      </details>
+                    )}
+
+                    <div className="flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 dark:bg-emerald-900/20 dark:border-emerald-800 px-3 py-2">
+                      <ChevronRight className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
+                      <p className="text-xs text-emerald-700 dark:text-emerald-400 font-medium">
+                        Prompt siap — klik Generate di Step 2 untuk pakai prompt ini di semua variasi.
+                      </p>
+                    </div>
                   </div>
                 )}
               </CardContent>
