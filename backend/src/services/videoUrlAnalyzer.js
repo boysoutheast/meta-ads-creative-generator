@@ -13,7 +13,9 @@
  * Requires: yt-dlp + ffmpeg installed in container.
  */
 
-const { execSync } = require('child_process');
+const { exec } = require('child_process');
+const { promisify } = require('util');
+const execAsync = promisify(exec);
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
@@ -33,12 +35,12 @@ function bytesMb(bytes) {
 
 /**
  * Run yt-dlp with a chain of progressively-more-lenient format selectors.
- * Instagram, TikTok, etc don't always expose separate video+audio streams.
- * @returns {string} path to the downloaded file
+ * Uses async exec so the Node.js event loop is NEVER blocked — keepalive
+ * pings keep firing during the download.
+ * @returns {Promise<string>} path to the downloaded file
  */
-function ytDlpDownload(url, outFile, { audioOnly = false, onProgress = NOOP } = {}) {
+async function ytDlpDownload(url, outFile, { audioOnly = false, onProgress = NOOP } = {}) {
   // Mobile Safari iOS UA — sometimes bypasses IG/TikTok desktop-only checks.
-  // English Accept-Language helps server return predictable content.
   const ua = '"Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1"';
   const headers = '--add-header "Accept-Language:en-US,en;q=0.9"';
   const cookiesFromEnv = process.env.YT_DLP_COOKIES_FILE && require('fs').existsSync(process.env.YT_DLP_COOKIES_FILE)
@@ -49,15 +51,8 @@ function ytDlpDownload(url, outFile, { audioOnly = false, onProgress = NOOP } = 
 
   // Format chains — tried in order until one works
   const chains = audioOnly
-    ? [
-        '"bestaudio/best"',
-        '"best"',
-      ]
-    : [
-        '"best[ext=mp4]/best"',
-        '"best"',
-        '"bestvideo+bestaudio/best"',
-      ];
+    ? ['"bestaudio/best"', '"best"']
+    : ['"best[ext=mp4]/best"', '"best"', '"bestvideo+bestaudio/best"'];
 
   let lastErr = null;
   for (const chain of chains) {
@@ -67,7 +62,8 @@ function ytDlpDownload(url, outFile, { audioOnly = false, onProgress = NOOP } = 
         message: `Mencoba download dengan format: ${chain.replace(/"/g, '')}…`,
       });
       const cmd = `yt-dlp ${flagsCommon} ${audioOnly ? '--extract-audio --audio-format mp3' : '--merge-output-format mp4'} --format ${chain} "${url}"`;
-      execSync(cmd, { timeout: 120000, stdio: 'pipe' });
+      // ASYNC exec — event loop stays free so SSE keepalive pings keep firing
+      await execAsync(cmd, { timeout: 120000, maxBuffer: 10 * 1024 * 1024 });
 
       // yt-dlp may produce outFile with different extension when audioOnly — locate it
       if (audioOnly) {
@@ -372,14 +368,15 @@ async function analyzeDownloadedVideoFull(url, onProgress) {
   try {
     onProgress({ phase: 'tmp_dir', message: `Tmp dir: ${tmpDir}` });
 
-    const downloadedPath = ytDlpDownload(url, rawFile, { onProgress });
+    const downloadedPath = await ytDlpDownload(url, rawFile, { onProgress });
 
     // Compress to keep base64 payload < ~10MB so Gemini accepts it fast
+    // Also async so event loop stays free (keepalive pings fire during ffmpeg)
     onProgress({ phase: 'compressing', message: 'Compressing dengan ffmpeg (854px, 500kbps)...' });
     try {
-      execSync(
+      await execAsync(
         `ffmpeg -i "${downloadedPath}" -vf "scale=854:-2" -c:v libx264 -b:v 500k -c:a aac -b:a 64k "${compressedFile}" -y`,
-        { timeout: 60000, stdio: 'pipe' }
+        { timeout: 60000, maxBuffer: 2 * 1024 * 1024 }
       );
     } catch (compErr) {
       onProgress({ phase: 'compress_skip', message: 'Compression skipped — pakai raw file', detail: compErr.message?.slice(0, 100) });
@@ -416,7 +413,7 @@ async function analyzeAudioOnly(url, onProgress) {
   try {
     onProgress({ phase: 'tmp_dir', message: `Tmp dir: ${tmpDir}` });
 
-    const audioPath = ytDlpDownload(url, rawFile, { audioOnly: true, onProgress });
+    const audioPath = await ytDlpDownload(url, rawFile, { audioOnly: true, onProgress });
 
     onProgress({ phase: 'transcribing', message: 'Mengirim audio ke Whisper-1...' });
     const { transcribeAudio } = require('./videoAnalyzer');
