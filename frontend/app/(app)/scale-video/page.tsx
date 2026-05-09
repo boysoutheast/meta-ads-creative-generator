@@ -90,6 +90,7 @@ export default function ScaleVideoPage() {
 
   // Live action log — populated by SSE phase events from /analyze-from-url
   const [liveLog, setLiveLog] = useState<Array<{ ts: number; phase: string; message: string; detail?: string }>>([])
+  const logScrollRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     getProducts()
@@ -830,7 +831,6 @@ interface CharacterBuilderProps {
 
 function CharacterBuilder({ name, onNameChange, photos, onPhotosChange }: CharacterBuilderProps) {
   const fileRef = useRef<HTMLInputElement>(null)
-  const logScrollRef = useRef<HTMLDivElement>(null)
 
   const handleFiles = (files: FileList | null) => {
     if (!files) return
