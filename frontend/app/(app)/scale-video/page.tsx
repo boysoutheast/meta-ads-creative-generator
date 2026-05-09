@@ -444,36 +444,9 @@ export default function ScaleVideoPage() {
             </Card>
           )}
 
-          {/* Analysis summary */}
+          {/* Analysis result — NotebookLM-style rich detail with expandable sections */}
           {videoAnalysis && !analyzing && (
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-base flex items-center gap-2">
-                  <Sparkles className="h-4 w-4 text-primary" /> Analisis AI
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-3 text-sm">
-                {videoAnalysis.hookType && (
-                  <div><span className="font-medium text-muted-foreground">Hook: </span>{videoAnalysis.hookType}</div>
-                )}
-                {videoAnalysis.overallStyle && (
-                  <div><span className="font-medium text-muted-foreground">Style: </span>{videoAnalysis.overallStyle}</div>
-                )}
-                {videoAnalysis.emotionArc && (
-                  <div><span className="font-medium text-muted-foreground">Emotion: </span>{videoAnalysis.emotionArc}</div>
-                )}
-                {videoAnalysis.pacing && (
-                  <div><span className="font-medium text-muted-foreground">Pacing: </span>{videoAnalysis.pacing}</div>
-                )}
-                {videoAnalysis.colorPalette?.length > 0 && (
-                  <div className="flex flex-wrap gap-1">
-                    {videoAnalysis.colorPalette.map((c: string, i: number) => (
-                      <Badge key={i} variant="outline" className="text-xs">{c}</Badge>
-                    ))}
-                  </div>
-                )}
-              </CardContent>
-            </Card>
+            <AnalysisCard analysis={videoAnalysis} />
           )}
 
           {/* Sprint 3 v2 — Step 1.5: Intent to Prompt */}
@@ -720,6 +693,374 @@ function VideoVariationCard({ variation, index }: { variation: AngleVariation; i
             </Button>
           )}
         </div>
+      </CardContent>
+    </Card>
+  )
+}
+
+// ─── AnalysisCard — NotebookLM-style rich detail renderer ────────────────────
+// Handles BOTH legacy flat shape and new nested-object shape from Gemini 2.5 Flash.
+
+type AnyAnalysis = Record<string, any>
+
+function asString(v: any, fallback = ''): string {
+  if (v == null) return fallback
+  if (typeof v === 'string') return v
+  if (typeof v === 'number' || typeof v === 'boolean') return String(v)
+  if (Array.isArray(v)) return v.map((x) => asString(x)).filter(Boolean).join(', ')
+  if (typeof v === 'object') return JSON.stringify(v)
+  return String(v)
+}
+
+function flattenObjectToText(obj: any, depth = 0): string {
+  if (obj == null) return ''
+  if (typeof obj !== 'object') return String(obj)
+  if (Array.isArray(obj)) return obj.map((x) => flattenObjectToText(x, depth + 1)).filter(Boolean).join(', ')
+  return Object.entries(obj)
+    .filter(([, v]) => v != null && v !== '' && !(Array.isArray(v) && v.length === 0))
+    .map(([k, v]) => {
+      if (typeof v === 'object') return `${k}: ${flattenObjectToText(v, depth + 1)}`
+      return `${k}: ${v}`
+    })
+    .join(' · ')
+}
+
+function AnalysisCard({ analysis }: { analysis: AnyAnalysis }) {
+  const a = analysis || {}
+
+  // Normalise possibly-nested fields to text
+  const hookTypeStr = asString(a.hookType)
+  const overallStyle = asString(a.overallStyle)
+  const emotionArcStr = typeof a.emotionArc === 'object'
+    ? (Array.isArray(a.emotionArc?.phases) ? a.emotionArc.phases.join(' → ') : flattenObjectToText(a.emotionArc))
+    : asString(a.emotionArc)
+  const pacingStr = typeof a.pacing === 'object'
+    ? `${a.pacing?.speed || ''} · ${a.pacing?.rhythm || ''}`.replace(/^ · /, '').replace(/ · $/, '')
+    : asString(a.pacing)
+  const toneStr = asString(a.toneOfVoice)
+  const cameraStr = typeof a.cameraMovement === 'object'
+    ? flattenObjectToText(a.cameraMovement)
+    : asString(a.cameraMovement)
+  const musicStr = asString(a.musicVibe)
+
+  // Color palette: object {primary, secondary[], accents[]} OR flat string[]
+  const palette: string[] = (() => {
+    if (Array.isArray(a.colorPalette)) return a.colorPalette
+    if (a.colorPalette && typeof a.colorPalette === 'object') {
+      return [
+        a.colorPalette.primary,
+        ...(Array.isArray(a.colorPalette.secondary) ? a.colorPalette.secondary : []),
+        ...(Array.isArray(a.colorPalette.accents) ? a.colorPalette.accents : []),
+      ].filter(Boolean)
+    }
+    return []
+  })()
+
+  const scenes: any[] = Array.isArray(a.scenes) ? a.scenes : []
+  const transcript = asString(a.transcript)
+  const keyMessages: any[] = Array.isArray(a.keyMessages) ? a.keyMessages : []
+  const visualMotifs: string[] = Array.isArray(a.visualMotifs) ? a.visualMotifs : []
+  const brandingMoments: any[] = Array.isArray(a.brandingMoments) ? a.brandingMoments : []
+  const uniqueSellingProps: string[] = Array.isArray(a.uniqueSellingProps) ? a.uniqueSellingProps : []
+
+  const scriptStructureStr = typeof a.scriptStructure === 'object' && a.scriptStructure
+    ? `${a.scriptStructure.framework || ''}${a.scriptStructure.framework ? ' — ' : ''}${a.scriptStructure.structureBreakdown || ''}`
+    : asString(a.scriptStructure)
+
+  const audioDesignStr = typeof a.audioDesign === 'object' && a.audioDesign
+    ? flattenObjectToText(a.audioDesign)
+    : ''
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base flex items-center gap-2">
+          <Sparkles className="h-4 w-4 text-primary" />
+          Analisis AI {scenes.length > 0 && <Badge variant="outline" className="text-[10px]">{scenes.length} scenes</Badge>}
+        </CardTitle>
+        <CardDescription className="text-[11px]">
+          NotebookLM-style detailed analysis · gunakan untuk Refine Prompt → recreate creative DNA
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-3 text-sm">
+        {/* Quick summary */}
+        {hookTypeStr && (
+          <div><span className="font-medium text-muted-foreground">Hook Type: </span><span>{hookTypeStr}</span></div>
+        )}
+        {overallStyle && (
+          <div><span className="font-medium text-muted-foreground">Overall Style: </span><span className="leading-relaxed">{overallStyle}</span></div>
+        )}
+        {emotionArcStr && (
+          <div><span className="font-medium text-muted-foreground">Emotion Arc: </span><span>{emotionArcStr}</span></div>
+        )}
+        {pacingStr && (
+          <div><span className="font-medium text-muted-foreground">Pacing: </span><span>{pacingStr}</span></div>
+        )}
+        {toneStr && (
+          <div><span className="font-medium text-muted-foreground">Tone: </span><span>{toneStr}</span></div>
+        )}
+        {palette.length > 0 && (
+          <div className="flex flex-wrap items-center gap-1">
+            <span className="font-medium text-muted-foreground mr-1">Colors:</span>
+            {palette.map((c, i) => (
+              <Badge key={i} variant="outline" className="text-xs">{c}</Badge>
+            ))}
+          </div>
+        )}
+
+        {/* Hook breakdown */}
+        {a.hookBreakdown && typeof a.hookBreakdown === 'object' && (
+          <details className="group">
+            <summary className="cursor-pointer text-xs font-semibold text-primary hover:text-primary/80 select-none">
+              🎯 Hook Breakdown {a.hookBreakdown.hookWords ? `— "${asString(a.hookBreakdown.hookWords).slice(0, 60)}…"` : ''}
+            </summary>
+            <div className="mt-2 ml-3 space-y-1 text-xs border-l-2 border-primary/20 pl-3 leading-relaxed">
+              {a.hookBreakdown.first3Seconds && <div><b>First 3s:</b> {asString(a.hookBreakdown.first3Seconds)}</div>}
+              {a.hookBreakdown.hookWords && <div><b>Hook words:</b> "{asString(a.hookBreakdown.hookWords)}"</div>}
+              {a.hookBreakdown.hookMechanism && <div><b>Mechanism:</b> {asString(a.hookBreakdown.hookMechanism)}</div>}
+              {a.hookBreakdown.viewerReaction && <div><b>Target reaction:</b> {asString(a.hookBreakdown.viewerReaction)}</div>}
+              {a.hookBreakdown.scrollStopPower && <div><b>Scroll-stop:</b> {asString(a.hookBreakdown.scrollStopPower)}</div>}
+            </div>
+          </details>
+        )}
+
+        {/* Scenes */}
+        {scenes.length > 0 && (
+          <details className="group" open>
+            <summary className="cursor-pointer text-xs font-semibold text-primary hover:text-primary/80 select-none">
+              📽 Scenes ({scenes.length})
+            </summary>
+            <div className="mt-2 space-y-2.5">
+              {scenes.map((s, i) => (
+                <div key={i} className="rounded-md border bg-muted/30 p-2.5 space-y-1 text-[11.5px] leading-relaxed">
+                  <div className="flex items-center gap-2 mb-1">
+                    <Badge className="text-[10px]">Scene {s.sceneNumber ?? i + 1}</Badge>
+                    {s.duration && <span className="text-muted-foreground text-[10px] font-mono">{s.duration}</span>}
+                    {s.title && <span className="font-semibold">{s.title}</span>}
+                    {s.hook && <Badge variant="outline" className="text-[9px] bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300 border-amber-300">HOOK</Badge>}
+                  </div>
+                  {s.description && <div><b>Action:</b> {asString(s.description)}</div>}
+                  {s.action && s.action !== s.description && <div><b>Action:</b> {asString(s.action)}</div>}
+                  {s.setting && <div><b>Setting:</b> {asString(s.setting)}</div>}
+                  {s.characters && (
+                    <div><b>Characters:</b> {Array.isArray(s.characters) ? s.characters.map((c: any) => typeof c === 'object' ? `${c.role || ''}: ${c.appearance || ''}` : c).join('; ') : asString(s.characters)}</div>
+                  )}
+                  {s.dialogue && <div><b>Dialogue:</b> "{asString(s.dialogue)}"</div>}
+                  {s.textOverlay && <div><b>Text overlay:</b> "{asString(s.textOverlay)}"</div>}
+                  {s.cameraShot && <div><b>Camera:</b> {asString(s.cameraShot)} {s.cameraMovement ? `· ${asString(s.cameraMovement)}` : ''}</div>}
+                  {s.lighting && <div><b>Lighting:</b> {asString(s.lighting)}</div>}
+                  {s.colorGrading && <div><b>Color grade:</b> {asString(s.colorGrading)}</div>}
+                  {Array.isArray(s.soundEffects) && s.soundEffects.length > 0 && (
+                    <div><b>SFX:</b> {s.soundEffects.join(', ')}</div>
+                  )}
+                  {s.musicCue && <div><b>Music cue:</b> {asString(s.musicCue)}</div>}
+                  {s.transition && <div><b>Transition:</b> {asString(s.transition)}</div>}
+                  {Array.isArray(s.visualEffects) && s.visualEffects.length > 0 && (
+                    <div><b>Effects:</b> {s.visualEffects.join(', ')}</div>
+                  )}
+                  {Array.isArray(s.visualElements) && s.visualElements.length > 0 && (
+                    <div><b>Visual elements:</b> {s.visualElements.join(', ')}</div>
+                  )}
+                  {s.purpose && <div><b>Purpose:</b> {asString(s.purpose)}</div>}
+                  {s.emotion && <div><b>Emotion:</b> {asString(s.emotion)}</div>}
+                </div>
+              ))}
+            </div>
+          </details>
+        )}
+
+        {/* Script structure */}
+        {scriptStructureStr && (
+          <details className="group">
+            <summary className="cursor-pointer text-xs font-semibold text-primary hover:text-primary/80 select-none">
+              📝 Script Structure
+            </summary>
+            <div className="mt-2 ml-3 space-y-1 text-xs border-l-2 border-primary/20 pl-3 leading-relaxed">
+              {typeof a.scriptStructure === 'object' && a.scriptStructure ? (
+                <>
+                  {a.scriptStructure.framework && <div><b>Framework:</b> {asString(a.scriptStructure.framework)}</div>}
+                  {a.scriptStructure.hookLine && <div><b>Hook line:</b> "{asString(a.scriptStructure.hookLine)}"</div>}
+                  {Array.isArray(a.scriptStructure.agitationPoints) && a.scriptStructure.agitationPoints.length > 0 && (
+                    <div><b>Agitation:</b>
+                      <ul className="list-disc ml-4 mt-0.5">
+                        {a.scriptStructure.agitationPoints.map((p: string, i: number) => <li key={i}>{p}</li>)}
+                      </ul>
+                    </div>
+                  )}
+                  {a.scriptStructure.solutionReveal && <div><b>Solution reveal:</b> {asString(a.scriptStructure.solutionReveal)}</div>}
+                  {a.scriptStructure.ctaLine && <div><b>CTA:</b> "{asString(a.scriptStructure.ctaLine)}"</div>}
+                  {a.scriptStructure.structureBreakdown && <div><b>Breakdown:</b> {asString(a.scriptStructure.structureBreakdown)}</div>}
+                </>
+              ) : (
+                <div>{scriptStructureStr}</div>
+              )}
+            </div>
+          </details>
+        )}
+
+        {/* Audio Design */}
+        {audioDesignStr && (
+          <details className="group">
+            <summary className="cursor-pointer text-xs font-semibold text-primary hover:text-primary/80 select-none">
+              🔊 Audio Design
+            </summary>
+            <div className="mt-2 ml-3 space-y-1 text-xs border-l-2 border-primary/20 pl-3 leading-relaxed">
+              {a.audioDesign?.voiceover && (
+                <div><b>Voiceover:</b> {flattenObjectToText(a.audioDesign.voiceover)}</div>
+              )}
+              {a.audioDesign?.music && (
+                <div><b>Music:</b> {flattenObjectToText(a.audioDesign.music)}</div>
+              )}
+              {Array.isArray(a.audioDesign?.soundEffects) && a.audioDesign.soundEffects.length > 0 && (
+                <div><b>SFX:</b> {a.audioDesign.soundEffects.join(', ')}</div>
+              )}
+              {musicStr && <div><b>Vibe:</b> {musicStr}</div>}
+            </div>
+          </details>
+        )}
+
+        {/* Camera */}
+        {cameraStr && (
+          <details className="group">
+            <summary className="cursor-pointer text-xs font-semibold text-primary hover:text-primary/80 select-none">
+              🎥 Camera & Composition
+            </summary>
+            <div className="mt-2 ml-3 text-xs border-l-2 border-primary/20 pl-3 leading-relaxed">{cameraStr}</div>
+          </details>
+        )}
+
+        {/* Key messages */}
+        {keyMessages.length > 0 && (
+          <details className="group">
+            <summary className="cursor-pointer text-xs font-semibold text-primary hover:text-primary/80 select-none">
+              💡 Key Messages ({keyMessages.length})
+            </summary>
+            <ul className="mt-2 ml-3 space-y-1 text-xs border-l-2 border-primary/20 pl-3 list-disc list-inside leading-relaxed">
+              {keyMessages.map((m, i) => (
+                <li key={i}>
+                  {typeof m === 'object' ? (
+                    <>
+                      <b>{asString(m.message)}</b>
+                      {m.deliveryMethod && <span className="text-muted-foreground"> · via {asString(m.deliveryMethod)}</span>}
+                      {m.sceneRef != null && <span className="text-muted-foreground"> · scene {m.sceneRef}</span>}
+                    </>
+                  ) : asString(m)}
+                </li>
+              ))}
+            </ul>
+          </details>
+        )}
+
+        {/* Visual motifs */}
+        {visualMotifs.length > 0 && (
+          <details className="group">
+            <summary className="cursor-pointer text-xs font-semibold text-primary hover:text-primary/80 select-none">
+              🎨 Visual Motifs
+            </summary>
+            <ul className="mt-2 ml-3 text-xs border-l-2 border-primary/20 pl-3 list-disc list-inside leading-relaxed">
+              {visualMotifs.map((m, i) => <li key={i}>{m}</li>)}
+            </ul>
+          </details>
+        )}
+
+        {/* Branding moments */}
+        {brandingMoments.length > 0 && (
+          <details className="group">
+            <summary className="cursor-pointer text-xs font-semibold text-primary hover:text-primary/80 select-none">
+              🏷 Branding Moments ({brandingMoments.length})
+            </summary>
+            <ul className="mt-2 ml-3 space-y-0.5 text-xs border-l-2 border-primary/20 pl-3 leading-relaxed">
+              {brandingMoments.map((b, i) => (
+                <li key={i}>
+                  <span className="font-mono text-[10px]">{asString(b.timestamp)}</span>
+                  {' '}<Badge variant="outline" className="text-[9px]">{asString(b.type)}</Badge>
+                  {' '}{asString(b.description)}
+                </li>
+              ))}
+            </ul>
+          </details>
+        )}
+
+        {/* Product placement */}
+        {a.productPlacement && typeof a.productPlacement === 'object' && (
+          <details className="group">
+            <summary className="cursor-pointer text-xs font-semibold text-primary hover:text-primary/80 select-none">
+              📦 Product Placement
+            </summary>
+            <div className="mt-2 ml-3 space-y-1 text-xs border-l-2 border-primary/20 pl-3 leading-relaxed">
+              {a.productPlacement.frequency && <div><b>Frequency:</b> {asString(a.productPlacement.frequency)}</div>}
+              {a.productPlacement.placement && <div><b>Placement:</b> {asString(a.productPlacement.placement)}</div>}
+              {a.productPlacement.transformation && <div><b>Transformation:</b> {asString(a.productPlacement.transformation)}</div>}
+            </div>
+          </details>
+        )}
+
+        {/* CTA strategy */}
+        {a.ctaStrategy && typeof a.ctaStrategy === 'object' && (
+          <details className="group">
+            <summary className="cursor-pointer text-xs font-semibold text-primary hover:text-primary/80 select-none">
+              🎯 CTA Strategy
+            </summary>
+            <div className="mt-2 ml-3 space-y-1 text-xs border-l-2 border-primary/20 pl-3 leading-relaxed">
+              {a.ctaStrategy.type && <div><b>Type:</b> {asString(a.ctaStrategy.type)}</div>}
+              {a.ctaStrategy.placement && <div><b>Placement:</b> {asString(a.ctaStrategy.placement)}</div>}
+              {a.ctaStrategy.wording && <div><b>Wording:</b> "{asString(a.ctaStrategy.wording)}"</div>}
+              {a.ctaStrategy.visualCue && <div><b>Visual cue:</b> {asString(a.ctaStrategy.visualCue)}</div>}
+            </div>
+          </details>
+        )}
+
+        {/* Target audience */}
+        {a.targetAudience && (
+          <details className="group">
+            <summary className="cursor-pointer text-xs font-semibold text-primary hover:text-primary/80 select-none">
+              👥 Target Audience
+            </summary>
+            <div className="mt-2 ml-3 text-xs border-l-2 border-primary/20 pl-3 leading-relaxed">{asString(a.targetAudience)}</div>
+          </details>
+        )}
+
+        {/* Unique selling props */}
+        {uniqueSellingProps.length > 0 && (
+          <details className="group">
+            <summary className="cursor-pointer text-xs font-semibold text-primary hover:text-primary/80 select-none">
+              ⭐ Unique Selling Props
+            </summary>
+            <ul className="mt-2 ml-3 text-xs border-l-2 border-primary/20 pl-3 list-disc list-inside leading-relaxed">
+              {uniqueSellingProps.map((p, i) => <li key={i}>{p}</li>)}
+            </ul>
+          </details>
+        )}
+
+        {/* Platform optimizations */}
+        {a.platformOptimizations && (
+          <details className="group">
+            <summary className="cursor-pointer text-xs font-semibold text-primary hover:text-primary/80 select-none">
+              📱 Platform Optimizations
+            </summary>
+            <div className="mt-2 ml-3 text-xs border-l-2 border-primary/20 pl-3 leading-relaxed">{asString(a.platformOptimizations)}</div>
+          </details>
+        )}
+
+        {/* Creative director notes */}
+        {a.creativeDirectorNotes && (
+          <details className="group">
+            <summary className="cursor-pointer text-xs font-semibold text-primary hover:text-primary/80 select-none">
+              🎬 Creative Director Notes
+            </summary>
+            <div className="mt-2 ml-3 text-xs border-l-2 border-primary/20 pl-3 leading-relaxed italic">{asString(a.creativeDirectorNotes)}</div>
+          </details>
+        )}
+
+        {/* Full transcript */}
+        {transcript && (
+          <details className="group">
+            <summary className="cursor-pointer text-xs font-semibold text-primary hover:text-primary/80 select-none">
+              📜 Full Transcript ({transcript.length} chars)
+            </summary>
+            <div className="mt-2 ml-3 text-xs border-l-2 border-primary/20 pl-3 leading-relaxed font-mono whitespace-pre-wrap">{transcript}</div>
+          </details>
+        )}
       </CardContent>
     </Card>
   )

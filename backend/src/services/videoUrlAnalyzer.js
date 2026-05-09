@@ -129,10 +129,10 @@ async function callGemini(parts, onProgress = NOOP) {
     GEMINI_ENDPOINT,
     {
       contents: [{ role: 'user', parts }],
-      // 8192 tokens > previous 2048 — schema requires ~600-800 tokens but transcripts can push it
+      // 16384 tokens — rich NotebookLM-style schema needs space for per-scene detail
       generationConfig: {
-        maxOutputTokens: 8192,
-        temperature: 0.4,
+        maxOutputTokens: 16384,
+        temperature: 0.35,
         responseMimeType: 'application/json',
       },
     },
@@ -152,33 +152,145 @@ async function callGemini(parts, onProgress = NOOP) {
 }
 
 function buildGeminiPrompt() {
-  return `You are a video creative director analyzing a winning ad for Meta/TikTok advertising.
-Watch this video — analyze both the visuals AND audio/speech.
+  return `You are a senior creative director and prompt engineer analyzing a winning ad video for Meta/TikTok scaling. Your output is consumed by another AI to RECREATE this ad's creative DNA for a new product, so be SPECIFIC, EXHAUSTIVE, and TECHNICAL.
+
+Watch the entire video — analyze visuals, audio/speech, music, sound effects, on-screen text, transitions, and brand moments. Be extremely thorough — like a NotebookLM source-grounded analysis with second-by-second detail.
 
 CRITICAL OUTPUT RULES:
-- Return ONLY a single valid JSON object — no \`\`\`json code fences, no markdown, no commentary.
+- Return ONLY a single valid JSON object — no \`\`\`json fences, no markdown, no prose outside the JSON.
 - Escape every double-quote inside string values with backslash.
-- No literal newlines inside string values; use spaces instead.
+- No literal newlines inside string values — use " · " or commas instead.
 - Start your response with { and end with }.
+- Be VERY DETAILED. Long descriptions are encouraged (this analysis will drive recreation).
 
-Schema:
+Schema (fill EVERY field thoroughly):
 {
-  "transcript": "full spoken words, empty string if no speech",
-  "hookWords": "first 8-10 spoken words or on-screen hook text",
-  "scenes": [
-    { "sceneNumber": 1, "duration": "0-3s", "description": "...", "hook": true, "visualElements": ["..."], "emotion": "..." }
+  "transcript": "FULL verbatim spoken words (every line, in order)",
+  "transcriptByScene": [
+    { "sceneNumber": 1, "spokenLines": "exact dialogue/VO for this scene" }
   ],
-  "overallStyle": "...",
-  "pacing": "fast/medium/slow — description",
-  "hookType": "how attention grabbed in first 3 seconds",
-  "colorPalette": ["color1", "color2", "color3"],
-  "cameraMovement": "...",
-  "emotionArc": "pain → hope → solution → relief  (adapt to actual)",
+
+  "hookBreakdown": {
+    "first3Seconds": "second-by-second description of the opening 0-3s — what viewer sees, hears, feels",
+    "hookWords": "first 8-12 spoken or on-screen words that grab attention",
+    "hookMechanism": "how attention is hijacked (e.g. 'pattern-break visual + confrontational dialogue + dramatic close-up')",
+    "viewerReaction": "what emotion/action this hook is designed to trigger in the viewer",
+    "scrollStopPower": "what specifically makes a scrolling user STOP — be concrete"
+  },
+
+  "scenes": [
+    {
+      "sceneNumber": 1,
+      "duration": "0-3s",
+      "title": "short scene label",
+      "setting": "location + time-of-day + environment + key props (be specific)",
+      "characters": [
+        { "role": "main character", "appearance": "age, gender, race, outfit, distinctive features", "personality": "energy and demeanor" }
+      ],
+      "action": "second-by-second description of what happens visually — every movement, gesture, reaction, prop interaction",
+      "dialogue": "exact spoken words in this scene",
+      "textOverlay": "any on-screen text (caption, subtitle, callout, kinetic type) — verbatim",
+      "cameraShot": "shot type (close-up, wide, dutch angle, etc) + framing + subject placement",
+      "cameraMovement": "static/pan/tilt/zoom/handheld/dolly/whip-pan etc — be specific",
+      "lighting": "key light direction, color temperature, contrast, shadows, mood (e.g. 'hard top-light, cold 5500K, harsh shadows for clinical look')",
+      "colorGrading": "saturation, contrast, dominant colors, look (e.g. 'high saturation, crushed blacks, teal-orange grade')",
+      "soundEffects": ["specific sfx heard in this scene — be concrete: 'whoosh', 'glass shatter', 'wet splash'"],
+      "musicCue": "music presence + style (e.g. 'driving 8-bit synth, 140 BPM' or 'silent — only foley')",
+      "transition": "how this scene moves to the next (cut, dissolve, match-cut, whip-pan, jump-cut, etc)",
+      "visualEffects": ["any post effects: motion graphics, kinetic type, glow, particle, color flash, etc"],
+      "purpose": "narrative role of this scene (hook, problem setup, agitation, demo, proof, CTA, etc)",
+      "emotion": "specific emotion this scene targets — be precise (anger, longing, relief, urgency, awe, etc)"
+    }
+  ],
+
+  "overallStyle": "detailed paragraph describing visual aesthetic, art direction, animation style or live-action treatment, brand identity feel, era/genre influences",
+
+  "pacing": {
+    "speed": "fast / medium / slow",
+    "rhythm": "describe the editing rhythm (e.g. 'rapid 0.5-1s cuts in act 1, slows to 2s shots in act 2')",
+    "averageShotLength": "X seconds",
+    "totalScenes": 0,
+    "energyArc": "how energy rises/falls across the video"
+  },
+
+  "colorPalette": {
+    "primary": "dominant color across the video",
+    "secondary": ["supporting color 1", "supporting color 2"],
+    "accents": ["highlight color 1", "highlight color 2"],
+    "moodAssociation": "what the palette communicates (e.g. 'warm-friendly + clinical-trustworthy')"
+  },
+
+  "cameraMovement": "detailed paragraph on shot composition, motion language, framing strategy across the whole video",
+
+  "emotionArc": {
+    "phases": ["emotion 1", "emotion 2", "emotion 3", "emotion 4"],
+    "peak": "scene number where emotional peak occurs + why",
+    "resolution": "how viewer is left feeling at the end"
+  },
+
+  "audioDesign": {
+    "voiceover": {
+      "presence": true,
+      "voiceCharacter": "tone, pace, accent, gender, age, energy",
+      "deliveryStyle": "shouting, whispering, conversational, theatrical, etc"
+    },
+    "music": {
+      "genre": "specific genre",
+      "instruments": ["instr 1", "instr 2"],
+      "tempoBpm": 0,
+      "mood": "uplifting, dramatic, urgent, etc"
+    },
+    "soundEffects": ["distinctive sfx that recur across the video"],
+    "audioPacingMatchesVisual": "yes/no — describe how"
+  },
+
+  "scriptStructure": {
+    "framework": "PAS / AIDA / problem-solution / before-after / testimonial / etc",
+    "hookLine": "the exact opening line",
+    "agitationPoints": ["pain point 1 amplified", "pain point 2"],
+    "solutionReveal": "how the product is introduced as solution — exact moment",
+    "ctaLine": "exact closing CTA",
+    "structureBreakdown": "act-by-act breakdown of how the script flows"
+  },
+
+  "toneOfVoice": "casual / formal / urgent / storytelling / educational + specific energy descriptor",
+
+  "keyMessages": [
+    { "message": "core claim verbatim", "deliveryMethod": "verbal | visual | text-overlay | combination", "sceneRef": 1 }
+  ],
+
+  "visualMotifs": ["recurring visual elements: characters, objects, colors, framings that repeat throughout"],
+
+  "brandingMoments": [
+    { "timestamp": "12s", "type": "logo / product / text-callout", "description": "what brand element + how presented" }
+  ],
+
+  "productPlacement": {
+    "frequency": "how many seconds product is on-screen / what % of video",
+    "placement": "how product is framed (centered hero, integrated lifestyle, before-after demo, etc)",
+    "transformation": "how product is positioned as the solution narratively"
+  },
+
+  "ctaStrategy": {
+    "type": "soft / hard / multi",
+    "placement": "early / middle / late / repeated",
+    "wording": "exact CTA verbatim",
+    "visualCue": "what visual reinforces the CTA (button graphic, arrow, kinetic text, etc)"
+  },
+
+  "targetAudience": "inferred demographic + psychographic + pain points + desires",
+
+  "uniqueSellingProps": ["what specifically makes THIS ad creative stand out vs typical ads in this category"],
+
+  "platformOptimizations": "vertical 9:16 framing / captions for sound-off / TikTok-style edits / IG Reels conventions / fast-hook for FYP — list specific platform-savvy choices",
+
+  "hookType": "categorize: problem-first / curiosity-gap / transformation / social-proof / shock / pattern-break / personification / dialogue-direct / etc",
+
+  "musicVibe": "concise descriptor",
+
   "recommendedDuration": 30,
-  "musicVibe": "...",
-  "scriptStructure": "pain→agitate→solution→cta  (adapt to actual)",
-  "toneOfVoice": "casual/formal/urgency/storytelling/educational",
-  "keyMessages": ["claim 1", "claim 2"]
+
+  "creativeDirectorNotes": "free-form 2-3 sentence note on what makes this ad's creative DNA reproducible — what to keep, what's optional"
 }`;
 }
 
