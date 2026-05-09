@@ -401,7 +401,7 @@ async function analyzeDownloadedVideoFull(url, onProgress) {
     );
   } finally {
     try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}
-    onProgress({ phase: 'cleanup', message: 'Tmp files cleaned up ✓' });
+    onProgress({ phase: 'cleanup', message: '🧹 Tmp files cleaned up ✓' });
   }
 }
 
@@ -463,7 +463,7 @@ Return ONLY valid JSON:
     return { analysis, transcript: transcript.slice(0, 1000) };
   } finally {
     try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}
-    onProgress({ phase: 'cleanup', message: 'Tmp files cleaned up ✓' });
+    onProgress({ phase: 'cleanup', message: '🧹 Tmp files cleaned up ✓' });
   }
 }
 

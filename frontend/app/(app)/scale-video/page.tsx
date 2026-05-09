@@ -37,6 +37,17 @@ const FORMATS = [
   { value: '16:9', label: '16:9', hint: 'Landscape' },
 ] as const
 
+function phaseColor(phase: string): string {
+  if (phase.includes('error') || phase.includes('Error')) return 'text-red-500'
+  if (phase === 'cleanup') return 'text-emerald-500'
+  if (['downloaded', 'transcribed', 'enriched', 'finalizing', 'gemini_done', 'parse_done'].includes(phase)) return 'text-emerald-600'
+  if (['download_retry', 'transcript_empty', 'compress_skip'].includes(phase)) return 'text-amber-500'
+  if (phase === 'downloading') return 'text-yellow-500'
+  if (['compressing', 'compress_done', 'encoding', 'downloaded'].includes(phase)) return 'text-orange-500'
+  if (['gemini_call', 'youtube_native', 'transcribing', 'enriching', 'gemini_empty'].includes(phase)) return 'text-purple-500'
+  return 'text-blue-500'
+}
+
 export default function ScaleVideoPage() {
   // Step 1 — upload + analyze
   const [file, setFile] = useState<File | null>(null)
@@ -88,6 +99,12 @@ export default function ScaleVideoPage() {
       })
       .catch(() => {})
   }, [])
+
+  useEffect(() => {
+    if (logScrollRef.current) {
+      logScrollRef.current.scrollTop = logScrollRef.current.scrollHeight
+    }
+  }, [liveLog])
 
   const handleAnalyze = async () => {
     if (inputMode === 'file' && !file) return
@@ -503,29 +520,27 @@ export default function ScaleVideoPage() {
                 </CardDescription>
               </CardHeader>
               <CardContent>
-                <div className="max-h-48 overflow-y-auto rounded-md bg-muted/40 px-2.5 py-2 space-y-1 font-mono text-[10.5px]">
+                <div ref={logScrollRef} className="max-h-48 overflow-y-auto rounded-md bg-muted/40 px-2.5 py-2 space-y-1 font-mono text-[10.5px]">
                   {liveLog.length === 0 ? (
                     <p className="text-muted-foreground italic">Initialising...</p>
                   ) : (
-                    liveLog.map((entry, i) => (
-                      <div key={i} className="flex gap-2 leading-snug">
-                        <span className="shrink-0 text-muted-foreground/60 tabular-nums">
-                          {new Date(entry.ts).toLocaleTimeString('id-ID', { hour12: false })}
-                        </span>
-                        <span className={`shrink-0 font-semibold ${
-                          entry.phase.includes('error') ? 'text-red-600' :
-                          entry.phase.includes('done') || entry.phase === 'cleanup' || entry.phase === 'transcribed' || entry.phase === 'enriched' || entry.phase === 'downloaded' ? 'text-emerald-600' :
-                          entry.phase === 'download_retry' || entry.phase === 'transcript_empty' || entry.phase === 'compress_skip' ? 'text-amber-600' :
-                          'text-blue-600'
-                        }`}>
-                          [{entry.phase}]
-                        </span>
-                        <span className="text-foreground/80 break-words">{entry.message}</span>
-                        {entry.detail && (
-                          <span className="text-muted-foreground/60 italic ml-1 truncate">— {entry.detail.slice(0, 80)}</span>
-                        )}
-                      </div>
-                    ))
+                    liveLog.map((entry, i) => {
+                      const startTs = liveLog[0].ts
+                      return (
+                        <div key={i} className="flex gap-2 leading-snug">
+                          <span className="shrink-0 text-muted-foreground/60 tabular-nums">
+                            +{((entry.ts - startTs) / 1000).toFixed(1)}s
+                          </span>
+                          <span className={`shrink-0 font-semibold ${phaseColor(entry.phase)}`}>
+                            [{entry.phase}]
+                          </span>
+                          <span className="text-foreground/80 break-words">{entry.message}</span>
+                          {entry.detail && (
+                            <span className="text-muted-foreground/60 italic ml-1 truncate">— {entry.detail.slice(0, 80)}</span>
+                          )}
+                        </div>
+                      )
+                    })
                   )}
                 </div>
               </CardContent>
@@ -815,6 +830,7 @@ interface CharacterBuilderProps {
 
 function CharacterBuilder({ name, onNameChange, photos, onPhotosChange }: CharacterBuilderProps) {
   const fileRef = useRef<HTMLInputElement>(null)
+  const logScrollRef = useRef<HTMLDivElement>(null)
 
   const handleFiles = (files: FileList | null) => {
     if (!files) return
