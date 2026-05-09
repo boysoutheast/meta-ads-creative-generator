@@ -27,14 +27,14 @@ import {
 } from '@/lib/api-auth'
 
 const ANGLES = [
-  { value: 'fomo', label: 'FOMO / Urgency', desc: 'Stok terbatas, scarcity' },
-  { value: 'price_anchor', label: 'Price Anchor', desc: 'Bandingkan harga, ROI' },
-  { value: 'social_proof', label: 'Social Proof', desc: 'Testimoni, review' },
-  { value: 'problem_agitation', label: 'Problem Agitation', desc: 'Pain point dulu, solusi setelah' },
-  { value: 'transformation', label: 'Transformation', desc: 'Before / after' },
-  { value: 'authority', label: 'Authority', desc: 'Endorsement ahli' },
-  { value: 'curiosity_gap', label: 'Curiosity Gap', desc: 'Hook bikin penasaran' },
-  { value: 'risk_reversal', label: 'Risk Reversal', desc: 'Garansi, free trial' },
+  { value: 'fomo',              label: 'FOMO / Urgency',     desc: 'Stok terbatas, scarcity',           emoji: '⏰', gradient: 'from-red-500 via-orange-500 to-amber-500' },
+  { value: 'price_anchor',      label: 'Price Anchor',       desc: 'Bandingkan harga, ROI',              emoji: '💰', gradient: 'from-emerald-500 via-green-500 to-lime-500' },
+  { value: 'social_proof',      label: 'Social Proof',       desc: 'Testimoni, review',                  emoji: '⭐', gradient: 'from-blue-500 via-cyan-500 to-teal-500' },
+  { value: 'problem_agitation', label: 'Problem Agitation',  desc: 'Pain point dulu, solusi setelah',    emoji: '😤', gradient: 'from-rose-600 via-red-500 to-orange-500' },
+  { value: 'transformation',    label: 'Transformation',     desc: 'Before / after',                     emoji: '✨', gradient: 'from-purple-500 via-fuchsia-500 to-pink-500' },
+  { value: 'authority',         label: 'Authority',          desc: 'Endorsement ahli',                   emoji: '🎓', gradient: 'from-slate-700 via-zinc-600 to-stone-600' },
+  { value: 'curiosity_gap',     label: 'Curiosity Gap',      desc: 'Hook bikin penasaran',               emoji: '🔍', gradient: 'from-violet-500 via-purple-500 to-indigo-500' },
+  { value: 'risk_reversal',     label: 'Risk Reversal',      desc: 'Garansi, free trial',                emoji: '🛡️', gradient: 'from-teal-500 via-cyan-500 to-sky-500' },
 ]
 
 const FORMATS = [
@@ -205,12 +205,17 @@ export default function SingleImagePage() {
                       key={a.value}
                       type="button"
                       onClick={() => setValue('angle', a.value, { shouldValidate: true })}
-                      className={`rounded-lg border p-2 text-left transition-colors ${
-                        angle === a.value ? 'border-primary bg-primary/5' : 'border-input hover:border-primary/50'
+                      className={`group flex w-full items-stretch gap-0 overflow-hidden rounded-lg border text-left transition-all ${
+                        angle === a.value ? 'border-primary ring-2 ring-primary/30' : 'border-input hover:border-primary/50'
                       }`}
                     >
-                      <p className="text-sm font-medium">{a.label}</p>
-                      <p className="text-xs text-muted-foreground">{a.desc}</p>
+                      <div className={`flex w-10 shrink-0 items-center justify-center bg-gradient-to-br ${a.gradient}`}>
+                        <span className="text-xl drop-shadow-md">{a.emoji}</span>
+                      </div>
+                      <div className="flex-1 px-2.5 py-2 bg-background">
+                        <p className="text-sm font-medium leading-tight">{a.label}</p>
+                        <p className="text-[11px] text-muted-foreground line-clamp-2 mt-0.5">{a.desc}</p>
+                      </div>
                     </button>
                   ))}
                 </div>
