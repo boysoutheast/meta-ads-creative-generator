@@ -50,20 +50,22 @@ router.post('/analyze', upload.single('file'), async (req, res) => {
 router.post('/generate', async (req, res) => {
   const {
     videoAnalysis,
-    productName,
+    productName = 'Generic',
     productDescription = '',
     selectedAngles = [],
     aspectRatio = '9:16',
     productPhotoBase64 = null,
     productPhotoMime = 'image/jpeg',
+    assetMode = 'product',
+    characterPhotosBase64 = [],   // array of base64 strings (no data: prefix), max 10
     customVideoPrompt = null,
   } = req.body;
 
-  if (!videoAnalysis || !productName) {
-    return res.status(400).json({ error: 'videoAnalysis and productName are required' });
+  if (!videoAnalysis) {
+    return res.status(400).json({ error: 'videoAnalysis is required' });
   }
 
-  // Step 1: Describe product visually from photo
+  // Step 1: Describe product visually from photo (product mode)
   let productVisualDescription = null;
   if (productPhotoBase64) {
     try {
@@ -77,14 +79,50 @@ router.post('/generate', async (req, res) => {
     }
   }
 
-  // Step 2: Upload product photo as image-to-video reference for GeminiGen
-  let productImageUrl = null;
-  if (productPhotoBase64) {
+  // Step 1b: Character mode — analyze every uploaded character photo (up to 4 for cost control)
+  // and combine into one merged appearance description. First photo is also the image-to-video ref below.
+  let characterVisualDescription = null;
+  if (assetMode === 'character' && Array.isArray(characterPhotosBase64) && characterPhotosBase64.length > 0) {
     try {
-      productImageUrl = await uploadImageToApimart(productPhotoBase64, productPhotoMime || 'image/jpeg');
-      if (productImageUrl) console.log('Product photo uploaded for GeminiGen:', productImageUrl.slice(0, 60));
+      const charDescriptions = await Promise.all(
+        characterPhotosBase64.slice(0, 4).map((b64, i) =>
+          analyzeImage({
+            imageBase64: b64,
+            mimeType: 'image/jpeg',
+            prompt: `Describe this character photo ${i + 1}: appearance, outfit, hair, skin tone, expression, style. Be specific for AI video generation. Under 60 words.`,
+          }).catch(() => null)
+        )
+      );
+      const valid = charDescriptions.filter(Boolean);
+      if (valid.length > 0) {
+        characterVisualDescription = `Character "${productName}": ${valid.join(' | ')}`;
+      }
     } catch (e) {
-      console.warn('Product photo upload for video failed (non-fatal):', e.message);
+      console.warn('Character photo analysis failed (non-fatal):', e.message);
+    }
+  }
+
+  // For character mode, the visual description threaded into angle prompts
+  // comes from character photos, not product photos.
+  if (assetMode === 'character' && characterVisualDescription) {
+    productVisualDescription = characterVisualDescription;
+  }
+
+  // Step 2: Upload reference photo as image-to-video reference for GeminiGen.
+  // Product mode: productPhotoBase64. Character mode: first character photo.
+  let productImageUrl = null;
+  let i2vBase64 = productPhotoBase64;
+  let i2vMime = productPhotoMime || 'image/jpeg';
+  if (assetMode === 'character' && Array.isArray(characterPhotosBase64) && characterPhotosBase64.length > 0) {
+    i2vBase64 = characterPhotosBase64[0];
+    i2vMime = 'image/jpeg';
+  }
+  if (i2vBase64) {
+    try {
+      productImageUrl = await uploadImageToApimart(i2vBase64, i2vMime);
+      if (productImageUrl) console.log(`${assetMode === 'character' ? 'Character' : 'Product'} photo uploaded for GeminiGen:`, productImageUrl.slice(0, 60));
+    } catch (e) {
+      console.warn('Reference photo upload for video failed (non-fatal):', e.message);
     }
   }
 
@@ -309,12 +347,28 @@ router.post('/analyze-from-url', async (req, res) => {
  * Returns: { videoPrompt, hookVariants, scriptOutline }
  */
 router.post('/translate-prompt', async (req, res) => {
-  const { videoAnalysis, userIntent, productName, productDescription = '' } = req.body || {};
+  const {
+    videoAnalysis,
+    userIntent,
+    productName,
+    productDescription = '',
+    assetMode = 'product',
+    characterPhotoBase64,
+    characterPhotoMime = 'image/jpeg',
+  } = req.body || {};
   if (!videoAnalysis || !userIntent || !productName) {
     return res.status(400).json({ error: 'videoAnalysis, userIntent, and productName are required' });
   }
   try {
-    const result = await translateVideoPrompt({ videoAnalysis, userIntent, productName, productDescription });
+    const result = await translateVideoPrompt({
+      videoAnalysis,
+      userIntent,
+      productName,
+      productDescription,
+      assetMode,
+      characterPhotoBase64: characterPhotoBase64 || null,
+      characterPhotoMime,
+    });
     res.json(result);
   } catch (err) {
     res.status(500).json({ error: err.message || 'Gagal generate prompt' });

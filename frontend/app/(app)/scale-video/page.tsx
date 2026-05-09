@@ -1,6 +1,6 @@
 'use client'
-import { useEffect, useState } from 'react'
-import { Loader2, AlertCircle, Video, Sparkles, Play, Download, Link2, Wand2, ChevronRight } from 'lucide-react'
+import { useEffect, useState, useRef } from 'react'
+import { Loader2, AlertCircle, Video, Sparkles, Play, Download, Link2, Wand2, ChevronRight, Package, User, Ban, Plus, X, Image as ImageIcon } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -48,6 +48,12 @@ export default function ScaleVideoPage() {
   // Step 2 — settings
   const [products, setProducts] = useState<Product[]>([])
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null)
+
+  // Asset mode — product (existing) / character (new) / none
+  const [assetMode, setAssetMode] = useState<'product' | 'character' | 'none'>('product')
+  // Character mode states
+  const [characterName, setCharacterName] = useState('')
+  const [characterPhotos, setCharacterPhotos] = useState<string[]>([]) // base64 data URLs, max 10
   const [aspectRatio, setAspectRatio] = useState<string>('9:16')
 
   // Step 3 — generate
@@ -121,15 +127,34 @@ export default function ScaleVideoPage() {
 
   // Sprint 3 v2 — Translate analysis + intent → tailored video prompt
   const handleTranslatePrompt = async () => {
-    if (!userIntent.trim() || !videoAnalysis || !selectedProduct) return
+    if (!userIntent.trim() || !videoAnalysis) return
     setError(null)
     setTranslating(true)
     try {
       const result = await translateVideoPrompt({
         videoAnalysis,
         userIntent: userIntent.trim(),
-        productName: selectedProduct.name,
-        productDescription: selectedProduct.description,
+        productName:
+          assetMode === 'product'
+            ? (selectedProduct?.name ?? 'Unknown Product')
+            : assetMode === 'character'
+            ? (characterName || 'Character')
+            : 'Generic',
+        productDescription:
+          assetMode === 'product'
+            ? (selectedProduct?.description ?? '')
+            : assetMode === 'character'
+            ? `Character name: ${characterName || 'unnamed'}. ${characterPhotos.length} character photo(s) provided.`
+            : '',
+        assetMode,
+        characterPhotoBase64:
+          assetMode === 'character' && characterPhotos.length > 0
+            ? characterPhotos[0].replace(/^data:[^;]+;base64,/, '')
+            : undefined,
+        characterPhotoMime:
+          assetMode === 'character' && characterPhotos.length > 0
+            ? (characterPhotos[0].match(/^data:([^;]+);/)?.[1] ?? 'image/jpeg')
+            : undefined,
       })
       setRefinedPrompt(result.videoPrompt || '')
       setHookVariants(result.hookVariants || [])
@@ -142,26 +167,52 @@ export default function ScaleVideoPage() {
   }
 
   const handleGenerate = async () => {
-    if (!videoAnalysis || !selectedProduct || selectedAngles.length === 0) return
+    if (!videoAnalysis || selectedAngles.length === 0) return
     setError(null)
     setGenerating(true)
     setResult(null)
 
     try {
-      const photoDataUrl = selectedProduct.photos?.[0]
-      const photoMatch = photoDataUrl?.match(/^data:([^;]+);base64,(.+)$/)
-      const productPhotoMime = photoMatch?.[1] ?? undefined
-      const productPhotoBase64 = photoMatch?.[2] ?? undefined
+      // Build asset payload depending on mode
+      let productPhotoBase64: string | undefined
+      let productPhotoMime: string | undefined
+      let productName = 'Generic'
+      let productDescription = ''
+      let characterPhotosBase64: string[] | undefined
+
+      if (assetMode === 'product' && selectedProduct) {
+        const photoDataUrl = selectedProduct.photos?.[0]
+        const photoMatch = photoDataUrl?.match(/^data:([^;]+);base64,(.+)$/)
+        productPhotoBase64 = photoMatch?.[2] ?? undefined
+        productPhotoMime = photoMatch?.[1] ?? undefined
+        productName = selectedProduct.name
+        productDescription = selectedProduct.description ?? ''
+      } else if (assetMode === 'character') {
+        productName = characterName || 'Character'
+        productDescription = `Character: ${characterName || 'unnamed'}`
+        if (characterPhotos.length > 0) {
+          // First photo as primary image-to-video reference
+          const firstMatch = characterPhotos[0].match(/^data:([^;]+);base64,(.+)$/)
+          productPhotoBase64 = firstMatch?.[2] ?? undefined
+          productPhotoMime = firstMatch?.[1] ?? undefined
+          // All photos as additional references for combined description
+          characterPhotosBase64 = characterPhotos.map((p) =>
+            p.replace(/^data:[^;]+;base64,/, '')
+          )
+        }
+      }
+      // assetMode === 'none': all remain undefined/empty, productName='Generic'
 
       const resp = await generateScaleVideoJob({
         videoAnalysis,
-        productName: selectedProduct.name,
-        productDescription: selectedProduct.description,
+        productName,
+        productDescription,
         selectedAngles,
         aspectRatio,
         productPhotoBase64,
         productPhotoMime,
-        // Sprint 3 v2 — when user has refined a prompt via intent-to-prompt, use that for every variation
+        characterPhotosBase64,
+        assetMode,
         customVideoPrompt: refinedPrompt || undefined,
       })
       setResult(resp)
@@ -286,17 +337,45 @@ export default function ScaleVideoPage() {
             </CardContent>
           </Card>
 
-          {/* Step 2 */}
+          {/* Step 2 — Setting & Aset (asset mode + format + angles) */}
           {videoAnalysis && (
             <Card>
               <CardHeader>
-                <CardTitle className="text-base">2. Pilih Produk & Setting</CardTitle>
+                <CardTitle className="text-base">2. Setting & Aset</CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
-                {/* Product selector */}
-                {products.length > 0 && (
+
+                {/* ── Asset mode selector ─────────────────── */}
+                <div className="space-y-2">
+                  <Label>Tambahan aset tersimpan</Label>
+                  <div className="grid grid-cols-3 gap-1.5">
+                    {(
+                      [
+                        { mode: 'product', icon: Package, label: 'Produk' },
+                        { mode: 'character', icon: User, label: 'Karakter' },
+                        { mode: 'none', icon: Ban, label: 'None' },
+                      ] as const
+                    ).map(({ mode, icon: Icon, label }) => (
+                      <button
+                        key={mode}
+                        type="button"
+                        onClick={() => setAssetMode(mode)}
+                        className={`flex flex-col items-center gap-1 rounded-lg border py-2.5 text-xs font-medium transition-colors ${
+                          assetMode === mode
+                            ? 'border-primary bg-primary/10 text-primary'
+                            : 'border-border bg-background text-muted-foreground hover:text-foreground hover:border-muted-foreground'
+                        }`}
+                      >
+                        <Icon className="h-4 w-4" />
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* ── Product picker ───────────────────────── */}
+                {assetMode === 'product' && products.length > 0 && (
                   <div className="space-y-2">
-                    <Label>Produk</Label>
                     <Select
                       value={selectedProduct?.id || ''}
                       onValueChange={(id) => {
@@ -320,6 +399,28 @@ export default function ScaleVideoPage() {
                       </p>
                     )}
                   </div>
+                )}
+                {assetMode === 'product' && products.length === 0 && (
+                  <p className="text-xs text-muted-foreground rounded border border-dashed p-2 text-center">
+                    Belum ada produk tersimpan. Tambah dulu di menu Produk.
+                  </p>
+                )}
+
+                {/* ── Character builder ────────────────────── */}
+                {assetMode === 'character' && (
+                  <CharacterBuilder
+                    name={characterName}
+                    onNameChange={setCharacterName}
+                    photos={characterPhotos}
+                    onPhotosChange={setCharacterPhotos}
+                  />
+                )}
+
+                {/* ── None info ────────────────────────────── */}
+                {assetMode === 'none' && (
+                  <p className="text-xs text-muted-foreground rounded border border-dashed p-2 text-center">
+                    Generate tanpa referensi foto produk / karakter.
+                  </p>
                 )}
 
                 {/* Format */}
@@ -363,7 +464,7 @@ export default function ScaleVideoPage() {
                 <Button
                   className="w-full"
                   onClick={handleGenerate}
-                  disabled={generating || !selectedProduct || selectedAngles.length === 0}
+                  disabled={generating || selectedAngles.length === 0}
                 >
                   {generating ? (
                     <><Loader2 className="h-4 w-4 animate-spin" /> Generating videos… (bisa 5-10 menit)</>
@@ -473,7 +574,7 @@ export default function ScaleVideoPage() {
                 <Button
                   className="w-full"
                   onClick={handleTranslatePrompt}
-                  disabled={!userIntent.trim() || !selectedProduct || translating}
+                  disabled={!userIntent.trim() || translating}
                 >
                   {translating ? (
                     <><Loader2 className="h-4 w-4 animate-spin" /> Generating refined prompt…</>
@@ -482,9 +583,14 @@ export default function ScaleVideoPage() {
                   )}
                 </Button>
 
-                {!selectedProduct && (
+                {assetMode === 'product' && !selectedProduct && (
                   <p className="text-[11px] text-amber-700 dark:text-amber-400">
-                    ⚠️ Pilih produk dulu di Step 2 (panel kiri) untuk enable refine.
+                    ℹ️ Belum pilih produk — refine akan pakai placeholder. Pilih produk untuk hasil terbaik.
+                  </p>
+                )}
+                {assetMode === 'character' && !characterName.trim() && (
+                  <p className="text-[11px] text-amber-700 dark:text-amber-400">
+                    ℹ️ Isi nama karakter untuk hasil yang lebih spesifik.
                   </p>
                 )}
 
@@ -695,6 +801,108 @@ function VideoVariationCard({ variation, index }: { variation: AngleVariation; i
         </div>
       </CardContent>
     </Card>
+  )
+}
+
+// ─── CharacterBuilder — name + photo grid (max 10) ─────────────────────────
+
+interface CharacterBuilderProps {
+  name: string
+  onNameChange: (n: string) => void
+  photos: string[]           // base64 data URLs
+  onPhotosChange: (p: string[]) => void
+}
+
+function CharacterBuilder({ name, onNameChange, photos, onPhotosChange }: CharacterBuilderProps) {
+  const fileRef = useRef<HTMLInputElement>(null)
+
+  const handleFiles = (files: FileList | null) => {
+    if (!files) return
+    const remaining = 10 - photos.length
+    const toAdd = Array.from(files).slice(0, remaining)
+    let collected: string[] = []
+    let pending = toAdd.length
+    if (pending === 0) return
+    toAdd.forEach((file) => {
+      if (!file.type.startsWith('image/')) {
+        pending--
+        if (pending === 0 && collected.length) onPhotosChange([...photos, ...collected])
+        return
+      }
+      const reader = new FileReader()
+      reader.onload = (e) => {
+        const result = e.target?.result as string
+        if (result) collected.push(result)
+        pending--
+        if (pending === 0) onPhotosChange([...photos, ...collected])
+      }
+      reader.onerror = () => {
+        pending--
+        if (pending === 0 && collected.length) onPhotosChange([...photos, ...collected])
+      }
+      reader.readAsDataURL(file)
+    })
+  }
+
+  const removePhoto = (i: number) => {
+    onPhotosChange(photos.filter((_, idx) => idx !== i))
+  }
+
+  return (
+    <div className="space-y-3">
+      <Input
+        placeholder="Nama karakter (contoh: Mbak Rini)"
+        value={name}
+        onChange={(e) => onNameChange(e.target.value)}
+        className="text-sm"
+      />
+
+      {/* Photo grid */}
+      <div className="grid grid-cols-5 gap-1.5">
+        {photos.map((src, i) => (
+          <div key={i} className="relative group aspect-square rounded-md overflow-hidden border bg-muted">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={src} alt={`char-${i}`} className="w-full h-full object-cover" />
+            <button
+              type="button"
+              onClick={() => removePhoto(i)}
+              className="absolute top-0.5 right-0.5 rounded-full bg-black/60 p-0.5 opacity-0 group-hover:opacity-100 transition-opacity"
+              aria-label={`Hapus foto ${i + 1}`}
+            >
+              <X className="h-2.5 w-2.5 text-white" />
+            </button>
+            {i === 0 && (
+              <div className="absolute bottom-0 left-0 right-0 bg-emerald-600/85 text-white text-[8px] py-0.5 text-center font-semibold">
+                REF UTAMA
+              </div>
+            )}
+          </div>
+        ))}
+        {photos.length < 10 && (
+          <button
+            type="button"
+            onClick={() => fileRef.current?.click()}
+            className="aspect-square rounded-md border border-dashed flex flex-col items-center justify-center gap-0.5 text-muted-foreground hover:text-foreground hover:border-muted-foreground transition-colors"
+          >
+            <Plus className="h-3.5 w-3.5" />
+            <span className="text-[9px]">Foto</span>
+          </button>
+        )}
+      </div>
+
+      <input
+        ref={fileRef}
+        type="file"
+        accept="image/*"
+        multiple
+        className="hidden"
+        onChange={(e) => handleFiles(e.target.files)}
+      />
+
+      <p className="text-[10px] text-muted-foreground">
+        {photos.length}/10 foto · Foto pertama jadi image-to-video reference utama untuk GeminiGen
+      </p>
+    </div>
   )
 }
 

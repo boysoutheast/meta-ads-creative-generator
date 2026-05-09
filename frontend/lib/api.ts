@@ -599,6 +599,11 @@ export async function translateVideoPrompt(payload: {
   userIntent: string
   productName: string
   productDescription?: string
+  /** Asset mode: product / character / none */
+  assetMode?: 'product' | 'character' | 'none'
+  /** Character mode: character photo base64 (no data: prefix) */
+  characterPhotoBase64?: string
+  characterPhotoMime?: string
 }): Promise<{ videoPrompt: string; hookVariants: string[]; scriptOutline: string }> {
   const res = await api.post('/scale-video/translate-prompt', payload, { timeout: 60000 })
   return res.data
@@ -620,6 +625,10 @@ export async function generateScaleVideoJob(payload: {
   aspectRatio?: string
   productPhotoBase64?: string
   productPhotoMime?: string
+  /** Asset mode: product / character / none */
+  assetMode?: 'product' | 'character' | 'none'
+  /** Character mode: all character photo base64 strings (max 10), no data: prefix */
+  characterPhotosBase64?: string[]
   /** Sprint 3 v2 — when set, every variation uses this prompt instead of the auto-built one */
   customVideoPrompt?: string | null
 }): Promise<ScaleVideoGenerateResponse> {
