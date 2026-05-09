@@ -125,172 +125,99 @@ function ytDlpDownload(url, outFile, { audioOnly = false, onProgress = NOOP } = 
 
 async function callGemini(parts, onProgress = NOOP) {
   onProgress({ phase: 'gemini_call', message: 'Mengirim ke Gemini 2.5 Flash...' });
-  const { data } = await axios.post(
-    GEMINI_ENDPOINT,
-    {
-      contents: [{ role: 'user', parts }],
-      // 16384 tokens — rich NotebookLM-style schema needs space for per-scene detail
-      generationConfig: {
-        maxOutputTokens: 16384,
-        temperature: 0.35,
-        responseMimeType: 'application/json',
+
+  let data;
+  try {
+    const resp = await axios.post(
+      GEMINI_ENDPOINT,
+      {
+        contents: [{ role: 'user', parts }],
+        generationConfig: {
+          maxOutputTokens: 4096,
+          temperature: 0.3,
+          // NOTE: responseMimeType:'application/json' is intentionally omitted —
+          // it is incompatible with video/inline-data input and causes Gemini to
+          // return empty candidates. We parse JSON manually from the text instead.
+        },
       },
-    },
-    {
-      headers: { Authorization: `Bearer ${config.apimart.apiKey}`, 'Content-Type': 'application/json' },
-      timeout: 120000,
-    }
-  );
-  const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
-  const finishReason = data?.candidates?.[0]?.finishReason || 'unknown';
+      {
+        headers: { Authorization: `Bearer ${config.apimart.apiKey}`, 'Content-Type': 'application/json' },
+        timeout: 120000,
+      }
+    );
+    data = resp.data;
+  } catch (axiosErr) {
+    const status = axiosErr.response?.status;
+    const detail = JSON.stringify(axiosErr.response?.data || axiosErr.message || '').slice(0, 300);
+    onProgress({ phase: 'gemini_error', message: `Gemini API error (HTTP ${status || 'network'})`, detail });
+    throw new Error(`Gemini API error ${status || ''}: ${detail}`);
+  }
+
+  // Surface block / safety / finish issues before returning empty text
+  const candidate = data?.candidates?.[0];
+  const finishReason = candidate?.finishReason || 'UNKNOWN';
+  const text = candidate?.content?.parts?.[0]?.text || '';
+
+  if (!text) {
+    const blockReason = data?.promptFeedback?.blockReason || '';
+    const safetyRatings = JSON.stringify(candidate?.safetyRatings || []).slice(0, 200);
+    onProgress({
+      phase: 'gemini_empty',
+      message: `⚠️ Gemini return kosong (finish=${finishReason}, block=${blockReason || 'none'})`,
+      detail: safetyRatings,
+    });
+    // Throw so the caller can handle or retry — don't silently return empty
+    throw new Error(
+      finishReason === 'SAFETY'
+        ? 'Gemini memblokir video ini karena safety policy. Coba video yang berbeda.'
+        : finishReason === 'RECITATION'
+        ? 'Gemini recitation block — coba video yang berbeda.'
+        : `Gemini return kosong (finish=${finishReason}). Pastikan APIMART_API_KEY valid dan video bisa diakses.`
+    );
+  }
+
   onProgress({
     phase: 'gemini_done',
-    message: `Gemini selesai (${text.length} chars, finish=${finishReason}) ✓`,
+    message: `Gemini selesai ✓ (${text.length} chars, finish=${finishReason})`,
     detail: text.slice(0, 120),
   });
   return text;
 }
 
 function buildGeminiPrompt() {
-  return `You are a senior creative director and prompt engineer analyzing a winning ad video for Meta/TikTok scaling. Your output is consumed by another AI to RECREATE this ad's creative DNA for a new product, so be SPECIFIC, EXHAUSTIVE, and TECHNICAL.
+  return `You are a creative director analyzing a winning ad video for Meta/TikTok. Your analysis will be used to recreate this ad's creative DNA for a new product.
 
-Watch the entire video — analyze visuals, audio/speech, music, sound effects, on-screen text, transitions, and brand moments. Be extremely thorough — like a NotebookLM source-grounded analysis with second-by-second detail.
+Watch the entire video — analyze visuals, audio/speech, music, on-screen text, and pacing.
 
-CRITICAL OUTPUT RULES:
-- Return ONLY a single valid JSON object — no \`\`\`json fences, no markdown, no prose outside the JSON.
-- Escape every double-quote inside string values with backslash.
-- No literal newlines inside string values — use " · " or commas instead.
-- Start your response with { and end with }.
-- Be VERY DETAILED. Long descriptions are encouraged (this analysis will drive recreation).
+OUTPUT RULES:
+- Return ONLY a single valid JSON object. No markdown fences, no prose outside JSON.
+- Use double-quotes for all strings. No literal newlines inside string values.
+- All string values must be concise (under 120 chars each).
 
-Schema (fill EVERY field thoroughly):
 {
-  "transcript": "FULL verbatim spoken words (every line, in order)",
-  "transcriptByScene": [
-    { "sceneNumber": 1, "spokenLines": "exact dialogue/VO for this scene" }
-  ],
-
-  "hookBreakdown": {
-    "first3Seconds": "second-by-second description of the opening 0-3s — what viewer sees, hears, feels",
-    "hookWords": "first 8-12 spoken or on-screen words that grab attention",
-    "hookMechanism": "how attention is hijacked (e.g. 'pattern-break visual + confrontational dialogue + dramatic close-up')",
-    "viewerReaction": "what emotion/action this hook is designed to trigger in the viewer",
-    "scrollStopPower": "what specifically makes a scrolling user STOP — be concrete"
-  },
-
+  "transcript": "full spoken words verbatim, empty string if no speech",
+  "hookWords": "first 8-10 spoken or on-screen words that open the video",
+  "hookType": "how attention is grabbed in first 3s: problem-first / curiosity-gap / transformation / social-proof / shock / pattern-break / dialogue-direct",
   "scenes": [
     {
       "sceneNumber": 1,
       "duration": "0-3s",
-      "title": "short scene label",
-      "setting": "location + time-of-day + environment + key props (be specific)",
-      "characters": [
-        { "role": "main character", "appearance": "age, gender, race, outfit, distinctive features", "personality": "energy and demeanor" }
-      ],
-      "action": "second-by-second description of what happens visually — every movement, gesture, reaction, prop interaction",
-      "dialogue": "exact spoken words in this scene",
-      "textOverlay": "any on-screen text (caption, subtitle, callout, kinetic type) — verbatim",
-      "cameraShot": "shot type (close-up, wide, dutch angle, etc) + framing + subject placement",
-      "cameraMovement": "static/pan/tilt/zoom/handheld/dolly/whip-pan etc — be specific",
-      "lighting": "key light direction, color temperature, contrast, shadows, mood (e.g. 'hard top-light, cold 5500K, harsh shadows for clinical look')",
-      "colorGrading": "saturation, contrast, dominant colors, look (e.g. 'high saturation, crushed blacks, teal-orange grade')",
-      "soundEffects": ["specific sfx heard in this scene — be concrete: 'whoosh', 'glass shatter', 'wet splash'"],
-      "musicCue": "music presence + style (e.g. 'driving 8-bit synth, 140 BPM' or 'silent — only foley')",
-      "transition": "how this scene moves to the next (cut, dissolve, match-cut, whip-pan, jump-cut, etc)",
-      "visualEffects": ["any post effects: motion graphics, kinetic type, glow, particle, color flash, etc"],
-      "purpose": "narrative role of this scene (hook, problem setup, agitation, demo, proof, CTA, etc)",
-      "emotion": "specific emotion this scene targets — be precise (anger, longing, relief, urgency, awe, etc)"
+      "description": "what happens visually + audio in this scene",
+      "hook": true,
+      "visualElements": ["element1", "element2"],
+      "emotion": "specific emotion targeted"
     }
   ],
-
-  "overallStyle": "detailed paragraph describing visual aesthetic, art direction, animation style or live-action treatment, brand identity feel, era/genre influences",
-
-  "pacing": {
-    "speed": "fast / medium / slow",
-    "rhythm": "describe the editing rhythm (e.g. 'rapid 0.5-1s cuts in act 1, slows to 2s shots in act 2')",
-    "averageShotLength": "X seconds",
-    "totalScenes": 0,
-    "energyArc": "how energy rises/falls across the video"
-  },
-
-  "colorPalette": {
-    "primary": "dominant color across the video",
-    "secondary": ["supporting color 1", "supporting color 2"],
-    "accents": ["highlight color 1", "highlight color 2"],
-    "moodAssociation": "what the palette communicates (e.g. 'warm-friendly + clinical-trustworthy')"
-  },
-
-  "cameraMovement": "detailed paragraph on shot composition, motion language, framing strategy across the whole video",
-
-  "emotionArc": {
-    "phases": ["emotion 1", "emotion 2", "emotion 3", "emotion 4"],
-    "peak": "scene number where emotional peak occurs + why",
-    "resolution": "how viewer is left feeling at the end"
-  },
-
-  "audioDesign": {
-    "voiceover": {
-      "presence": true,
-      "voiceCharacter": "tone, pace, accent, gender, age, energy",
-      "deliveryStyle": "shouting, whispering, conversational, theatrical, etc"
-    },
-    "music": {
-      "genre": "specific genre",
-      "instruments": ["instr 1", "instr 2"],
-      "tempoBpm": 0,
-      "mood": "uplifting, dramatic, urgent, etc"
-    },
-    "soundEffects": ["distinctive sfx that recur across the video"],
-    "audioPacingMatchesVisual": "yes/no — describe how"
-  },
-
-  "scriptStructure": {
-    "framework": "PAS / AIDA / problem-solution / before-after / testimonial / etc",
-    "hookLine": "the exact opening line",
-    "agitationPoints": ["pain point 1 amplified", "pain point 2"],
-    "solutionReveal": "how the product is introduced as solution — exact moment",
-    "ctaLine": "exact closing CTA",
-    "structureBreakdown": "act-by-act breakdown of how the script flows"
-  },
-
-  "toneOfVoice": "casual / formal / urgent / storytelling / educational + specific energy descriptor",
-
-  "keyMessages": [
-    { "message": "core claim verbatim", "deliveryMethod": "verbal | visual | text-overlay | combination", "sceneRef": 1 }
-  ],
-
-  "visualMotifs": ["recurring visual elements: characters, objects, colors, framings that repeat throughout"],
-
-  "brandingMoments": [
-    { "timestamp": "12s", "type": "logo / product / text-callout", "description": "what brand element + how presented" }
-  ],
-
-  "productPlacement": {
-    "frequency": "how many seconds product is on-screen / what % of video",
-    "placement": "how product is framed (centered hero, integrated lifestyle, before-after demo, etc)",
-    "transformation": "how product is positioned as the solution narratively"
-  },
-
-  "ctaStrategy": {
-    "type": "soft / hard / multi",
-    "placement": "early / middle / late / repeated",
-    "wording": "exact CTA verbatim",
-    "visualCue": "what visual reinforces the CTA (button graphic, arrow, kinetic text, etc)"
-  },
-
-  "targetAudience": "inferred demographic + psychographic + pain points + desires",
-
-  "uniqueSellingProps": ["what specifically makes THIS ad creative stand out vs typical ads in this category"],
-
-  "platformOptimizations": "vertical 9:16 framing / captions for sound-off / TikTok-style edits / IG Reels conventions / fast-hook for FYP — list specific platform-savvy choices",
-
-  "hookType": "categorize: problem-first / curiosity-gap / transformation / social-proof / shock / pattern-break / personification / dialogue-direct / etc",
-
-  "musicVibe": "concise descriptor",
-
-  "recommendedDuration": 30,
-
-  "creativeDirectorNotes": "free-form 2-3 sentence note on what makes this ad's creative DNA reproducible — what to keep, what's optional"
+  "overallStyle": "visual aesthetic, lighting, art direction, live-action or animation style",
+  "pacing": "fast/medium/slow — one-line description of editing rhythm",
+  "colorPalette": ["dominant color", "secondary color", "accent color"],
+  "cameraMovement": "shot types and motion language used (e.g. handheld close-ups, slow zoom, static wide)",
+  "emotionArc": "emotion phase 1 → phase 2 → phase 3 → resolution (adapt to actual arc)",
+  "musicVibe": "music genre, tempo, mood (e.g. upbeat EDM 130bpm, urgent strings, no music only SFX)",
+  "scriptStructure": "how script flows: e.g. pain→agitate→solution→CTA or hook→demo→proof→CTA",
+  "toneOfVoice": "casual / formal / urgent / storytelling / educational",
+  "keyMessages": ["main claim 1", "main claim 2", "CTA"],
+  "recommendedDuration": 30
 }`;
 }
 
