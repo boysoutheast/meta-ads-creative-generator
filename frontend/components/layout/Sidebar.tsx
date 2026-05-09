@@ -1,56 +1,11 @@
 'use client'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
-import {
-  LayoutDashboard,
-  Clapperboard,
-  Sparkles,
-  LogOut,
-  User as UserIcon,
-  History,
-  Package,
-  Layers,
-  Film,
-  Video,
-  Wand2,
-  Library as LibraryIcon,
-  Image as ImageIcon,
-} from 'lucide-react'
+import { Sparkles, LogOut } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/lib/auth'
 import { Button } from '@/components/ui/button'
-
-const navGroups = [
-  {
-    label: 'Workspace',
-    items: [
-      { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
-      { href: '/results-reels', label: 'Results Reels', icon: Clapperboard },
-      { href: '/library', label: 'Library', icon: LibraryIcon },
-      { href: '/history', label: 'History', icon: History },
-    ],
-  },
-  {
-    label: 'Generate',
-    items: [
-      { href: '/reels', label: 'Create AI Reels', icon: Film },
-      { href: '/scale', label: 'Scale Winning Image', icon: Layers },
-      { href: '/scale-video', label: 'Scale Winning Video', icon: Video },
-      { href: '/remake', label: 'Video Remake', icon: Wand2 },
-      { href: '/generate/single-image', label: 'Single Image', icon: ImageIcon },
-    ],
-  },
-  {
-    label: 'Produk',
-    items: [
-      { href: '/products', label: 'Insert Produk', icon: Package },
-    ],
-  },
-  {
-    label: 'Account',
-    items: [{ href: '/profile', label: 'Profile', icon: UserIcon }],
-  },
-]
+import { navGroups } from '@/lib/nav-config'
 
 export function Sidebar() {
   const pathname = usePathname()
