@@ -79,8 +79,8 @@ async function generateSceneImages(storyboard) {
           prompt,
           size: PORTRAIT_SIZE,
           model: SCENE_IMAGE_MODEL,
-          pollIntervalMs: 4000,
-          timeoutMs: 120000,
+          pollIntervalMs: 2000,
+          timeoutMs: 90000,
         });
 
         const url = images?.[0]?.url;
@@ -115,8 +115,8 @@ async function generateSingleSceneImage(clip) {
       prompt,
       size: PORTRAIT_SIZE,
       model: SCENE_IMAGE_MODEL,
-      pollIntervalMs: 4000,
-      timeoutMs: 120000,
+      pollIntervalMs: 2000,
+      timeoutMs: 90000,
     });
     const url = images?.[0]?.url;
     if (!url) throw new Error('No URL returned');
