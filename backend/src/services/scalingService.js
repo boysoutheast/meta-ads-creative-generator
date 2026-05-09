@@ -1,4 +1,5 @@
-const { analyzeImage, chatCompletion, generateImage, generateVideo, getTask, uploadImageToApimart, submitImageJobPayload, GPT_IMAGE_SIZE_MAP } = require('./apimart');
+const { analyzeImage, chatCompletion, generateImage, getTask, uploadImageToApimart, submitImageJobPayload, GPT_IMAGE_SIZE_MAP } = require('./apimart');
+const { generateFirstClip, pollUntilComplete } = require('./geminiGenService');
 const config = require('../config');
 const fs = require('fs');
 
@@ -1198,64 +1199,33 @@ async function batchGenerateImages(variations, aspectRatio = '1:1', referenceIma
 }
 
 // ─── batchGenerateVideos ──────────────────────────────────────────────────────
-// Uses kling-v2-6 @ 10 seconds. Mirrors batchGenerateImages — submits all jobs
-// in parallel then polls until each is done (or times out at 5 min).
-// productImageUrl: when provided, passed as image_url for image-to-video accuracy.
+// Uses GeminiGen grok-3. Mirrors batchGenerateImages — submits all jobs in
+// parallel then polls until each is done (or times out at 5 min).
+// productImageUrl: when provided, passed as file_urls[] for image-to-video accuracy.
+
+function toGeminiAR(ar) {
+  return { '9:16': 'portrait', '16:9': 'landscape', '1:1': 'square', '4:5': 'portrait', '2:3': 'vertical', '3:2': 'horizontal' }[ar] || 'portrait';
+}
 
 async function batchGenerateVideos(variations, aspectRatio = '9:16', productImageUrl = null) {
-  const POLL_INTERVAL_MS = 8000;
-  const TIMEOUT_MS = 300000; // 5 minutes per video
+  const geminiAR = toGeminiAR(aspectRatio);
 
   const results = await Promise.allSettled(
     variations.map(async (v) => {
       if (!v.imagePrompt) return { ...v, videoUrl: null, videoError: 'No prompt generated' };
       try {
-        // Submit video job
-        const submitted = await generateVideo({
+        const imageUrls = productImageUrl ? [productImageUrl] : [];
+        const { uuid } = await generateFirstClip({
           prompt: v.imagePrompt,
-          aspectRatio,
-          duration: 10,
-          imageUrl: productImageUrl || undefined,
+          mode: 'normal',
+          imageUrls,
+          aspectRatio: geminiAR,
+          resolution: '720p',
+          clipDuration: 10,
         });
-        const taskId = submitted.task_id || submitted.taskId || submitted.id;
-        if (!taskId) {
-          const raw = JSON.stringify(submitted).slice(0, 200);
-          console.error('[batchGenerateVideos] No task_id in response:', raw);
-          return { ...v, videoUrl: null, videoError: `Video API tidak mengembalikan task ID. Detail: ${raw}` };
-        }
-        console.log(`[batchGenerateVideos] Task submitted: ${taskId}`);
-
-        // Poll until done
-        const start = Date.now();
-        while (Date.now() - start < TIMEOUT_MS) {
-          await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
-          const task = await getTask(taskId);
-          const status = (task.status || '').toLowerCase();
-
-          if (['completed', 'succeed', 'success'].includes(status)) {
-            const videoUrl =
-              task.result?.video_url ||
-              task.result?.url ||
-              task.video_url ||
-              task.url ||
-              task.output?.url ||
-              // Kling v2 puts it here
-              task.result?.videos?.[0]?.url ||
-              task.videos?.[0]?.url ||
-              null;
-            return {
-              ...v,
-              videoUrl,
-              videoError: videoUrl ? null : 'Completed but no URL in response',
-            };
-          }
-
-          if (['failed', 'error', 'cancelled'].includes(status)) {
-            return { ...v, videoUrl: null, videoError: task.message || task.error || 'Generation failed' };
-          }
-          // queued / processing — keep polling
-        }
-        return { ...v, videoUrl: null, videoError: `Timed out after ${TIMEOUT_MS / 1000}s (task ${taskId})` };
+        console.log(`[batchGenerateVideos] GeminiGen job: ${uuid}`);
+        const { videoUrl } = await pollUntilComplete(uuid);
+        return { ...v, videoUrl: videoUrl || null, videoError: videoUrl ? null : 'Completed but no URL' };
       } catch (e) {
         return { ...v, videoUrl: null, videoError: e.message };
       }

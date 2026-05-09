@@ -398,7 +398,7 @@ export async function generateScaleVideoJob(payload: {
   productPhotoBase64?: string
   productPhotoMime?: string
 }): Promise<ScaleVideoGenerateResponse> {
-  // Videos take longer — 10s each × N angles × kling queue time = up to 10 min
+  // Videos take longer — 10s each × N angles × GeminiGen grok-3 queue time = up to 10 min
   const res = await api.post('/scale-video/generate', payload, { timeout: 600000 })
   return res.data
 }

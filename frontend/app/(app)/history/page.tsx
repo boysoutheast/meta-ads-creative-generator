@@ -264,7 +264,7 @@ function HistoryDetail({ entry }: { entry: HistoryEntry }) {
               bodyText: v.bodyText,
               cta: v.cta,
               imageUrl: v.imageUrl,
-              videoJobId: v.videoJobId,
+              videoUrl: v.videoUrl ?? v.videoJobId,  // legacy entries used videoJobId for URL
               imagePrompt: v.imagePrompt,
             }}
           />
@@ -288,7 +288,7 @@ function HistoryDetail({ entry }: { entry: HistoryEntry }) {
               subheadline: c?.subtext,
               cta: c?.cta || null,
               imageUrl: r.imageUrl,
-              videoJobId: r.videoJobId,
+              videoUrl: r.videoUrl ?? r.videoJobId,  // legacy entries used videoJobId for URL
               imagePrompt: r.imagePrompt,
             }}
           />

@@ -29,7 +29,6 @@ module.exports = {
 
   models: {
     image: process.env.IMAGE_MODEL || 'gpt-image-2',
-    video: process.env.VIDEO_MODEL || 'kling-v2-6',
     remake: process.env.REMAKE_MODEL || 'doubao-seedance-2-0',
     vision: process.env.VISION_MODEL || 'gpt-4o',
     chat: process.env.CHAT_MODEL || 'gpt-4o',

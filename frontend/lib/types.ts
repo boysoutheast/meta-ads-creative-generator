@@ -32,7 +32,7 @@ export interface AngleVariation {
   imageUrl?: string | null
   imageUrls?: string[] | null
   imageError?: string | null
-  // Video output (kling-v2-6)
+  // Video output (GeminiGen grok-3)
   videoUrl?: string | null
   videoError?: string | null
   // V2 concept translation fields

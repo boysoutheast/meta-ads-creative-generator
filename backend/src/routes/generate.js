@@ -2,7 +2,8 @@ const express = require('express');
 const router = express.Router();
 const upload = require('../middleware/upload');
 const { generateAdPrompt, generateSlideCopy } = require('../services/promptGenerator');
-const { generateImage, generateVideo, checkVideoStatus } = require('../services/apimart');
+const { generateImage } = require('../services/apimart');
+const { generateFirstClip, pollUntilComplete } = require('../services/geminiGenService');
 const { analyzeImageReference, analyzeVideoReference, generateVideoPromptFromReference } = require('../services/videoAnalyzer');
 
 /**
@@ -98,25 +99,43 @@ router.post('/image', async (req, res) => {
  * Generate video from prompt
  */
 router.post('/video', async (req, res) => {
-  const { prompt, aspectRatio = '9:16', duration = 5 } = req.body;
+  const { prompt, aspectRatio = '9:16', duration = 10 } = req.body;
+  if (!prompt) return res.status(400).json({ error: 'prompt is required' });
 
-  if (!prompt) {
-    return res.status(400).json({ error: 'prompt is required' });
-  }
-
-  const result = await generateVideo({ prompt, aspectRatio, duration });
-
-  res.json(result);
+  const arMap = { '9:16': 'portrait', '16:9': 'landscape', '1:1': 'square' };
+  const { uuid } = await generateFirstClip({
+    prompt,
+    mode: 'normal',
+    aspectRatio: arMap[aspectRatio] || 'portrait',
+    resolution: '720p',
+    clipDuration: typeof duration === 'number' ? duration : parseInt(duration) || 10,
+  });
+  const { videoUrl, thumbnailUrl } = await pollUntilComplete(uuid);
+  res.json({ uuid, videoUrl, thumbnailUrl });
 });
 
 /**
  * GET /api/generate/video/:taskId
- * Check video generation status
+ * Check video generation status (polls GeminiGen history)
  */
 router.get('/video/:taskId', async (req, res) => {
   const { taskId } = req.params;
-  const result = await checkVideoStatus(taskId);
-  res.json(result);
+  try {
+    const axios = require('axios');
+    const { data } = await axios.get(`https://api.geminigen.ai/uapi/v1/history/${taskId}`, {
+      headers: { 'x-api-key': process.env.GEMINIGEN_API_KEY || '' },
+      timeout: 10000,
+    });
+    const videoUrl = data.generated_video?.[0]?.video_url || null;
+    res.json({
+      uuid: taskId,
+      status: data.status === 2 ? 'completed' : data.status === 3 ? 'failed' : 'processing',
+      videoUrl,
+      progress: data.status_percentage || 0,
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 /**

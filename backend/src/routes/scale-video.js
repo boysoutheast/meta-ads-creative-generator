@@ -9,7 +9,8 @@ const {
   generateVariationPrompts,
   batchGenerateVideos,
 } = require('../services/scalingService');
-const { analyzeImage, uploadImageToApimart, getTask } = require('../services/apimart');
+const axios = require('axios');
+const { analyzeImage, uploadImageToApimart } = require('../services/apimart');
 const { startRemakeJob, getJob } = require('../services/videoRemakeService');
 
 /**
@@ -41,7 +42,7 @@ router.post('/analyze', upload.single('file'), async (req, res) => {
 
 /**
  * POST /api/scale-video/generate
- * Generate angle variations as 10-second kling-v2-6 videos.
+ * Generate angle variations as 10-second GeminiGen grok-3 videos.
  * Mirror of /scale/generate-variations — same angle pipeline, video output.
  */
 router.post('/generate', async (req, res) => {
@@ -73,12 +74,12 @@ router.post('/generate', async (req, res) => {
     }
   }
 
-  // Step 2: Upload product photo as image-to-video reference for kling
+  // Step 2: Upload product photo as image-to-video reference for GeminiGen
   let productImageUrl = null;
   if (productPhotoBase64) {
     try {
       productImageUrl = await uploadImageToApimart(productPhotoBase64, productPhotoMime || 'image/jpeg');
-      if (productImageUrl) console.log('Product photo uploaded for kling:', productImageUrl.slice(0, 60));
+      if (productImageUrl) console.log('Product photo uploaded for GeminiGen:', productImageUrl.slice(0, 60));
     } catch (e) {
       console.warn('Product photo upload for video failed (non-fatal):', e.message);
     }
@@ -107,7 +108,7 @@ router.post('/generate', async (req, res) => {
     null
   );
 
-  // Step 5: Batch generate 10-second kling-v2-6 videos for every variation
+  // Step 5: Batch generate 10-second GeminiGen grok-3 videos for every variation
   const finalVariations = await batchGenerateVideos(variationsWithPrompts, aspectRatio, productImageUrl);
 
   res.json({
@@ -126,32 +127,13 @@ router.post('/generate', async (req, res) => {
 router.get('/status/:taskId', async (req, res) => {
   const { taskId } = req.params;
   try {
-    const task = await getTask(taskId);
-    const status = (task.status || '').toLowerCase();
-
-    let videoUrl = null;
-    if (['completed', 'succeed', 'success'].includes(status)) {
-      videoUrl =
-        task.result?.video_url ||
-        task.result?.url ||
-        task.result?.videos?.[0]?.url ||
-        task.videos?.[0]?.url ||
-        task.video_url ||
-        task.url ||
-        task.output?.url ||
-        null;
-    }
-
-    const failed = ['failed', 'error', 'cancelled'].includes(status);
-    res.json({
-      taskId,
-      status: failed ? 'failed'
-        : ['completed', 'succeed', 'success'].includes(status) ? 'completed'
-        : 'processing',
-      videoUrl,
-      progress: task.progress || null,
-      error: failed ? (task.message || task.error || 'Generation failed') : null,
+    const { data } = await axios.get(`https://api.geminigen.ai/uapi/v1/history/${taskId}`, {
+      headers: { 'x-api-key': process.env.GEMINIGEN_API_KEY || '' },
+      timeout: 10000,
     });
+    const videoUrl = data.generated_video?.[0]?.video_url || null;
+    const status = data.status === 2 ? 'completed' : data.status === 3 ? 'failed' : 'processing';
+    res.json({ taskId, status, videoUrl, progress: data.status_percentage || 0 });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }

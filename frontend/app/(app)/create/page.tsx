@@ -479,7 +479,7 @@ export default function CreatePage() {
                         subheadline: c?.subtext,
                         cta: c?.cta || null,
                         imageUrl: r.imageUrl,
-                        videoJobId: r.videoJobId,
+                        videoUrl: r.videoJobId,  // backend reuses videoJobId field to carry the URL
                         imagePrompt: r.imagePrompt,
                         error: r.error,
                       }}

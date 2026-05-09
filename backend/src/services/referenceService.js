@@ -1,4 +1,4 @@
-const { analyzeImage, chatCompletion, generateImage, generateVideo } = require('./apimart');
+const { analyzeImage, chatCompletion, generateImage } = require('./apimart');
 const config = require('../config');
 const fs = require('fs');
 

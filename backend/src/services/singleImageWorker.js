@@ -104,7 +104,7 @@ async function processSingleImageJob(jobId) {
         completedAt: new Date(),
         durationMs,
         costUsd,
-        apiUsed: 'apimart/dall-e-3',
+        apiUsed: 'apimart/gpt-image-2',
       },
     });
 

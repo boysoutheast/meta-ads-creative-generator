@@ -12,7 +12,6 @@ export interface AdCardData {
   imageUrl?: string | null
   imageUrls?: string[] | null
   videoUrl?: string | null
-  videoJobId?: string | null
   headline?: string
   subheadline?: string
   bodyText?: string
@@ -198,12 +197,13 @@ export function AdCard({ data, index }: { data: AdCardData; index: number }) {
               alt={data.headline || `variation-${index}`}
               className="h-full w-full object-cover"
             />
-          ) : data.videoJobId ? (
-            <div className="flex h-full w-full flex-col items-center justify-center gap-2 p-4 text-center text-xs text-muted-foreground">
-              <Badge variant="secondary">Video Job</Badge>
-              <p className="font-mono break-all">{data.videoJobId}</p>
-              <p>Cek status di apimart.ai dashboard</p>
-            </div>
+          ) : data.videoUrl ? (
+            <video
+              src={data.videoUrl}
+              controls
+              className="h-full w-full object-cover"
+              playsInline
+            />
           ) : (
             <div className="flex h-full w-full flex-col items-center justify-center gap-2 text-muted-foreground">
               <ImageIcon className="h-8 w-8" />

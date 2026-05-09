@@ -11,7 +11,8 @@ const {
   buildCarouselSlidePrompt,
 } = require('../services/scalingService');
 const { analyzeVideoReference } = require('../services/videoAnalyzer');
-const { analyzeImage, uploadImageToApimart, generateImage, generateVideo, chatCompletion } = require('../services/apimart');
+const { analyzeImage, uploadImageToApimart, generateImage, chatCompletion } = require('../services/apimart');
+const { generateFirstClip, pollUntilComplete } = require('../services/geminiGenService');
 const config = require('../config');
 
 router.get('/angles', (req, res) => {
@@ -410,10 +411,18 @@ router.post('/generate-image', async (req, res) => {
 });
 
 router.post('/generate-video', async (req, res) => {
-  const { prompt, aspectRatio = '9:16', duration = 5 } = req.body;
+  const { prompt, aspectRatio = '9:16', duration = 10 } = req.body;
   if (!prompt) return res.status(400).json({ error: 'prompt is required' });
-  const result = await generateVideo({ prompt, aspectRatio, duration });
-  res.json(result);
+  const arMap = { '9:16': 'portrait', '16:9': 'landscape', '1:1': 'square' };
+  const { uuid } = await generateFirstClip({
+    prompt,
+    mode: 'normal',
+    aspectRatio: arMap[aspectRatio] || 'portrait',
+    resolution: '720p',
+    clipDuration: typeof duration === 'number' ? duration : parseInt(duration) || 10,
+  });
+  const { videoUrl, thumbnailUrl } = await pollUntilComplete(uuid);
+  res.json({ uuid, videoUrl, thumbnailUrl });
 });
 
 module.exports = router;

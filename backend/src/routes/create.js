@@ -9,7 +9,8 @@ const {
   generateAdCopy,
   generateCarouselFromReference,
 } = require('../services/referenceService');
-const { generateImage, generateVideo } = require('../services/apimart');
+const { generateImage } = require('../services/apimart');
+const { generateFirstClip, pollUntilComplete } = require('../services/geminiGenService');
 const { analyzeVideoReference } = require('../services/videoAnalyzer');
 
 /**
@@ -105,8 +106,16 @@ router.post('/generate', async (req, res) => {
         }
       } else if (outputType === 'video') {
         try {
-          const videoResult = await generateVideo({ prompt: imagePrompt, aspectRatio: format, duration: 5 });
-          videoJobId = videoResult.id || videoResult.taskId || null;
+          const arMap = { '9:16': 'portrait', '16:9': 'landscape', '1:1': 'square', '4:5': 'portrait' };
+          const { uuid } = await generateFirstClip({
+            prompt: imagePrompt,
+            mode: 'normal',
+            aspectRatio: arMap[format] || 'portrait',
+            resolution: '720p',
+            clipDuration: 10,
+          });
+          const result = await pollUntilComplete(uuid);
+          videoJobId = result.videoUrl || null;  // reuse videoJobId field — frontend reads it as videoUrl
         } catch (err) {
           console.error('Video generation failed:', err.message);
         }
