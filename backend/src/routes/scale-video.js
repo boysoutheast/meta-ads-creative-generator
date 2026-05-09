@@ -254,8 +254,16 @@ router.post('/analyze-from-url', async (req, res) => {
     });
   } catch (err) {
     const msg = err.message || 'Gagal menganalisis URL';
-    if (msg.includes('yt-dlp') || msg.includes('not found') || msg.includes('spawn')) {
-      return res.status(500).json({ error: 'yt-dlp tidak tersedia. Silakan upload file manual.' });
+    // yt-dlp binary not installed — happens on local dev (works on Railway/Docker)
+    const isYtdlpMissing =
+      msg.includes('yt-dlp: command not found') ||
+      msg.includes("yt-dlp' is not recognized") ||
+      (msg.includes('ENOENT') && msg.includes('yt-dlp')) ||
+      (err.code === 'ENOENT' && String(err.path || '').includes('yt-dlp'));
+    if (isYtdlpMissing) {
+      return res.status(500).json({
+        error: 'yt-dlp tidak tersedia di environment ini. Untuk Instagram/TikTok gunakan Upload File manual, atau coba YouTube URL (tidak butuh yt-dlp).',
+      });
     }
     res.status(500).json({ error: msg });
   }
