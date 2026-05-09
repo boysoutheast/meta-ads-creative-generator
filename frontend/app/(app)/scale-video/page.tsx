@@ -16,7 +16,7 @@ import {
 } from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Dropzone } from '@/components/ads/Dropzone'
-import { AngleSelector } from '@/components/ads/AngleSelector'
+// AngleSelector removed — angles auto-selected in scale-video flow
 import {
   analyzeWinningVideo,
   analyzeWinningVideoFromUrl,
@@ -185,7 +185,7 @@ export default function ScaleVideoPage() {
   }
 
   const handleGenerate = async () => {
-    if (!videoAnalysis || selectedAngles.length === 0) return
+    if (!videoAnalysis) return
     setError(null)
     setGenerating(true)
     setResult(null)
@@ -225,7 +225,7 @@ export default function ScaleVideoPage() {
         videoAnalysis,
         productName,
         productDescription,
-        selectedAngles,
+        selectedAngles: availableAngles.map((a) => a.key), // auto-select all angles
         aspectRatio,
         productPhotoBase64,
         productPhotoMime,
@@ -467,27 +467,15 @@ export default function ScaleVideoPage() {
                   <p className="text-xs text-primary font-medium">Durasi: 10 detik · Model: GeminiGen grok-3</p>
                 </div>
 
-                {/* Angle selector */}
-                {availableAngles.length > 0 && (
-                  <div>
-                    <Label className="mb-2 block">Pilih angle</Label>
-                    <AngleSelector
-                      angles={availableAngles}
-                      selected={selectedAngles}
-                      onChange={setSelectedAngles}
-                    />
-                  </div>
-                )}
-
                 <Button
                   className="w-full"
                   onClick={handleGenerate}
-                  disabled={generating || selectedAngles.length === 0}
+                  disabled={generating || !videoAnalysis}
                 >
                   {generating ? (
-                    <><Loader2 className="h-4 w-4 animate-spin" /> Generating videos… (bisa 5-10 menit)</>
+                    <><Loader2 className="h-4 w-4 animate-spin" /> Generating video… (bisa 5-10 menit)</>
                   ) : (
-                    <><Video className="h-4 w-4" /> Generate {selectedAngles.length} variasi video</>
+                    <><Video className="h-4 w-4" /> Generate Video</>
                   )}
                 </Button>
               </CardContent>
@@ -659,10 +647,10 @@ export default function ScaleVideoPage() {
             <div className="space-y-4">
               <div className="flex items-center gap-2 rounded-lg border border-primary/20 bg-primary/5 p-4 text-sm text-primary font-medium">
                 <Loader2 className="h-4 w-4 animate-spin" />
-                Generating {selectedAngles.length} variasi video dengan GeminiGen grok-3… estimasi 5-10 menit
+                Generating {availableAngles.length || 'variasi'} video dengan GeminiGen grok-3… estimasi 5-10 menit
               </div>
               <div className="grid gap-4 sm:grid-cols-2">
-                {selectedAngles.map((_, i) => (
+                {Array.from({ length: availableAngles.length || 3 }).map((_, i) => (
                   <Card key={i}>
                     <Skeleton className="aspect-video w-full rounded-t-lg" />
                     <CardContent className="space-y-2 p-4">

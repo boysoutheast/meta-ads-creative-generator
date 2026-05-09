@@ -199,6 +199,7 @@ OUTPUT RULES:
       "sceneNumber": 1,
       "duration": "0-3s",
       "description": "what happens visually + audio in this scene",
+      "dialogue": "exact spoken words / voiceover in this scene, empty string if silent",
       "hook": true,
       "visualElements": ["element1", "element2"],
       "emotion": "specific emotion targeted"
