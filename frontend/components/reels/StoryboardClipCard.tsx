@@ -3,7 +3,8 @@
 import React, { useState } from 'react'
 import {
   Camera, Lightbulb, Clapperboard,
-  RefreshCw, Eye, EyeOff, Loader2, Sparkles, Palette, Globe, Package, Music2, Mic2,
+  RefreshCw, Loader2, Sparkles, Palette, Globe, Package, Music2,
+  Pencil, Check, X,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
@@ -19,6 +20,7 @@ export interface StoryboardClipCardProps {
   hint: string
   onHintChange: (v: string) => void
   onRefresh: () => void
+  onEdit?: (idx: number, visualSummary: string, voScript: string) => Promise<void>
   isRefreshing: boolean
   isStale: boolean
   refLabels?: { tag: string; label: string }[]
@@ -43,11 +45,33 @@ const VO_TYPE_LABELS: Record<string, string> = {
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export function StoryboardClipCard({
-  clip, idx, totalClips, clipDuration = 10, hint, onHintChange, onRefresh, isRefreshing, isStale, refLabels = [],
+  clip, idx, totalClips, clipDuration = 10, hint, onHintChange, onRefresh, onEdit, isRefreshing, isStale, refLabels = [],
 }: StoryboardClipCardProps) {
   const [showHint, setShowHint] = useState(false)
-  const [showPrompt, setShowPrompt] = useState(false)
   const [showDetails, setShowDetails] = useState(false)
+
+  // Edit mode state
+  const [editing, setEditing] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [editVisualSummary, setEditVisualSummary] = useState(clip.visualSummary)
+  const [editVoScript, setEditVoScript] = useState(clip.voScript)
+
+  async function handleSaveEdit() {
+    if (!onEdit) return
+    setSaving(true)
+    try {
+      await onEdit(idx, editVisualSummary, editVoScript)
+      setEditing(false)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  function handleCancelEdit() {
+    setEditVisualSummary(clip.visualSummary)
+    setEditVoScript(clip.voScript)
+    setEditing(false)
+  }
   const clipsAffected = totalClips - idx
   const tc = clip.technicalConfig
   const startSec = idx * clipDuration
@@ -119,13 +143,32 @@ export function StoryboardClipCard({
               )}
             </div>
 
-            {/* Visual summary */}
+            {/* Visual summary — editable */}
             <div>
-              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-0.5">Scene</p>
-              <p className="text-sm leading-relaxed">{clip.visualSummary}</p>
+              <div className="flex items-center gap-1.5 mb-0.5">
+                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Scene</p>
+                {onEdit && !editing && (
+                  <button
+                    className="text-[10px] text-muted-foreground/60 hover:text-primary flex items-center gap-0.5 transition-colors"
+                    onClick={() => { setEditVisualSummary(clip.visualSummary); setEditVoScript(clip.voScript); setEditing(true) }}
+                  >
+                    <Pencil className="h-2.5 w-2.5" />edit
+                  </button>
+                )}
+              </div>
+              {editing ? (
+                <textarea
+                  value={editVisualSummary}
+                  onChange={e => setEditVisualSummary(e.target.value)}
+                  rows={3}
+                  className="w-full resize-none rounded-md border bg-background px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                />
+              ) : (
+                <p className="text-sm leading-relaxed">{clip.visualSummary}</p>
+              )}
             </div>
 
-            {/* Audio Dimension — varies by voType */}
+            {/* Audio Dimension — varies by voType, editable when in edit mode */}
             <div className="rounded-md bg-muted/50 px-3 py-2 space-y-1.5">
               <div className="flex items-center gap-1.5">
                 <span className="text-sm">{VO_TYPE_ICONS[voType] || '🔊'}</span>
@@ -134,11 +177,21 @@ export function StoryboardClipCard({
                 </p>
               </div>
 
-              {/* ASMR: show sound design */}
+              {/* ASMR: show sound design (not editable via voScript field) */}
               {isAsmr && tc?.soundDesign ? (
                 <p className="text-sm leading-relaxed text-foreground/80 italic">{tc.soundDesign}</p>
-              ) : !isAsmr && clip.voScript ? (
-                <p className="text-sm italic leading-relaxed">"{clip.voScript.replace(/^\[ASMR\]\s*/, '')}"</p>
+              ) : !isAsmr ? (
+                editing ? (
+                  <textarea
+                    value={editVoScript}
+                    onChange={e => setEditVoScript(e.target.value)}
+                    rows={4}
+                    placeholder="Voiceover script…"
+                    className="w-full resize-none rounded-md border bg-background px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                  />
+                ) : clip.voScript ? (
+                  <p className="text-sm italic leading-relaxed">"{clip.voScript.replace(/^\[ASMR\]\s*/, '')}"</p>
+                ) : null
               ) : null}
 
               {/* Ambient sounds — shown for all types if present */}
@@ -149,6 +202,30 @@ export function StoryboardClipCard({
                 </div>
               )}
             </div>
+
+            {/* Edit mode save/cancel buttons */}
+            {editing && (
+              <div className="flex items-center gap-2">
+                <Button
+                  size="sm"
+                  className="h-7 text-xs"
+                  onClick={handleSaveEdit}
+                  disabled={saving}
+                >
+                  {saving ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <Check className="mr-1 h-3 w-3" />}
+                  Save
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-7 text-xs"
+                  onClick={handleCancelEdit}
+                  disabled={saving}
+                >
+                  <X className="mr-1 h-3 w-3" />Cancel
+                </Button>
+              </div>
+            )}
 
             {/* Scene Flow — 3-beat breakdown */}
             {sceneFlow && (
@@ -237,29 +314,6 @@ export function StoryboardClipCard({
               </div>
             )}
 
-            {/* Full Grok Prompt toggle */}
-            {clip.grokPrompt && (
-              <div>
-                <button
-                  className="flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors"
-                  onClick={() => setShowPrompt(p => !p)}
-                >
-                  {showPrompt ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
-                  {showPrompt ? 'Hide AI prompt' : 'View full AI generation prompt'}
-                  <span className="text-muted-foreground/60">({clip.grokPrompt.length} chars)</span>
-                </button>
-                {showPrompt && (
-                  <div className="mt-1.5 rounded-md border border-border/60 bg-muted/30 px-3 py-2 max-h-64 overflow-y-auto">
-                    <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1 sticky top-0 bg-muted/80 pb-1">
-                      Grok Prompt (13 sections)
-                    </p>
-                    <p className="font-mono text-[11px] leading-relaxed text-foreground/80 whitespace-pre-wrap break-words">
-                      {clip.grokPrompt}
-                    </p>
-                  </div>
-                )}
-              </div>
-            )}
 
             {/* Refresh controls */}
             <div className="flex items-center gap-2 pt-1">

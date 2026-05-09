@@ -1,7 +1,7 @@
 'use client'
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
-import { ArrowRight, Image as ImageIcon, Wand2, Library as LibraryIcon, DollarSign, ChevronRight, Loader2 } from 'lucide-react'
+import { ArrowRight, Image as ImageIcon, Wand2, Film, DollarSign, ChevronRight, Loader2 } from 'lucide-react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -37,8 +37,8 @@ export default function DashboardPage() {
           <p className="text-muted-foreground">Mulai generate creative ads kamu hari ini.</p>
         </div>
         <Button asChild size="lg">
-          <Link href="/generate/single-image">
-            Generate Baru <ArrowRight className="h-4 w-4" />
+          <Link href="/reels">
+            <Film className="h-4 w-4" /> Create AI Reels <ArrowRight className="h-4 w-4" />
           </Link>
         </Button>
       </div>
@@ -50,7 +50,7 @@ export default function DashboardPage() {
       )}
 
       <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard label="Library items" value={stats?.totalItems} icon={<LibraryIcon className="h-4 w-4" />} loading={loading} />
+        <StatCard label="History items" value={stats?.totalItems} icon={<ImageIcon className="h-4 w-4" />} loading={loading} />
         <StatCard label="Total generations" value={stats?.totalJobs} icon={<ImageIcon className="h-4 w-4" />} loading={loading} />
         <StatCard label="Completed" value={stats?.completedJobs} icon={<Wand2 className="h-4 w-4" />} loading={loading} />
         <StatCard
@@ -70,7 +70,7 @@ export default function DashboardPage() {
                 <CardDescription>5 generation terakhir</CardDescription>
               </div>
               <Button asChild variant="ghost" size="sm">
-                <Link href="/library">Lihat library <ChevronRight className="h-4 w-4" /></Link>
+                <Link href="/history">Lihat history <ChevronRight className="h-4 w-4" /></Link>
               </Button>
             </div>
           </CardHeader>
@@ -83,7 +83,7 @@ export default function DashboardPage() {
               <div className="rounded-lg border border-dashed p-8 text-center">
                 <p className="mb-3 text-sm text-muted-foreground">Belum ada activity. Generate creative pertamamu!</p>
                 <Button asChild>
-                  <Link href="/generate/single-image">Mulai generate</Link>
+                  <Link href="/reels">Create AI Reels</Link>
                 </Button>
               </div>
             ) : (

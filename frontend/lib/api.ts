@@ -330,62 +330,6 @@ export async function getReelAudit(sessionId: string): Promise<any> {
   return res.data
 }
 
-// ─── Legacy SSE stream (kept for backward compat) ────────────────────────────
-
-export async function generateReelsStream(
-  payload: { prompt: string; targetDuration: number; mode?: string },
-  onEvent: (event: any) => void,
-): Promise<ReelsClip[]> {
-  const controller = new AbortController()
-  const timeoutId = setTimeout(() => controller.abort(), 30 * 60_000)
-
-  try {
-    const response = await fetch(`${API_URL}/reels/generate-stream-legacy`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-      signal: controller.signal,
-    })
-
-    if (!response.ok) {
-      const text = await response.text().catch(() => '')
-      throw new Error(`HTTP ${response.status}: ${text}`)
-    }
-
-    const reader = response.body!.getReader()
-    const decoder = new TextDecoder()
-    let buffer = ''
-    let finalClips: ReelsClip[] = []
-
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
-      buffer += decoder.decode(value, { stream: true })
-
-      const parts = buffer.split('\n\n')
-      buffer = parts.pop() ?? ''
-
-      for (const part of parts) {
-        for (const line of part.split('\n')) {
-          if (!line.startsWith('data: ')) continue
-          try {
-            const evt = JSON.parse(line.slice(6))
-            onEvent(evt)
-            if (evt.type === 'done') finalClips = evt.clips
-            if (evt.type === 'error') throw new Error(evt.message)
-          } catch (parseErr) {
-            if ((parseErr as Error).message && !(parseErr as Error).message.includes('JSON'))
-              throw parseErr
-          }
-        }
-      }
-    }
-
-    return finalClips
-  } finally {
-    clearTimeout(timeoutId)
-  }
-}
 
 export async function generateScalingVariations(payload: {
   analysis: any

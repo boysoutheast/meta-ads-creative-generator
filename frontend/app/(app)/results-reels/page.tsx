@@ -256,8 +256,8 @@ function SessionCard({ stored, onRemove }: { stored: StoredSession; onRemove: ()
           return
         }
 
-        // Auto-start / reconnect SSE for any active session
-        const active = ['storyboard_built', 'reviewing', 'generating', 'partial']
+        // Auto-start / reconnect SSE only for sessions already in generation — NOT reviewing/storyboard_built
+        const active = ['generating', 'partial']
         if (active.includes(s.status) && !sseStarted.current) {
           sseStarted.current = true
           setStatus('generating')

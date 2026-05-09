@@ -62,32 +62,32 @@ const MODE_OPTIONS = [
   { value: 'custom', label: 'Custom', desc: 'Balanced creative freedom' },
 ]
 
-const VO_TYPE_OPTIONS: { value: ReelsVoType; label: string; desc: string; icon: string }[] = [
-  { value: 'narration', label: 'CTA Narration', desc: '5 benefit sentences → Call to Action', icon: '📢' },
-  { value: 'dialogue',  label: 'Character Dialogue', desc: 'Character speaks with accent & personality', icon: '🎭' },
-  { value: 'asmr',      label: 'ASMR / Sound-Only', desc: 'No voice — pure textural sound design', icon: '🎧' },
-  { value: 'demo',      label: 'Tutorial / Demo', desc: 'Step-by-step instructional narration', icon: '📚' },
-  { value: 'story',     label: 'Emotional Story', desc: 'Narrative arc — connect, then convert', icon: '✨' },
+const VO_TYPE_OPTIONS: { value: ReelsVoType; label: string; desc: string; icon: string; gradient: string }[] = [
+  { value: 'narration', label: 'CTA Narration',      desc: '5 benefit sentences → Call to Action',       icon: '📢', gradient: 'from-blue-500 to-indigo-600' },
+  { value: 'dialogue',  label: 'Character Dialogue', desc: 'Character speaks with accent & personality', icon: '🎭', gradient: 'from-rose-500 to-pink-600' },
+  { value: 'asmr',      label: 'ASMR / Sound-Only',  desc: 'No voice — pure textural sound design',      icon: '🎧', gradient: 'from-teal-500 to-emerald-600' },
+  { value: 'demo',      label: 'Tutorial / Demo',    desc: 'Step-by-step instructional narration',       icon: '📚', gradient: 'from-amber-500 to-orange-600' },
+  { value: 'story',     label: 'Emotional Story',    desc: 'Narrative arc — connect, then convert',      icon: '✨', gradient: 'from-violet-500 to-purple-600' },
 ]
 
-const VISUAL_STYLE_OPTIONS: { value: ReelsVisualStyle; label: string; desc: string; icon: string; hot?: boolean }[] = [
-  { value: 'premium_3d',     label: '3D Premium',       desc: 'Glossy 3D semi-cartoon, volumetric light', icon: '💎' },
-  { value: 'realistic',      label: 'Realistic',        desc: 'Live-action cinematic, RED camera look',   icon: '🎬' },
-  { value: 'anime',          label: 'Anime JP/KR',      desc: 'Japanese anime, vibrant saturated colors', icon: '⛩️', hot: true },
-  { value: 'cinematic',      label: 'Cinematic',        desc: 'Anamorphic lens, golden hour grade',       icon: '🎞️' },
-  { value: 'cartoon',        label: 'Pixar 3D',         desc: 'Pixar-style 3D, bright rounded shapes',   icon: '🎨' },
-  { value: 'ghibli',         label: 'Ghibli',           desc: 'Watercolor backgrounds, Ghibli magic',    icon: '🌿' },
-  { value: 'makoto_shinkai', label: 'Shinkai Film',     desc: 'Hyperdetailed cityscape, lens flare',      icon: '🌆' },
-  { value: 'chibi',          label: 'Chibi Cute',       desc: 'Super-deformed kawaii, pastel colors',     icon: '🌸' },
-  { value: 'pixel_art',      label: 'Pixel Art',        desc: 'Retro 16-bit aesthetic, chunky sprites',   icon: '👾' },
-  { value: 'chinese_cg',     label: 'Donghua 3D',       desc: 'Chinese 3D animation, wuxia aesthetic',   icon: '🐉' },
+const VISUAL_STYLE_OPTIONS: { value: ReelsVisualStyle; label: string; desc: string; icon: string; hot?: boolean; gradient: string }[] = [
+  { value: 'premium_3d',     label: '3D Premium',    desc: 'Glossy 3D semi-cartoon, volumetric light', icon: '💎', gradient: 'from-purple-600 via-pink-500 to-orange-400' },
+  { value: 'realistic',      label: 'Realistic',     desc: 'Live-action cinematic, RED camera look',   icon: '🎬', gradient: 'from-slate-700 via-gray-600 to-zinc-500' },
+  { value: 'anime',          label: 'Anime JP/KR',   desc: 'Japanese anime, vibrant saturated colors', icon: '⛩️', gradient: 'from-orange-400 via-red-500 to-pink-500', hot: true },
+  { value: 'cinematic',      label: 'Cinematic',     desc: 'Anamorphic lens, golden hour grade',       icon: '🎞️', gradient: 'from-amber-700 via-yellow-600 to-orange-500' },
+  { value: 'cartoon',        label: 'Pixar 3D',      desc: 'Pixar-style 3D, bright rounded shapes',   icon: '🎨', gradient: 'from-sky-400 via-blue-500 to-indigo-500' },
+  { value: 'ghibli',         label: 'Ghibli',        desc: 'Watercolor backgrounds, Ghibli magic',    icon: '🌿', gradient: 'from-emerald-400 via-teal-500 to-green-600' },
+  { value: 'makoto_shinkai', label: 'Shinkai Film',  desc: 'Hyperdetailed cityscape, lens flare',      icon: '🌆', gradient: 'from-blue-900 via-indigo-700 to-cyan-500' },
+  { value: 'chibi',          label: 'Chibi Cute',    desc: 'Super-deformed kawaii, pastel colors',     icon: '🌸', gradient: 'from-pink-300 via-rose-400 to-fuchsia-400' },
+  { value: 'pixel_art',      label: 'Pixel Art',     desc: 'Retro 16-bit aesthetic, chunky sprites',   icon: '👾', gradient: 'from-violet-900 via-purple-700 to-indigo-600' },
+  { value: 'chinese_cg',     label: 'Donghua 3D',    desc: 'Chinese 3D animation, wuxia aesthetic',   icon: '🐉', gradient: 'from-red-600 via-orange-500 to-yellow-500' },
 ]
 
-const PROJECT_TYPE_OPTIONS: { value: ReelsProjectType; label: string; desc: string; icon: string }[] = [
-  { value: 'product_promo', label: 'Product Promo',    desc: 'Commercial ad — product always center stage, ends with CTA', icon: '📦' },
-  { value: 'story',         label: 'Story Video',      desc: 'Narrative film — emotional arc, product appears naturally',   icon: '🎭' },
-  { value: 'digital_human', label: 'Digital Human Ad', desc: 'AI presenter talks to camera, showcases product',             icon: '🤖' },
-  { value: 'default',       label: 'General',          desc: 'Balanced creative — good for any brief',                     icon: '✨' },
+const PROJECT_TYPE_OPTIONS: { value: ReelsProjectType; label: string; desc: string; icon: string; gradient: string }[] = [
+  { value: 'product_promo', label: 'Product Promo',    desc: 'Commercial ad — product always center stage, ends with CTA', icon: '📦', gradient: 'from-blue-500 to-cyan-500' },
+  { value: 'story',         label: 'Story Video',      desc: 'Narrative film — emotional arc, product appears naturally',   icon: '🎭', gradient: 'from-violet-500 to-purple-600' },
+  { value: 'digital_human', label: 'Digital Human',    desc: 'AI presenter talks to camera, showcases product',             icon: '🤖', gradient: 'from-emerald-500 to-teal-600' },
+  { value: 'default',       label: 'General',          desc: 'Balanced creative — good for any brief',                     icon: '✨', gradient: 'from-orange-400 to-pink-500' },
 ]
 
 const OUTPUT_LANGUAGE_OPTIONS: { value: ReelsOutputLanguage; label: string; flag: string }[] = [
@@ -400,15 +400,23 @@ export default function ReelsPage() {
                     type="button"
                     disabled={building}
                     onClick={() => setProjectType(o.value)}
-                    className={`flex flex-col items-start rounded-lg border px-3 py-2.5 text-left transition-colors disabled:opacity-50 ${
+                    className={`overflow-hidden flex flex-col items-start rounded-lg border text-left transition-all disabled:opacity-50 ${
                       projectType === o.value
-                        ? 'border-primary bg-primary/5 ring-1 ring-primary/30'
-                        : 'border-border/60 bg-background hover:border-primary/40 hover:bg-muted/30'
+                        ? 'border-primary ring-2 ring-primary/30'
+                        : 'border-border/60 bg-background hover:border-primary/40'
                     }`}
                   >
-                    <span className="text-lg mb-0.5">{o.icon}</span>
-                    <span className="text-xs font-semibold leading-tight">{o.label}</span>
-                    <span className="text-[10px] text-muted-foreground leading-tight mt-0.5">{o.desc}</span>
+                    {/* Gradient preview strip */}
+                    <div className={`w-full h-12 bg-gradient-to-br ${o.gradient} flex items-center justify-between px-3`}>
+                      <span className="text-2xl drop-shadow-sm">{o.icon}</span>
+                      {projectType === o.value && (
+                        <span className="rounded-full bg-white/90 w-5 h-5 flex items-center justify-center text-[10px] font-bold text-primary">✓</span>
+                      )}
+                    </div>
+                    <div className="px-2.5 py-2">
+                      <span className="text-xs font-semibold leading-tight block">{o.label}</span>
+                      <span className="text-[10px] text-muted-foreground leading-tight mt-0.5 block">{o.desc}</span>
+                    </div>
                   </button>
                 ))}
               </div>
@@ -478,15 +486,20 @@ export default function ReelsPage() {
                     type="button"
                     disabled={building}
                     onClick={() => setVoType(o.value)}
-                    className={`flex flex-col items-start rounded-lg border px-3 py-2 text-left transition-colors disabled:opacity-50 ${
+                    className={`overflow-hidden flex flex-col items-start rounded-lg border text-left transition-all disabled:opacity-50 ${
                       voType === o.value
-                        ? 'border-primary bg-primary/5 ring-1 ring-primary/30'
-                        : 'border-border/60 bg-background hover:border-primary/40 hover:bg-muted/30'
+                        ? 'border-primary ring-2 ring-primary/30'
+                        : 'border-border/60 bg-background hover:border-primary/40'
                     }`}
                   >
-                    <span className="text-base mb-0.5">{o.icon}</span>
-                    <span className="text-xs font-semibold leading-tight">{o.label}</span>
-                    <span className="text-[10px] text-muted-foreground leading-tight mt-0.5">{o.desc}</span>
+                    {/* Gradient preview strip */}
+                    <div className={`w-full h-9 bg-gradient-to-r ${o.gradient} flex items-center justify-center`}>
+                      <span className="text-lg drop-shadow-sm">{o.icon}</span>
+                    </div>
+                    <div className="px-2.5 py-2">
+                      <span className="text-xs font-semibold leading-tight block">{o.label}</span>
+                      <span className="text-[10px] text-muted-foreground leading-tight mt-0.5 block">{o.desc}</span>
+                    </div>
                   </button>
                 ))}
               </div>
@@ -503,18 +516,26 @@ export default function ReelsPage() {
                     type="button"
                     disabled={building}
                     onClick={() => setVisualStyle(o.value)}
-                    className={`relative flex flex-col items-start rounded-lg border px-3 py-2 text-left transition-colors disabled:opacity-50 ${
+                    className={`relative overflow-hidden flex flex-col items-start rounded-lg border text-left transition-all disabled:opacity-50 ${
                       visualStyle === o.value
-                        ? 'border-primary bg-primary/5 ring-1 ring-primary/30'
-                        : 'border-border/60 bg-background hover:border-primary/40 hover:bg-muted/30'
+                        ? 'border-primary ring-2 ring-primary/30'
+                        : 'border-border/60 bg-background hover:border-primary/40'
                     }`}
                   >
-                    {o.hot && (
-                      <span className="absolute top-1.5 right-1.5 rounded-full bg-orange-500/90 px-1 py-px text-[8px] font-bold text-white leading-none">HOT</span>
-                    )}
-                    <span className="text-base mb-0.5">{o.icon}</span>
-                    <span className="text-xs font-semibold leading-tight">{o.label}</span>
-                    <span className="text-[10px] text-muted-foreground leading-tight mt-0.5">{o.desc}</span>
+                    {/* Style preview gradient */}
+                    <div className={`w-full h-14 bg-gradient-to-br ${o.gradient} flex items-end justify-between p-1.5`}>
+                      <span className="text-xl drop-shadow-md">{o.icon}</span>
+                      {o.hot && (
+                        <span className="rounded-full bg-orange-500 px-1.5 py-0.5 text-[8px] font-bold text-white leading-none">HOT</span>
+                      )}
+                      {visualStyle === o.value && (
+                        <span className="rounded-full bg-white/90 px-1.5 py-0.5 text-[8px] font-bold text-primary leading-none">✓</span>
+                      )}
+                    </div>
+                    <div className="px-2.5 py-2">
+                      <span className="text-xs font-semibold leading-tight block">{o.label}</span>
+                      <span className="text-[10px] text-muted-foreground leading-tight mt-0.5 block">{o.desc}</span>
+                    </div>
                   </button>
                 ))}
               </div>

@@ -11,6 +11,8 @@ import {
   Package,
   Layers,
   Film,
+  Video,
+  Wand2,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/lib/auth'
@@ -29,6 +31,8 @@ const navGroups = [
     label: 'Generate',
     items: [
       { href: '/scale', label: 'Scale Winning Image', icon: Layers },
+      { href: '/scale-video', label: 'Scale Winning Video', icon: Video },
+      { href: '/remake', label: 'Video Remake', icon: Wand2 },
       { href: '/reels', label: 'Create AI Reels', icon: Film },
     ],
   },
