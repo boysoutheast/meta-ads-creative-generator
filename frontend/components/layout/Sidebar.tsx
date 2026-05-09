@@ -13,6 +13,8 @@ import {
   Film,
   Video,
   Wand2,
+  Library as LibraryIcon,
+  Image as ImageIcon,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/lib/auth'
@@ -24,16 +26,18 @@ const navGroups = [
     items: [
       { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
       { href: '/results-reels', label: 'Results Reels', icon: Clapperboard },
+      { href: '/library', label: 'Library', icon: LibraryIcon },
       { href: '/history', label: 'History', icon: History },
     ],
   },
   {
     label: 'Generate',
     items: [
+      { href: '/reels', label: 'Create AI Reels', icon: Film },
       { href: '/scale', label: 'Scale Winning Image', icon: Layers },
       { href: '/scale-video', label: 'Scale Winning Video', icon: Video },
       { href: '/remake', label: 'Video Remake', icon: Wand2 },
-      { href: '/reels', label: 'Create AI Reels', icon: Film },
+      { href: '/generate/single-image', label: 'Single Image', icon: ImageIcon },
     ],
   },
   {

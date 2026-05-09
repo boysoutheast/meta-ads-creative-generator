@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import {
   Film, Download, CheckCircle2, AlertCircle, Loader2,
   Clock, RefreshCw, Trash2, Plus, ChevronDown, ChevronRight,
-  Clapperboard,
+  Clapperboard, Play,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
@@ -63,6 +63,7 @@ function getStatusConfig(status: string, downloadReady: boolean) {
   }
   switch (status) {
     case 'loading': return { label: 'Loading…', variant: 'secondary' as const, bg: 'bg-muted', icon: <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />, textColor: 'text-muted-foreground' }
+    case 'reviewing': return { label: 'Ready to start', variant: 'secondary' as const, bg: 'bg-blue-100 dark:bg-blue-900/30', icon: <Play className="h-4 w-4 text-blue-600" />, textColor: 'text-blue-700 dark:text-blue-400' }
     case 'generating': return { label: 'Generating', variant: 'default' as const, bg: 'bg-primary/10', icon: <Loader2 className="h-4 w-4 animate-spin text-primary" />, textColor: 'text-primary' }
     case 'merging': return { label: 'Merging', variant: 'default' as const, bg: 'bg-primary/10', icon: <Loader2 className="h-4 w-4 animate-spin text-primary" />, textColor: 'text-primary' }
     case 'partial': return { label: 'Partial', variant: 'secondary' as const, bg: 'bg-amber-100 dark:bg-amber-900/30', icon: <RefreshCw className="h-4 w-4 text-amber-600" />, textColor: 'text-amber-700' }
@@ -278,6 +279,17 @@ function SessionCard({ stored, onRemove }: { stored: StoredSession; onRemove: ()
   const cfg = getStatusConfig(status, downloadReady)
   const isActive = ['generating', 'merging', 'loading'].includes(status) && !downloadReady
 
+  function handleStart() {
+    if (sseStarted.current) return
+    sseStarted.current = true
+    setStatus('generating')
+    setError(null)
+    startReelGeneration(stored.sessionId, handleSSE).catch(err => {
+      setStatus('error')
+      setError(err.message)
+    })
+  }
+
   return (
     <Card className={`transition-all ${downloadReady ? 'border-green-200 dark:border-green-800' : ''}`}>
       <CardHeader className="pb-0 pt-4">
@@ -307,6 +319,26 @@ function SessionCard({ stored, onRemove }: { stored: StoredSession; onRemove: ()
 
           {/* Action buttons */}
           <div className="flex shrink-0 items-center gap-1">
+            {status === 'reviewing' && !downloadReady && (
+              <Button
+                size="sm"
+                className="h-8 bg-blue-600 hover:bg-blue-700 text-white text-xs"
+                onClick={handleStart}
+              >
+                <Play className="mr-1.5 h-3.5 w-3.5" />
+                Start Generation
+              </Button>
+            )}
+            {status === 'partial' && !downloadReady && (
+              <Button
+                size="sm"
+                className="h-8 bg-amber-600 hover:bg-amber-700 text-white text-xs"
+                onClick={handleStart}
+              >
+                <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
+                Resume
+              </Button>
+            )}
             {downloadReady && (
               <Button
                 size="sm"
@@ -395,10 +427,22 @@ function SessionCard({ stored, onRemove }: { stored: StoredSession; onRemove: ()
             </div>
           )}
 
-          {/* Loading / not found */}
+          {/* Loading / reviewing / not found */}
           {status === 'loading' && (
             <div className="flex items-center gap-2 text-sm text-muted-foreground py-1">
               <Loader2 className="h-4 w-4 animate-spin" />Checking session…
+            </div>
+          )}
+          {status === 'reviewing' && (
+            <div className="flex items-start gap-2 rounded-md bg-blue-50 dark:bg-blue-900/20 px-3 py-2 text-xs text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
+              <Play className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+              <span>Storyboard is ready. Click <span className="font-semibold">Start Generation</span> above to begin video clip generation. This may take 5-10 minutes.</span>
+            </div>
+          )}
+          {status === 'partial' && !downloadReady && (
+            <div className="flex items-start gap-2 rounded-md bg-amber-50 dark:bg-amber-900/20 px-3 py-2 text-xs text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800">
+              <RefreshCw className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+              <span>Some clips failed. Click <span className="font-semibold">Resume</span> to retry the failed clips.</span>
             </div>
           )}
           {status === 'not_found' && (
