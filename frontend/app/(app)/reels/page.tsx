@@ -15,7 +15,7 @@ import {
 import {
   buildStoryboard, refreshClips, generateSceneImages,
   type PublicClip, type ReferenceImageInput,
-  type ReelsAspectRatio, type ReelsResolution, type ReelsClipDuration,
+  type ReelsAspectRatio, type ReelsResolution, type ReelsClipDuration, type ReelsVoType,
 } from '@/lib/api'
 import { pushStoredSession } from '@/lib/reels-sessions'
 import { StoryboardClipCard } from '@/components/reels/StoryboardClipCard'
@@ -61,6 +61,14 @@ const MODE_OPTIONS = [
   { value: 'custom', label: 'Custom', desc: 'Balanced creative freedom' },
 ]
 
+const VO_TYPE_OPTIONS: { value: ReelsVoType; label: string; desc: string; icon: string }[] = [
+  { value: 'narration', label: 'CTA Narration', desc: '5 benefit sentences → Call to Action', icon: '📢' },
+  { value: 'dialogue',  label: 'Character Dialogue', desc: 'Character speaks with accent & personality', icon: '🎭' },
+  { value: 'asmr',      label: 'ASMR / Sound-Only', desc: 'No voice — pure textural sound design', icon: '🎧' },
+  { value: 'demo',      label: 'Tutorial / Demo', desc: 'Step-by-step instructional narration', icon: '📚' },
+  { value: 'story',     label: 'Emotional Story', desc: 'Narrative arc — connect, then convert', icon: '✨' },
+]
+
 // ─── types ───────────────────────────────────────────────────────────────────
 
 type Step = 'input' | 'storyboard'
@@ -97,6 +105,7 @@ export default function ReelsPage() {
   const [aspectRatio, setAspectRatio] = useState<ReelsAspectRatio>('portrait')
   const [resolution, setResolution] = useState<ReelsResolution>('720p')
   const [clipDuration, setClipDuration] = useState<ReelsClipDuration>(10)
+  const [voType, setVoType] = useState<ReelsVoType>('narration')
   const [building, setBuilding] = useState(false)
 
   // reference images
@@ -171,7 +180,7 @@ export default function ReelsPage() {
         label: r.label,
         dataUrl: r.dataUrl,
       }))
-      const data = await buildStoryboard({ prompt: prompt.trim(), mode, duration, aspectRatio, resolution, clipDuration, referenceImages })
+      const data = await buildStoryboard({ prompt: prompt.trim(), mode, duration, aspectRatio, resolution, clipDuration, voType, referenceImages })
       setSessionId(data.sessionId)
       setStoryboard(data.storyboard)
       setSessionRefLabels(data.referenceImageUrls || [])
@@ -350,6 +359,31 @@ export default function ReelsPage() {
               </div>
             </div>
 
+            {/* Row 1b: VO / Audio Type */}
+            <div className="space-y-1.5">
+              <Label>Audio Style</Label>
+              <p className="text-xs text-muted-foreground">What kind of audio experience does this video need?</p>
+              <div className="grid gap-2 sm:grid-cols-3 lg:grid-cols-5">
+                {VO_TYPE_OPTIONS.map(o => (
+                  <button
+                    key={o.value}
+                    type="button"
+                    disabled={building}
+                    onClick={() => setVoType(o.value)}
+                    className={`flex flex-col items-start rounded-lg border px-3 py-2 text-left transition-colors disabled:opacity-50 ${
+                      voType === o.value
+                        ? 'border-primary bg-primary/5 ring-1 ring-primary/30'
+                        : 'border-border/60 bg-background hover:border-primary/40 hover:bg-muted/30'
+                    }`}
+                  >
+                    <span className="text-base mb-0.5">{o.icon}</span>
+                    <span className="text-xs font-semibold leading-tight">{o.label}</span>
+                    <span className="text-[10px] text-muted-foreground leading-tight mt-0.5">{o.desc}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
             {/* Row 2: Aspect Ratio + Resolution + Total Duration */}
             <div className="grid gap-4 sm:grid-cols-3">
               <div className="space-y-1.5">
@@ -465,7 +499,10 @@ export default function ReelsPage() {
             </div>
 
             <div className="rounded-md bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
-              AI will generate {Math.ceil(duration / 10)} clips × 10s · Grok 720p Portrait · Mode: {mode}
+              AI will generate {Math.ceil(duration / clipDuration)} clip{Math.ceil(duration / clipDuration) > 1 ? 's' : ''} × {clipDuration}s
+              {' · '}{resolution} {ASPECT_RATIO_OPTIONS.find(a => a.value === aspectRatio)?.label || aspectRatio}
+              {' · '}{VO_TYPE_OPTIONS.find(v => v.value === voType)?.icon} {VO_TYPE_OPTIONS.find(v => v.value === voType)?.label}
+              {' · '}Mode: {mode}
               {refImages.length > 0 && ` · ${refImages.length} reference image${refImages.length > 1 ? 's' : ''}`}
             </div>
 
@@ -528,6 +565,7 @@ export default function ReelsPage() {
                 clip={clip}
                 idx={idx}
                 totalClips={storyboard.length}
+                clipDuration={clipDuration}
                 hint={hints[idx] || ''}
                 onHintChange={v => setHints(prev => ({ ...prev, [idx]: v }))}
                 onRefresh={() => handleRefresh(idx)}

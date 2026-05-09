@@ -21,32 +21,40 @@ const PORTRAIT_SIZE = '1024x1536'; // closest 9:16 portrait supported by apimart
  * Build a concise English image prompt from a storyboard clip's technicalConfig.
  * Falls back to grokPrompt excerpt if technicalConfig is sparse.
  */
+/**
+ * Build a rich English image prompt from a storyboard clip's technicalConfig.
+ * Leverages the power template fields: characterDesign, productDesign, worldBuilding,
+ * colorPalette, effects — for a much more accurate scene preview image.
+ */
 function buildSceneImagePrompt(clip) {
   const tc = clip.technicalConfig || {};
 
   const parts = [];
 
-  if (tc.mainSubject) parts.push(tc.mainSubject);
-  if (tc.action)      parts.push(tc.action);
-  if (tc.setting)     parts.push(`in ${tc.setting}`);
-  if (tc.lighting)    parts.push(tc.lighting);
-  if (tc.visualStyle) parts.push(`${tc.visualStyle} style`);
-  if (tc.cameraShot)  parts.push(tc.cameraShot);
+  // Rich fields from the power template (new)
+  if (tc.worldBuilding)    parts.push(tc.worldBuilding);
+  if (tc.mainSubject)      parts.push(tc.mainSubject);
+  if (tc.characterDesign)  parts.push(`Character: ${tc.characterDesign}`);
+  if (tc.productDesign)    parts.push(`Product: ${tc.productDesign}`);
+  if (tc.action)           parts.push(tc.action);
+  if (tc.effects)          parts.push(tc.effects);
+  if (tc.colorPalette)     parts.push(`Color palette: ${tc.colorPalette}`);
+  if (tc.lighting)         parts.push(tc.lighting);
+  if (tc.visualStyle)      parts.push(`${tc.visualStyle} style`);
+  if (tc.cameraShot)       parts.push(tc.cameraShot);
   if (tc.additionalDetails) parts.push(tc.additionalDetails);
 
-  // If technicalConfig is sparse, pull the first 200 chars of grokPrompt
-  if (parts.length < 3 && clip.grokPrompt) {
-    const excerpt = clip.grokPrompt
-      .replace(/\[FORMAT\].*?\n/s, '')   // strip [FORMAT] line
-      .replace(/\[VO\][\s\S]*/s, '')     // strip VO onwards (just want visual)
-      .replace(/\[.*?\]/g, '')           // strip remaining tags
-      .trim()
-      .slice(0, 200);
-    if (excerpt) parts.unshift(excerpt);
+  // Fallback: if still sparse, extract visual sections from the grokPrompt directly
+  if (parts.length < 4 && clip.grokPrompt) {
+    const visualSections = ['WORLD', 'CHARACTER', 'PRODUCT', 'EFFECTS', 'STYLE'];
+    for (const s of visualSections) {
+      const m = clip.grokPrompt.match(new RegExp(`\\[${s}\\]\\s*([^\\[]+)`, 'i'));
+      if (m) parts.push(m[1].replace(/\n/g, ' ').trim().slice(0, 150));
+    }
   }
 
-  const base = parts.join(', ');
-  return `${base}, vertical 9:16 aspect ratio, high quality digital art, cinematic lighting, ultra detailed`;
+  const base = parts.filter(Boolean).join(', ');
+  return `${base}, vertical 9:16 aspect ratio, high quality 3D render, cinematic lighting, ultra detailed, premium glossy finish`;
 }
 
 /**

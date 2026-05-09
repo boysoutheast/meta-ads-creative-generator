@@ -139,12 +139,25 @@ export type ReelsClip = {
 
 export type TechnicalConfig = {
   mainSubject: string
-  action: string
-  setting: string
+  // Power template fields (new — rich storyboard detail)
+  characterDesign: string    // exact character visual: outfit, accessories, colors
+  productDesign: string      // exact product: container color/finish, label, content
+  worldBuilding: string      // environment name + atmosphere + bg elements
+  sceneFlow: string          // Opening beat | Mid beat | Close beat
+  action: string             // primary physical movement
+  effects: string            // glow color + particle type + environment reaction
+  colorPalette: string       // primary + secondary + accent + bg colors
+  // Legacy fields (kept for backward compat)
+  setting?: string
   lighting: string
   visualStyle: string
   cameraShot: string
   additionalDetails: string
+  // Audio dimension fields
+  voType?: ReelsVoType       // narration | dialogue | asmr | demo | story
+  voiceType?: string         // voice personality / character name + accent
+  soundDesign?: string       // ASMR sound design description
+  ambientSounds?: string     // background audio description
 }
 
 export type PublicClip = {
@@ -176,6 +189,7 @@ export type ReelsSSEEvent =
 export type ReelsAspectRatio = 'portrait' | 'landscape' | 'square' | 'vertical' | 'horizontal'
 export type ReelsResolution = '480p' | '720p'
 export type ReelsClipDuration = 6 | 10 | 15
+export type ReelsVoType = 'narration' | 'dialogue' | 'asmr' | 'demo' | 'story'
 
 /** Step 1 — GPT-4o builds storyboard, creates session */
 export async function buildStoryboard(payload: {
@@ -185,6 +199,7 @@ export async function buildStoryboard(payload: {
   aspectRatio?: ReelsAspectRatio
   resolution?: ReelsResolution
   clipDuration?: ReelsClipDuration
+  voType?: ReelsVoType
   referenceImages?: ReferenceImageInput[]
 }): Promise<{
   sessionId: string

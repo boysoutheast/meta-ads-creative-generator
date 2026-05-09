@@ -155,7 +155,7 @@ async function deleteSession(sessionId) {
 
 // ── factory ───────────────────────────────────────────────────────────────────
 
-function createSession({ prompt, mode, duration, aspectRatio = 'portrait', resolution = '720p', clipDuration = 10 }) {
+function createSession({ prompt, mode, duration, aspectRatio = 'portrait', resolution = '720p', clipDuration = 10, voType = 'narration' }) {
   return {
     sessionId: uuidv4(),
     createdAt: new Date().toISOString(),
@@ -170,6 +170,7 @@ function createSession({ prompt, mode, duration, aspectRatio = 'portrait', resol
     aspectRatio,    // portrait (9:16) | landscape (16:9) | square (1:1) | vertical (2:3) | horizontal (3:2)
     resolution,     // 480p | 720p
     clipDuration,   // 6 | 10 | 15 seconds per clip
+    voType,         // narration | dialogue | asmr | demo | story
     storyboard: [],          // { clipNumber, visualSummary, voScript, grokPrompt, sceneImageUrl, technicalConfig }
     referenceImageUrls: [],  // { tag, label, url } — user-uploaded reference images
     clips: [],               // { index, status, uuid, videoUrl, thumbnailUrl, attempts, completedAt, error }

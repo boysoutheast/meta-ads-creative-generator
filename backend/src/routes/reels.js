@@ -95,6 +95,7 @@ const VALID_DURATIONS = [6, 10, 12, 15, 18, 20, 24, 30, 36, 40, 42, 45, 50, 54, 
 const VALID_CLIP_DURATIONS = [6, 10, 15];
 const VALID_ASPECT_RATIOS = ['portrait', 'landscape', 'square', 'vertical', 'horizontal'];
 const VALID_RESOLUTIONS = ['480p', '720p'];
+const VALID_VO_TYPES = ['narration', 'dialogue', 'asmr', 'demo', 'story'];
 
 // ── SSE helper ────────────────────────────────────────────────────────────────
 
@@ -120,6 +121,7 @@ router.post('/build-storyboard', async (req, res) => {
     aspectRatio = 'portrait',
     resolution = '720p',
     clipDuration = 10,
+    voType = 'narration',
     referenceImages: rawRefImages = [],
   } = req.body;
 
@@ -131,6 +133,7 @@ router.post('/build-storyboard', async (req, res) => {
   const dur = VALID_DURATIONS.includes(Number(duration)) ? Number(duration) : 30;
   const ar = VALID_ASPECT_RATIOS.includes(aspectRatio) ? aspectRatio : 'portrait';
   const res_ = VALID_RESOLUTIONS.includes(resolution) ? resolution : '720p';
+  const vt = VALID_VO_TYPES.includes(voType) ? voType : 'narration';
 
   // Validate referenceImages count upfront
   if (!Array.isArray(rawRefImages)) {
@@ -142,8 +145,8 @@ router.post('/build-storyboard', async (req, res) => {
     });
   }
 
-  const session = createSession({ prompt: prompt.trim(), mode, duration: dur, aspectRatio: ar, resolution: res_, clipDuration: clipDur });
-  auditLog(session, 'info', 'SESSION_CREATED', { prompt: prompt.trim(), mode, duration: dur, aspectRatio: ar, resolution: res_, clipDuration: clipDur });
+  const session = createSession({ prompt: prompt.trim(), mode, duration: dur, aspectRatio: ar, resolution: res_, clipDuration: clipDur, voType: vt });
+  auditLog(session, 'info', 'SESSION_CREATED', { prompt: prompt.trim(), mode, duration: dur, aspectRatio: ar, resolution: res_, clipDuration: clipDur, voType: vt });
 
   // Save session immediately so crash recovery can find it
   await saveSession(session);
@@ -170,6 +173,7 @@ router.post('/build-storyboard', async (req, res) => {
       referenceImages: savedRefs,
       aspectRatio: ar,
       clipDuration: clipDur,
+      voType: vt,
     });
 
     session.storyboard = storyboard;
@@ -226,6 +230,7 @@ router.post('/refresh-clips', async (req, res) => {
       referenceImages: session.referenceImageUrls || [],
       aspectRatio: session.aspectRatio || 'portrait',
       clipDuration: session.clipDuration || 10,
+      voType: session.voType || 'narration',
     });
 
     session.storyboard = newStoryboard;
@@ -385,6 +390,7 @@ router.get('/session/:sessionId', async (req, res) => {
     aspectRatio: session.aspectRatio || 'portrait',
     resolution: session.resolution || '720p',
     clipDuration: session.clipDuration || 10,
+    voType: session.voType || 'narration',
     storyboard: publicStoryboard,
     clips: session.clips.map(c => ({
       index: c.index,
