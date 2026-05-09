@@ -15,6 +15,7 @@ import {
 import {
   buildStoryboard, refreshClips, generateSceneImages,
   type PublicClip, type ReferenceImageInput,
+  type ReelsAspectRatio, type ReelsResolution, type ReelsClipDuration,
 } from '@/lib/api'
 import { pushStoredSession } from '@/lib/reels-sessions'
 import { StoryboardClipCard } from '@/components/reels/StoryboardClipCard'
@@ -24,9 +25,34 @@ const MAX_REF_IMAGES = 6
 
 // ─── constants ───────────────────────────────────────────────────────────────
 
-const DURATION_OPTIONS = [
-  10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120,
-].map(v => ({ value: v, label: `${v}s (${v / 10} clip${v / 10 > 1 ? 's' : ''})` }))
+const CLIP_DURATION_OPTIONS: { value: ReelsClipDuration; label: string }[] = [
+  { value: 6,  label: '6s (Snappy)' },
+  { value: 10, label: '10s (Standard)' },
+  { value: 15, label: '15s (Extended)' },
+]
+
+function getDurationOptions(clipDur: number) {
+  // Show multiples of clipDuration up to 120s
+  const vals: number[] = []
+  for (let v = clipDur; v <= 120; v += clipDur) vals.push(v)
+  return vals.map(v => ({
+    value: v,
+    label: `${v}s (${v / clipDur} clip${v / clipDur > 1 ? 's' : ''})`,
+  }))
+}
+
+const ASPECT_RATIO_OPTIONS: { value: ReelsAspectRatio; label: string; icon: string }[] = [
+  { value: 'portrait',   label: 'Portrait 9:16',    icon: '▌' },
+  { value: 'landscape',  label: 'Landscape 16:9',   icon: '▬' },
+  { value: 'square',     label: 'Square 1:1',       icon: '■' },
+  { value: 'vertical',   label: 'Vertical 2:3',     icon: '▍' },
+  { value: 'horizontal', label: 'Horizontal 3:2',   icon: '▬' },
+]
+
+const RESOLUTION_OPTIONS: { value: ReelsResolution; label: string }[] = [
+  { value: '480p', label: '480p (Fast)' },
+  { value: '720p', label: '720p (HD)' },
+]
 
 const MODE_OPTIONS = [
   { value: 'normal', label: 'Normal', desc: 'Cinematic, clean, premium' },
@@ -68,6 +94,9 @@ export default function ReelsPage() {
   const [prompt, setPrompt] = useState('')
   const [duration, setDuration] = useState(30)
   const [mode, setMode] = useState('normal')
+  const [aspectRatio, setAspectRatio] = useState<ReelsAspectRatio>('portrait')
+  const [resolution, setResolution] = useState<ReelsResolution>('720p')
+  const [clipDuration, setClipDuration] = useState<ReelsClipDuration>(10)
   const [building, setBuilding] = useState(false)
 
   // reference images
@@ -142,7 +171,7 @@ export default function ReelsPage() {
         label: r.label,
         dataUrl: r.dataUrl,
       }))
-      const data = await buildStoryboard({ prompt: prompt.trim(), mode, duration, referenceImages })
+      const data = await buildStoryboard({ prompt: prompt.trim(), mode, duration, aspectRatio, resolution, clipDuration, referenceImages })
       setSessionId(data.sessionId)
       setStoryboard(data.storyboard)
       setSessionRefLabels(data.referenceImageUrls || [])
@@ -281,6 +310,7 @@ export default function ReelsPage() {
               />
             </div>
 
+            {/* Row 1: Mode + Clip Duration */}
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-1.5">
                 <Label>Generation Mode</Label>
@@ -299,11 +329,59 @@ export default function ReelsPage() {
                 </Select>
               </div>
               <div className="space-y-1.5">
+                <Label>Clip Length</Label>
+                <Select
+                  value={String(clipDuration)}
+                  onValueChange={v => {
+                    const cd = Number(v) as ReelsClipDuration
+                    setClipDuration(cd)
+                    // Reset duration to first valid multiple
+                    setDuration(cd)
+                  }}
+                  disabled={building}
+                >
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {CLIP_DURATION_OPTIONS.map(o => (
+                      <SelectItem key={o.value} value={String(o.value)}>{o.label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            {/* Row 2: Aspect Ratio + Resolution + Total Duration */}
+            <div className="grid gap-4 sm:grid-cols-3">
+              <div className="space-y-1.5">
+                <Label>Aspect Ratio</Label>
+                <Select value={aspectRatio} onValueChange={v => setAspectRatio(v as ReelsAspectRatio)} disabled={building}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {ASPECT_RATIO_OPTIONS.map(o => (
+                      <SelectItem key={o.value} value={o.value}>
+                        <span className="font-mono mr-1.5">{o.icon}</span>{o.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <Label>Resolution</Label>
+                <Select value={resolution} onValueChange={v => setResolution(v as ReelsResolution)} disabled={building}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {RESOLUTION_OPTIONS.map(o => (
+                      <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
                 <Label>Total Duration</Label>
                 <Select value={String(duration)} onValueChange={v => setDuration(Number(v))} disabled={building}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    {DURATION_OPTIONS.map(o => (
+                    {getDurationOptions(clipDuration).map(o => (
                       <SelectItem key={o.value} value={String(o.value)}>{o.label}</SelectItem>
                     ))}
                   </SelectContent>

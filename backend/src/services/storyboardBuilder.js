@@ -26,38 +26,63 @@ const MODEL = process.env.VISION_MODEL || 'gpt-4o';
 
 // ── build full storyboard from scratch ───────────────────────────────────────
 
-async function buildStoryboard({ prompt, mode, duration, referenceImages = [] }) {
-  const totalClips = Math.ceil(duration / 10);
+// Map aspect ratio code → human label for prompt context
+const ASPECT_RATIO_LABELS = {
+  portrait:   '9:16',
+  landscape:  '16:9',
+  square:     '1:1',
+  vertical:   '2:3',
+  horizontal: '3:2',
+};
+
+async function buildStoryboard({ prompt, mode, duration, referenceImages = [], aspectRatio = 'portrait', clipDuration = 10 }) {
+  const totalClips = Math.ceil(duration / clipDuration);
 
   // Build reference images context — instructs GPT-4o to use @imageN tags smartly per clip
   const refImagesContext = referenceImages.length > 0
     ? `\nUSER REFERENCE IMAGES (${referenceImages.length} uploaded):\n${referenceImages.map(r => `  ${r.tag} = "${r.label}"`).join('\n')}\n\nREFERENCE IMAGE RULES:\n- In each clip's [CHARACTER] section, mention the relevant @imageN tags for subjects that appear in that clip\n- Example: "Maintain exact design from @image1 and @image2 when they appear in this scene"\n- If a clip focuses on the product, prioritize the product reference image tag\n- If a clip features a character, use that character's reference image tag\n- Always use the exact @imageN tag syntax so GeminiGen can match them to the uploaded images\n`
     : '';
 
+  // VO density adapts to clip duration
+  const arLabel = ASPECT_RATIO_LABELS[aspectRatio] || '9:16';
+  const isShortClip = clipDuration <= 6;
+  const voRules = isShortClip
+    ? `VOICEOVER DENSITY RULES (critical — ${clipDuration}s clip):
+- voScript: EXACTLY 2 punchy sentences in Bahasa Indonesia
+- Total words: 15–25 words — exactly right for ${clipDuration} seconds of spoken audio
+- High-impact, benefit-first. No filler.
+- Good example: "Melastop mencerahkan kulit kusam dari hari pertama. Formula Niacinamide 11% bekerja nyata dalam 14 hari."`
+    : `VOICEOVER DENSITY RULES (critical — ${clipDuration}s clip):
+- voScript: EXACTLY 3 long, information-dense sentences in Bahasa Indonesia
+- Each sentence must carry real content — benefit, feature, or story beat
+- Total words: 35–50 words across the 3 sentences — enough for ${clipDuration} seconds of spoken audio
+- Real TV/Instagram ad voiceover energy: energetic, benefit-driven, brand-aligned
+- NEVER write less than 3 sentences. NEVER write vague filler.
+- Good example: "Kulit kusam bukan takdir — itu tanda kulit butuh pertolongan ekstra setiap hari. Melastop mengandung Niacinamide 11% yang bekerja aktif mencerahkan tampilan kulit secara merata dari hari pertama. Dengan Tranexamic Acid 3%, tampilan flek dan noda hitam mulai memudar setelah pemakaian rutin selama 14 hari."`;
+
+  const voScriptSpec = isShortClip
+    ? '"voScript": "<EXACTLY 2 punchy sentences in Bahasa Indonesia, 15-25 words total>"'
+    : '"voScript": "<EXACTLY 3 long sentences in Bahasa Indonesia, 35-50 words total>"';
+
   const systemPrompt = `You are an expert AI video director and copywriter specialising in short-form social media ads.
 Your task is to create a detailed, clip-by-clip video storyboard for a Grok AI video generator.
 
 Architecture:
-- Each clip is exactly 10 seconds long and generated INDEPENDENTLY (no chaining)
+- Each clip is exactly ${clipDuration} seconds long and generated INDEPENDENTLY (no chaining)
 - Each clip will receive its own scene reference image (pre-generated) + grokPrompt
 - grokPrompt describes MOTION and ANIMATION — the scene image already handles the visual look
 - Clips must flow narratively but each clip is visually self-contained
+- Aspect ratio: ${arLabel} (${aspectRatio})
 - visualSummary and voScript in Bahasa Indonesia
 - grokPrompt MUST be in English using the structured template below
 ${refImagesContext}
-VOICEOVER DENSITY RULES (critical):
-- voScript: EXACTLY 3 long, information-dense sentences in Bahasa Indonesia
-- Each sentence must carry real content — benefit, feature, or story beat
-- Total words: 35–50 words across the 3 sentences — enough for 10 seconds of spoken audio
-- Real TV/Instagram ad voiceover energy: energetic, benefit-driven, brand-aligned
-- NEVER write less than 3 sentences. NEVER write vague filler.
-- Good example: "Kulit kusam bukan takdir — itu tanda kulit butuh pertolongan ekstra setiap hari. Melastop mengandung Niacinamide 11% yang bekerja aktif mencerahkan tampilan kulit secara merata dari hari pertama. Dengan Tranexamic Acid 3%, tampilan flek dan noda hitam mulai memudar setelah pemakaian rutin selama 14 hari."
+${voRules}
 
 VISUAL SUMMARY RULES:
 - visualSummary: 2-3 sentences describing the FULL visual arc — opening shot, mid action, closing moment
 
 GROKPROMPT TEMPLATE (use this exact structure — describes MOTION, not just appearance):
-[FORMAT] Vertical 9:16, 10 seconds, [style — e.g. 3D semi-cartoon premium skincare, glossy, cinematic, high detail]
+[FORMAT] ${arLabel}, ${clipDuration} seconds, [style — e.g. 3D semi-cartoon premium skincare, glossy, cinematic, high detail]
 [SCENE] [scene name/theme + world context]
 [CHARACTER] [who appears; for user reference subjects: "Maintain exact design from @imageN"]
 [ACTION] [specific physical movement — NEVER "appears" or "showcases"; e.g. "walks carrying a sack of dull dust, laughs mischievously while sprinkling particles"]
@@ -75,14 +100,18 @@ Generation mode hints:
 
 Return ONLY a valid JSON array with exactly ${totalClips} clip objects. No markdown, no explanation.`;
 
-  const userPrompt = `Create a ${totalClips}-clip video storyboard (${duration} seconds total) for this ad:
+  const voInstruction = isShortClip
+    ? `1. voScript = EXACTLY 2 punchy sentences, 15–25 words, Bahasa Indonesia. No filler.`
+    : `1. voScript = EXACTLY 3 long sentences, 35–50 words, Bahasa Indonesia, real TV ad energy. No filler.`;
+
+  const userPrompt = `Create a ${totalClips}-clip video storyboard (${duration} seconds total, ${clipDuration}s per clip, ${arLabel} aspect ratio) for this ad:
 
 "${prompt}"
 
 Generation mode: ${mode || 'normal'}
 
 CRITICAL RULES:
-1. voScript = EXACTLY 3 long sentences, 35–50 words, Bahasa Indonesia, real TV ad energy. No filler.
+${voInstruction}
 2. grokPrompt = use [FORMAT][SCENE][CHARACTER][ACTION][CAMERA][VO][TEXT OVERLAY][MOOD][RESTRICTIONS] template
 3. ACTION = specific physical movement (not "appears" or "showcases")
 4. VO inside grokPrompt = SAME text as voScript field
@@ -92,7 +121,7 @@ Return JSON array with exactly ${totalClips} objects:
 {
   "clipNumber": <number 1-${totalClips}>,
   "visualSummary": "<2-3 sentences in Bahasa Indonesia: opening shot → mid action → closing moment>",
-  "voScript": "<EXACTLY 3 long sentences in Bahasa Indonesia, 35-50 words total>",
+  ${voScriptSpec},
   "grokPrompt": "<structured English prompt using [FORMAT][SCENE][CHARACTER][ACTION][CAMERA][VO][TEXT OVERLAY][MOOD][RESTRICTIONS]>",
   "technicalConfig": {
     "mainSubject": "<who/what>",
@@ -120,7 +149,7 @@ Return JSON array with exactly ${totalClips} objects:
 
 // ── refresh from a specific clip index (keeps previous clips) ────────────────
 
-async function refreshFromIndex({ prompt, mode, existingClips, fromIndex, totalClips, hint, referenceImages = [] }) {
+async function refreshFromIndex({ prompt, mode, existingClips, fromIndex, totalClips, hint, referenceImages = [], aspectRatio = 'portrait', clipDuration = 10 }) {
   const clipsToKeep = existingClips.slice(0, fromIndex);
   const clipsToGenerate = totalClips - fromIndex;
 
@@ -138,30 +167,43 @@ async function refreshFromIndex({ prompt, mode, existingClips, fromIndex, totalC
     ? `\nReference images (${referenceImages.length}): ${referenceImages.map(r => `${r.tag}="${r.label}"`).join(', ')}\nIn [CHARACTER] section, use the relevant @imageN tags for subjects appearing in that clip. Always use exact @imageN syntax.\n`
     : '';
 
+  const arLabel2 = ASPECT_RATIO_LABELS[aspectRatio] || '9:16';
+  const isShortClip2 = clipDuration <= 6;
+  const voRefreshRules = isShortClip2
+    ? `VOICEOVER: EXACTLY 2 punchy sentences in Bahasa Indonesia, 15–25 words. High-impact, benefit-first.`
+    : `VOICEOVER: EXACTLY 3 long sentences in Bahasa Indonesia, 35–50 words total. Real TV ad energy. No filler.`;
+  const voRefreshSpec = isShortClip2
+    ? `"voScript": "<EXACTLY 2 punchy sentences Bahasa Indonesia, 15-25 words>"`
+    : `"voScript": "<EXACTLY 3 long sentences Bahasa Indonesia, 35-50 words>"`;
+  const voCritical = isShortClip2
+    ? `voScript = EXACTLY 2 sentences, 15–25 words.`
+    : `voScript = EXACTLY 3 sentences, 35–50 words.`;
+
   const systemPrompt = `You are an expert AI video director creating a continuation of an existing video storyboard.
 Generate new clips that follow the narrative of the preceding clips.
-Each clip is independently generated — visually self-contained. Same template rules apply.
+Each clip is ${clipDuration} seconds long and independently generated — visually self-contained.
+Aspect ratio: ${arLabel2} (${aspectRatio}).
 ${refImagesContext}
-VOICEOVER: EXACTLY 3 long sentences in Bahasa Indonesia, 35–50 words total. Real TV ad energy. No filler.
+${voRefreshRules}
 VISUAL SUMMARY: 2-3 sentences, opening shot → mid action → closing moment.
-GROKPROMPT: [FORMAT][SCENE][CHARACTER][ACTION][CAMERA][VO][TEXT OVERLAY][MOOD][RESTRICTIONS] template. ACTION must be specific movement.
+GROKPROMPT: [FORMAT] ${arLabel2}, ${clipDuration} seconds — then [SCENE][CHARACTER][ACTION][CAMERA][VO][TEXT OVERLAY][MOOD][RESTRICTIONS]. ACTION must be specific movement.
 
 Return ONLY a valid JSON array. No markdown, no explanation.`;
 
-  const userPrompt = `Continue this ${totalClips * 10}s ad storyboard.
+  const userPrompt = `Continue this ${totalClips * clipDuration}s ad storyboard (${clipDuration}s per clip, ${arLabel2}).
 Original prompt: "${prompt}"
 Mode: ${mode || 'normal'}
 ${contextStr}${hintStr}
 
 Generate ${clipsToGenerate} new clip(s) starting from clip ${fromIndex + 1} to ${totalClips}.
 
-CRITICAL: voScript = EXACTLY 3 sentences, 35–50 words. grokPrompt uses full template. ACTION must be specific physical movement.
+CRITICAL: ${voCritical} grokPrompt uses full template. ACTION must be specific physical movement.
 
 Return JSON array with exactly ${clipsToGenerate} objects (clipNumber starts at ${fromIndex + 1}):
 {
   "clipNumber": <number>,
   "visualSummary": "<2-3 sentences Bahasa Indonesia: opening → mid → closing>",
-  "voScript": "<EXACTLY 3 long sentences Bahasa Indonesia, 35-50 words>",
+  ${voRefreshSpec},
   "grokPrompt": "<structured English prompt>",
   "technicalConfig": {
     "mainSubject": "", "action": "", "setting": "",

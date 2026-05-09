@@ -91,7 +91,10 @@ sweepExpiredMerged();
 // Periodic sweep every 6 hours (catches missed deletes across restarts)
 setInterval(() => sweepExpiredMerged(), 6 * 60 * 60 * 1000);
 
-const VALID_DURATIONS = [10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120];
+const VALID_DURATIONS = [6, 10, 12, 15, 18, 20, 24, 30, 36, 40, 42, 45, 50, 54, 60, 70, 80, 90, 100, 110, 120];
+const VALID_CLIP_DURATIONS = [6, 10, 15];
+const VALID_ASPECT_RATIOS = ['portrait', 'landscape', 'square', 'vertical', 'horizontal'];
+const VALID_RESOLUTIONS = ['480p', '720p'];
 
 // ── SSE helper ────────────────────────────────────────────────────────────────
 
@@ -110,12 +113,24 @@ function setupSSE(res) {
 // ── POST /build-storyboard ────────────────────────────────────────────────────
 
 router.post('/build-storyboard', async (req, res) => {
-  const { prompt, mode = 'normal', duration = 30, referenceImages: rawRefImages = [] } = req.body;
+  const {
+    prompt,
+    mode = 'normal',
+    duration = 30,
+    aspectRatio = 'portrait',
+    resolution = '720p',
+    clipDuration = 10,
+    referenceImages: rawRefImages = [],
+  } = req.body;
 
   if (!prompt || typeof prompt !== 'string' || !prompt.trim()) {
     return res.status(400).json({ error: 'prompt is required' });
   }
+
+  const clipDur = VALID_CLIP_DURATIONS.includes(Number(clipDuration)) ? Number(clipDuration) : 10;
   const dur = VALID_DURATIONS.includes(Number(duration)) ? Number(duration) : 30;
+  const ar = VALID_ASPECT_RATIOS.includes(aspectRatio) ? aspectRatio : 'portrait';
+  const res_ = VALID_RESOLUTIONS.includes(resolution) ? resolution : '720p';
 
   // Validate referenceImages count upfront
   if (!Array.isArray(rawRefImages)) {
@@ -127,8 +142,8 @@ router.post('/build-storyboard', async (req, res) => {
     });
   }
 
-  const session = createSession({ prompt: prompt.trim(), mode, duration: dur });
-  auditLog(session, 'info', 'SESSION_CREATED', { prompt: prompt.trim(), mode, duration: dur });
+  const session = createSession({ prompt: prompt.trim(), mode, duration: dur, aspectRatio: ar, resolution: res_, clipDuration: clipDur });
+  auditLog(session, 'info', 'SESSION_CREATED', { prompt: prompt.trim(), mode, duration: dur, aspectRatio: ar, resolution: res_, clipDuration: clipDur });
 
   // Save session immediately so crash recovery can find it
   await saveSession(session);
@@ -153,6 +168,8 @@ router.post('/build-storyboard', async (req, res) => {
       mode,
       duration: dur,
       referenceImages: savedRefs,
+      aspectRatio: ar,
+      clipDuration: clipDur,
     });
 
     session.storyboard = storyboard;
@@ -207,6 +224,8 @@ router.post('/refresh-clips', async (req, res) => {
       totalClips: session.totalClips,
       hint: hint || null,
       referenceImages: session.referenceImageUrls || [],
+      aspectRatio: session.aspectRatio || 'portrait',
+      clipDuration: session.clipDuration || 10,
     });
 
     session.storyboard = newStoryboard;
@@ -363,6 +382,9 @@ router.get('/session/:sessionId', async (req, res) => {
     mode: session.mode,
     duration: session.duration,
     totalClips: session.totalClips,
+    aspectRatio: session.aspectRatio || 'portrait',
+    resolution: session.resolution || '720p',
+    clipDuration: session.clipDuration || 10,
     storyboard: publicStoryboard,
     clips: session.clips.map(c => ({
       index: c.index,

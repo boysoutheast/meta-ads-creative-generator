@@ -173,11 +173,18 @@ export type ReelsSSEEvent =
   | { type: 'ready'; sessionId: string; mergedHash: string; sizeBytes: number | null; downloadUrl: string }
   | { type: 'error'; message: string; resumable?: boolean; failedAtClip?: number; sessionId?: string }
 
+export type ReelsAspectRatio = 'portrait' | 'landscape' | 'square' | 'vertical' | 'horizontal'
+export type ReelsResolution = '480p' | '720p'
+export type ReelsClipDuration = 6 | 10 | 15
+
 /** Step 1 — GPT-4o builds storyboard, creates session */
 export async function buildStoryboard(payload: {
   prompt: string
   mode: string
   duration: number
+  aspectRatio?: ReelsAspectRatio
+  resolution?: ReelsResolution
+  clipDuration?: ReelsClipDuration
   referenceImages?: ReferenceImageInput[]
 }): Promise<{
   sessionId: string

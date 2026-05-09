@@ -24,7 +24,7 @@ const { auditLog } = require('./sessionStore');
 const MAX_CLIP_ATTEMPTS = 3;
 
 async function runGeneration(session, sse, saveSession) {
-  const { totalClips, storyboard, mode, sessionId } = session;
+  const { totalClips, storyboard, mode, sessionId, aspectRatio = 'portrait', resolution = '720p', clipDuration = 10 } = session;
 
   session.status = 'generating';
   auditLog(session, 'info', 'GENERATION_START', { totalClips });
@@ -78,7 +78,7 @@ async function runGeneration(session, sse, saveSession) {
       });
 
       try {
-        const result = await generateFirstClip({ prompt: grokPrompt, mode, imageUrls });
+        const result = await generateFirstClip({ prompt: grokPrompt, mode, imageUrls, aspectRatio, resolution, clipDuration });
 
         clipRecord.uuid = result.uuid;
         clipRecord.status = 'polling';

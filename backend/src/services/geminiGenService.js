@@ -9,11 +9,16 @@
  *
  * Status codes: 1 = processing, 2 = completed, 3 = failed
  *
- * Confirmed generation modes (tested 2026-05-08):
+ * Confirmed generation modes (docs verified 2026-05-08):
  *   "normal"                   — Standard video generation
  *   "extremely-crazy"          — Wild and unpredictable
  *   "extremely-spicy-or-crazy" — Maximum creativity and chaos
  *   "custom"                   — Custom generation settings
+ *
+ * Aspect ratios: portrait (9:16), landscape (16:9), square (1:1), vertical (2:3), horizontal (3:2)
+ * Resolutions  : 480p (default), 720p
+ * Durations    : 6, 10, 15 (seconds, integer)
+ * Reference img: file_urls[] (priority 2 of 3) — one method per request only
  */
 
 const axios = require('axios');
@@ -79,19 +84,34 @@ function sleep(ms) {
 
 /**
  * Generate a FRESH clip from a text prompt, optionally with reference images.
- * imageUrls — array of public CDN URLs; maps to GeminiGen image_urls[] param
+ *
+ * @param {string}   prompt        - The text prompt for the clip
+ * @param {string}   mode          - Generation mode: normal | extremely-crazy | extremely-spicy-or-crazy | custom
+ * @param {string[]} imageUrls     - Array of public CDN URLs sent as file_urls[] (GeminiGen param)
+ * @param {string}   aspectRatio   - portrait | landscape | square | vertical | horizontal (default: portrait)
+ * @param {string}   resolution    - 480p | 720p (default: 480p per GeminiGen docs)
+ * @param {number}   clipDuration  - 6 | 10 | 15 seconds (default: 10)
+ *
  * Returns { uuid } immediately (async job).
  */
-async function generateFirstClip({ prompt, mode, imageUrls = [] }) {
+async function generateFirstClip({
+  prompt,
+  mode,
+  imageUrls = [],
+  aspectRatio = 'portrait',
+  resolution = '720p',
+  clipDuration = 10,
+}) {
   const form = new FormData();
   form.append('prompt', prompt);
-  form.append('model', 'grok-video');
-  form.append('aspect_ratio', 'portrait');
-  form.append('resolution', '720p');
-  form.append('duration', '10');
+  form.append('model', 'grok-3');
+  form.append('aspect_ratio', aspectRatio);
+  form.append('resolution', resolution);
+  form.append('duration', clipDuration);          // integer, not string
   if (mode) form.append('mode', mode);
   // Reference images — GeminiGen matches @image1, @image2 etc. in prompt text
-  imageUrls.forEach(url => form.append('image_urls[]', url));
+  // Use file_urls[] (confirmed param name from docs — NOT image_urls[])
+  imageUrls.forEach(url => form.append('file_urls[]', url));
 
   const { data } = await axios.post(`${BASE_URL}/uapi/v1/video-gen/grok`, form, {
     headers: { ...apiHeaders(), ...form.getHeaders() },
@@ -105,16 +125,17 @@ async function generateFirstClip({ prompt, mode, imageUrls = [] }) {
 
 /**
  * Extend from a previous clip UUID.
- * prompt   — continuation prompt (can be same as original)
- * refUuid  — UUID of the clip to extend from
+ * Per GeminiGen docs: extend only supports prompt + ref_history.
+ * No image refs, no resolution/duration overrides on extend.
+ *
+ * @param {string} prompt   - continuation prompt
+ * @param {string} refUuid  - UUID of the clip to extend from
  * Returns { uuid } immediately.
  */
 async function extendClip({ prompt, refUuid }) {
   const form = new FormData();
   form.append('prompt', prompt);
   form.append('ref_history', refUuid);
-  form.append('resolution', '720p');
-  form.append('duration', '10');
 
   const { data } = await axios.post(`${BASE_URL}/uapi/v1/video-extend/grok`, form, {
     headers: { ...apiHeaders(), ...form.getHeaders() },
