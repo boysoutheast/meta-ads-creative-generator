@@ -1,6 +1,6 @@
 'use client'
 import { useEffect, useState, useRef } from 'react'
-import { Loader2, AlertCircle, Video, Sparkles, Play, Download, Link2, Wand2, ChevronRight, Package, User, Ban, Plus, X, Image as ImageIcon } from 'lucide-react'
+import { Loader2, AlertCircle, Video, Sparkles, Play, Download, Link2, Wand2, ChevronRight, Package, User, Ban, Plus, X, Image as ImageIcon, Clock, RefreshCw } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -28,8 +28,11 @@ import {
   type Product,
   type Character,
   type ScaleVideoGenerateResponse,
+  type AdaptedAnalysis,
 } from '@/lib/api'
 import type { ScalingAngle, AngleVariation } from '@/lib/types'
+
+const DURATION_OPTIONS = [10, 20, 30, 40, 50, 60, 90, 120]
 
 const fmt = (n?: number) =>
   n !== undefined ? 'Rp ' + n.toLocaleString('id-ID') : ''
@@ -96,6 +99,9 @@ export default function ScaleVideoPage() {
     scene: number; duration: string; voiceover: string; imagePrompt: string; imageUrl?: string | null
   }>>([])
   const [generatingSceneImages, setGeneratingSceneImages] = useState(false)
+  // Duration-aware comparison
+  const [targetDuration, setTargetDuration] = useState<number>(30)
+  const [adaptedAnalysis, setAdaptedAnalysis] = useState<AdaptedAnalysis | null>(null)
 
   // Live action log — populated by SSE phase events from /analyze-from-url
   const [liveLog, setLiveLog] = useState<Array<{ ts: number; phase: string; message: string; detail?: string }>>([])
@@ -121,6 +127,16 @@ export default function ScaleVideoPage() {
       logScrollRef.current.scrollTop = logScrollRef.current.scrollHeight
     }
   }, [liveLog])
+
+  // Auto-set duration from analysis (round to nearest 10s, min 10s)
+  useEffect(() => {
+    if (videoAnalysis) {
+      const raw = videoAnalysis.recommendedDuration
+        ?? (Array.isArray(videoAnalysis.scenes) ? videoAnalysis.scenes.length * 5 : 30)
+      const rounded = Math.max(10, Math.round(raw / 10) * 10)
+      setTargetDuration(rounded)
+    }
+  }, [videoAnalysis])
 
   const handleAnalyze = async () => {
     if (inputMode === 'file' && !file) return
@@ -150,6 +166,7 @@ export default function ScaleVideoPage() {
       setHookVariants([])
       setScriptOutline('')
       setAdaptedScenes([])
+      setAdaptedAnalysis(null)
       setUserIntent('')
       setShowIntentStep(true)
     } catch (e: any) {
@@ -198,10 +215,12 @@ export default function ScaleVideoPage() {
           assetMode === 'product' && selectedProduct?.photos?.[0]
             ? selectedProduct.photos[0].replace(/^data:[^;]+;base64,/, '')
             : undefined,
+        targetDuration,
       })
       setRefinedPrompt(result.videoPrompt || '')
       setHookVariants(result.hookVariants || [])
       setScriptOutline(result.scriptOutline || '')
+      setAdaptedAnalysis(result.adaptedAnalysis || null)
       const scenes = result.adaptedScenes || []
       setAdaptedScenes(scenes)
 
@@ -646,7 +665,7 @@ export default function ScaleVideoPage() {
             <AnalysisCard analysis={videoAnalysis} />
           )}
 
-          {/* Sprint 3 v2 — Step 1.5: Intent to Prompt */}
+          {/* Step 1.5: Refine Prompt — duration picker + intent */}
           {videoAnalysis && !analyzing && showIntentStep && (
             <Card className="border-primary/30 bg-primary/5">
               <CardHeader className="pb-3">
@@ -655,29 +674,52 @@ export default function ScaleVideoPage() {
                   Refine Prompt
                 </CardTitle>
                 <CardDescription>
-                  Ceritakan mau dipakai untuk apa — AI akan translate analisis ini jadi video prompt yang spesifik untuk produkmu.
+                  AI akan translate analisis video winning jadi struktur yang persis sama, tapi diadaptasi untuk produkmu.
                 </CardDescription>
               </CardHeader>
-              <CardContent className="space-y-3">
-                <Textarea
-                  placeholder="Contoh: jual suplemen kolagen untuk wanita 30-45 tahun, target ibu-ibu Jakarta yang aktif, tone: warm dan aspirational"
-                  value={userIntent}
-                  onChange={(e) => setUserIntent(e.target.value)}
-                  rows={3}
-                  className="text-sm resize-none"
-                />
+              <CardContent className="space-y-4">
 
-                <Button
-                  className="w-full"
-                  onClick={handleTranslatePrompt}
-                  disabled={!userIntent.trim() || translating}
-                >
-                  {translating ? (
-                    <><Loader2 className="h-4 w-4 animate-spin" /> Generating refined prompt…</>
-                  ) : (
-                    <><Wand2 className="h-4 w-4" /> Refine Prompt dengan AI</>
+                {/* Duration picker */}
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <Clock className="h-3.5 w-3.5 text-muted-foreground" />
+                    <Label className="text-xs font-medium">Target durasi video</Label>
+                    <span className="ml-auto text-xs font-semibold text-primary">{targetDuration}s</span>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {DURATION_OPTIONS.map((d) => (
+                      <button
+                        key={d}
+                        type="button"
+                        onClick={() => setTargetDuration(d)}
+                        className={`rounded-md px-3 py-1 text-xs font-medium border transition-colors ${
+                          targetDuration === d
+                            ? 'bg-primary text-primary-foreground border-primary'
+                            : 'bg-background text-muted-foreground border-border hover:border-primary hover:text-primary'
+                        }`}
+                      >
+                        {d}s
+                      </button>
+                    ))}
+                  </div>
+                  {videoAnalysis?.recommendedDuration && (
+                    <p className="text-[10px] text-muted-foreground">
+                      ⚡ Video asli ≈ {videoAnalysis.recommendedDuration}s — default sudah disesuaikan
+                    </p>
                   )}
-                </Button>
+                </div>
+
+                {/* Intent textarea */}
+                <div className="space-y-2">
+                  <Label className="text-xs font-medium">Ceritakan tujuanmu</Label>
+                  <Textarea
+                    placeholder="Contoh: jual suplemen kolagen untuk wanita 30-45 tahun, target ibu-ibu Jakarta yang aktif, tone: warm dan aspirational"
+                    value={userIntent}
+                    onChange={(e) => setUserIntent(e.target.value)}
+                    rows={3}
+                    className="text-sm resize-none"
+                  />
+                </div>
 
                 {assetMode === 'product' && !selectedProduct && (
                   <p className="text-[11px] text-amber-700 dark:text-amber-400">
@@ -690,90 +732,102 @@ export default function ScaleVideoPage() {
                   </p>
                 )}
 
-                {refinedPrompt && (
-                  <div className="space-y-3 pt-1">
+                <Button
+                  className="w-full"
+                  onClick={handleTranslatePrompt}
+                  disabled={!userIntent.trim() || translating}
+                >
+                  {translating ? (
+                    <><Loader2 className="h-4 w-4 animate-spin" /> Generating {targetDuration}s adaptation…</>
+                  ) : (
+                    <><Wand2 className="h-4 w-4" /> Generate Adaptasi {targetDuration}s</>
+                  )}
+                </Button>
+
+                {/* Results: Comparison + Storyboard */}
+                {(adaptedAnalysis || refinedPrompt) && (
+                  <div className="space-y-4 pt-1">
+
+                    {/* ── Comparison View ──────────────────────────── */}
+                    {adaptedAnalysis && (
+                      <ComparisonView
+                        original={videoAnalysis}
+                        adapted={adaptedAnalysis}
+                        productName={
+                          assetMode === 'product' ? (selectedProduct?.name ?? 'Produk')
+                          : assetMode === 'character' ? (selectedCharacter?.name ?? (characterName || 'Karakter'))
+                          : 'Adaptasi'
+                        }
+                        targetDuration={targetDuration}
+                        hookVariants={hookVariants}
+                        scriptOutline={scriptOutline}
+                      />
+                    )}
+
+                    {/* ── Video Prompt (editable) ────────────────── */}
                     <div className="space-y-1.5">
-                      <p className="text-xs font-semibold text-primary">Video Prompt (editable):</p>
+                      <p className="text-xs font-semibold text-primary">🎬 Video Prompt (editable · dipakai di Generate):</p>
                       <Textarea
                         value={refinedPrompt}
                         onChange={(e) => setRefinedPrompt(e.target.value)}
-                        rows={6}
+                        rows={5}
                         className="text-xs font-mono resize-none"
                       />
                     </div>
 
-                    {hookVariants.length > 0 && (
-                      <div className="space-y-1.5">
-                        <p className="text-xs font-semibold text-muted-foreground">Hook variants:</p>
-                        <div className="space-y-1">
-                          {hookVariants.map((h, i) => (
-                            <div key={i} className="rounded border bg-background px-2.5 py-1.5 text-xs">
-                              <span className="font-medium text-primary">{i + 1}.</span> {h}
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-
-                    {scriptOutline && (
-                      <details>
-                        <summary className="cursor-pointer text-xs text-muted-foreground hover:text-foreground">Script outline</summary>
-                        <p className="mt-1.5 rounded border bg-muted p-2.5 text-xs leading-relaxed whitespace-pre-wrap">{scriptOutline}</p>
-                      </details>
-                    )}
-
-                    {/* Storyboard per scene */}
+                    {/* ── Storyboard per scene ──────────────────── */}
                     {adaptedScenes.length > 0 && (
                       <div className="space-y-2">
                         <p className="text-xs font-semibold text-muted-foreground flex items-center gap-1.5">
-                          🎬 Storyboard per scene
+                          🎞 Storyboard ({adaptedScenes.length} scenes · {targetDuration}s)
                           {generatingSceneImages && (
                             <span className="flex items-center gap-1 text-[10px] text-primary">
                               <Loader2 className="h-2.5 w-2.5 animate-spin" /> generating images…
                             </span>
                           )}
                         </p>
-                        <div className="space-y-2">
+                        <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
                           {adaptedScenes.map((item, i) => (
                             <div key={i} className="rounded-lg border bg-background overflow-hidden">
-                              {/* Scene image */}
-                              <div className="relative aspect-video bg-muted flex items-center justify-center">
+                              {/* Scene image — portrait 9:16 */}
+                              <div className="relative bg-muted" style={{ aspectRatio: '9/16', maxHeight: '240px' }}>
                                 {item.imageUrl ? (
                                   // eslint-disable-next-line @next/next/no-img-element
                                   <img
                                     src={item.imageUrl}
                                     alt={`Scene ${item.scene}`}
                                     className="w-full h-full object-cover"
+                                    onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }}
                                   />
                                 ) : (
-                                  <div className="flex flex-col items-center gap-1 text-muted-foreground">
+                                  <div className="flex flex-col items-center justify-center h-full gap-1 text-muted-foreground">
                                     {generatingSceneImages
                                       ? <Loader2 className="h-5 w-5 animate-spin text-primary" />
                                       : <ImageIcon className="h-5 w-5 opacity-30" />
                                     }
                                     <span className="text-[10px]">
-                                      {generatingSceneImages ? 'Generating…' : 'No image'}
+                                      {generatingSceneImages ? 'Generating…' : 'No preview'}
                                     </span>
                                   </div>
                                 )}
                                 <div className="absolute top-1.5 left-1.5 flex items-center gap-1">
                                   <span className="text-[10px] font-semibold bg-primary text-primary-foreground rounded px-1.5 py-0.5">
-                                    Scene {item.scene}
+                                    {item.scene}
                                   </span>
-                                  <span className="text-[10px] bg-black/50 text-white rounded px-1.5 py-0.5">
+                                  <span className="text-[10px] bg-black/60 text-white rounded px-1.5 py-0.5 font-mono">
                                     {item.duration}
                                   </span>
                                 </div>
                               </div>
-                              {/* VO + image prompt */}
-                              <div className="p-2.5 space-y-1.5">
-                                <p className="text-xs leading-relaxed italic text-foreground">
+                              {/* VO text */}
+                              <div className="p-2 space-y-1">
+                                <p className="text-[11px] leading-relaxed italic text-foreground line-clamp-3">
                                   🎙 "{item.voiceover}"
                                 </p>
                                 {item.imagePrompt && (
                                   <details>
                                     <summary className="cursor-pointer text-[10px] text-muted-foreground hover:text-foreground">
-                                      Lihat image prompt
+                                      Image prompt
                                     </summary>
                                     <p className="mt-1 text-[10px] leading-relaxed text-muted-foreground bg-muted rounded p-1.5">
                                       {item.imagePrompt}
@@ -790,7 +844,7 @@ export default function ScaleVideoPage() {
                     <div className="flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 dark:bg-emerald-900/20 dark:border-emerald-800 px-3 py-2">
                       <ChevronRight className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
                       <p className="text-xs text-emerald-700 dark:text-emerald-400 font-medium">
-                        Prompt siap — klik Generate di Step 2 untuk pakai prompt ini di semua variasi.
+                        Prompt {targetDuration}s siap — klik Generate di Step 2 untuk pakai prompt ini.
                       </p>
                     </div>
                   </div>
@@ -845,6 +899,222 @@ export default function ScaleVideoPage() {
           )}
         </div>
       </div>
+    </div>
+  )
+}
+
+// ── ComparisonView — kiri-kanan: original AI analysis vs adapted version ─────
+
+interface ComparisonViewProps {
+  original: any
+  adapted: AdaptedAnalysis
+  productName: string
+  targetDuration: number
+  hookVariants: string[]
+  scriptOutline: string
+}
+
+function ComparisonRow({ label, left, right }: { label: string; left: React.ReactNode; right: React.ReactNode }) {
+  return (
+    <div className="grid grid-cols-2 gap-0 border-b border-border/40 last:border-0">
+      <div className="px-3 py-2.5 border-r border-border/40">
+        <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-1">{label}</p>
+        <div className="text-xs leading-relaxed text-foreground/80">{left}</div>
+      </div>
+      <div className="px-3 py-2.5 bg-primary/[0.03]">
+        <p className="text-[10px] font-semibold text-primary/70 uppercase tracking-wide mb-1">{label}</p>
+        <div className="text-xs leading-relaxed text-foreground">{right}</div>
+      </div>
+    </div>
+  )
+}
+
+function ComparisonView({ original, adapted, productName, targetDuration, hookVariants, scriptOutline }: ComparisonViewProps) {
+  const a = original || {}
+
+  // ── Helpers ──────────────────────────────────────────────────────────────
+  const hookTypeStr = asString(a.hookType)
+  const emotionArcStr = typeof a.emotionArc === 'object'
+    ? (Array.isArray(a.emotionArc?.phases) ? a.emotionArc.phases.join(' → ') : flattenObjectToText(a.emotionArc))
+    : asString(a.emotionArc)
+  const overallStyle = asString(a.overallStyle)
+  const scriptStructureOrig = typeof a.scriptStructure === 'object' && a.scriptStructure
+    ? { framework: asString(a.scriptStructure.framework), hookLine: asString(a.scriptStructure.hookLine), ctaLine: asString(a.scriptStructure.ctaLine) }
+    : { framework: asString(a.scriptStructure), hookLine: '', ctaLine: '' }
+  const keyMessagesOrig: any[] = Array.isArray(a.keyMessages) ? a.keyMessages : []
+  const ctaOrig = typeof a.ctaStrategy === 'object' && a.ctaStrategy
+    ? `${asString(a.ctaStrategy.type)} — "${asString(a.ctaStrategy.wording)}" @ ${asString(a.ctaStrategy.placement)}`
+    : asString(a.ctaStrategy)
+  const audioOrig = typeof a.audioDesign === 'object' ? flattenObjectToText(a.audioDesign) : asString(a.musicVibe)
+
+  // Hook breakdown
+  const hookOrig = typeof a.hookBreakdown === 'object' && a.hookBreakdown
+    ? `"${asString(a.hookBreakdown.hookWords)}" — ${asString(a.hookBreakdown.hookMechanism)}`
+    : hookTypeStr || ''
+  const hookAdapted = adapted.hookBreakdown
+    ? `"${adapted.hookBreakdown.hookWords ?? ''}" — ${adapted.hookBreakdown.hookMechanism ?? ''}`
+    : adapted.hookType || ''
+
+  // Script structure adapted
+  const scriptAdapted = adapted.scriptStructure
+    ? `${adapted.scriptStructure.framework ?? ''} — hook: "${adapted.scriptStructure.hookLine ?? ''}" · CTA: "${adapted.scriptStructure.ctaLine ?? ''}"`
+    : ''
+
+  const ctaAdapted = adapted.ctaStrategy
+    ? `${adapted.ctaStrategy.type ?? ''} — "${adapted.ctaStrategy.wording ?? ''}" @ ${adapted.ctaStrategy.placement ?? ''}`
+    : ''
+
+  // Scenes count estimation
+  const origSceneCount = Array.isArray(a.scenes) ? a.scenes.length : '?'
+  const origDuration = a.recommendedDuration ?? (Array.isArray(a.scenes) ? a.scenes.length * 5 : '?')
+
+  return (
+    <div className="rounded-lg border border-border overflow-hidden">
+      {/* Header */}
+      <div className="grid grid-cols-2 gap-0 border-b border-border bg-muted/40">
+        <div className="px-3 py-2 border-r border-border">
+          <p className="text-[11px] font-bold text-muted-foreground flex items-center gap-1.5">
+            🎬 ORIGINAL
+            <Badge variant="outline" className="text-[9px]">{origSceneCount} scenes · {origDuration}s</Badge>
+          </p>
+        </div>
+        <div className="px-3 py-2 bg-primary/5">
+          <p className="text-[11px] font-bold text-primary flex items-center gap-1.5">
+            ✨ ADAPTASI: {productName}
+            <Badge className="text-[9px] bg-primary/20 text-primary border-0">{targetDuration}s</Badge>
+          </p>
+        </div>
+      </div>
+
+      {/* Hook */}
+      <ComparisonRow
+        label="Hook Strategy"
+        left={hookOrig || <span className="text-muted-foreground/50 italic">—</span>}
+        right={hookAdapted || hookVariants[0] || <span className="text-muted-foreground/50 italic">—</span>}
+      />
+
+      {/* Hook variants (only right side) */}
+      {hookVariants.length > 0 && (
+        <div className="grid grid-cols-2 gap-0 border-b border-border/40">
+          <div className="px-3 py-2.5 border-r border-border/40">
+            <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-1">Hook Variants</p>
+            {typeof a.hookBreakdown === 'object' && a.hookBreakdown ? (
+              <div className="text-xs text-foreground/80 space-y-0.5">
+                {a.hookBreakdown.first3Seconds && <div>3s: {asString(a.hookBreakdown.first3Seconds)}</div>}
+                {a.hookBreakdown.viewerReaction && <div className="text-muted-foreground/70">Reaksi: {asString(a.hookBreakdown.viewerReaction)}</div>}
+              </div>
+            ) : <span className="text-muted-foreground/40 text-xs italic">—</span>}
+          </div>
+          <div className="px-3 py-2.5 bg-primary/[0.03]">
+            <p className="text-[10px] font-semibold text-primary/70 uppercase tracking-wide mb-1">Hook Variants (3 opsi)</p>
+            <div className="space-y-1">
+              {hookVariants.map((h, i) => (
+                <div key={i} className="text-xs leading-relaxed">
+                  <span className="font-medium text-primary">{i + 1}.</span> {h}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Overall Style */}
+      {(overallStyle || adapted.overallStyle) && (
+        <ComparisonRow
+          label="Visual Style"
+          left={overallStyle || <span className="text-muted-foreground/50 italic">—</span>}
+          right={adapted.overallStyle || <span className="text-muted-foreground/50 italic">—</span>}
+        />
+      )}
+
+      {/* Emotion Arc */}
+      {(emotionArcStr || adapted.emotionArc) && (
+        <ComparisonRow
+          label="Emotion Arc"
+          left={emotionArcStr || <span className="text-muted-foreground/50 italic">—</span>}
+          right={adapted.emotionArc || <span className="text-muted-foreground/50 italic">—</span>}
+        />
+      )}
+
+      {/* Script Structure */}
+      {(scriptStructureOrig.framework || adapted.scriptStructure?.framework) && (
+        <div className="grid grid-cols-2 gap-0 border-b border-border/40">
+          <div className="px-3 py-2.5 border-r border-border/40">
+            <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-1">Script Structure</p>
+            <div className="text-xs space-y-0.5 text-foreground/80">
+              {scriptStructureOrig.framework && <div className="font-medium">{scriptStructureOrig.framework}</div>}
+              {scriptStructureOrig.hookLine && <div>Hook: "{scriptStructureOrig.hookLine}"</div>}
+              {scriptStructureOrig.ctaLine && <div>CTA: "{scriptStructureOrig.ctaLine}"</div>}
+            </div>
+          </div>
+          <div className="px-3 py-2.5 bg-primary/[0.03]">
+            <p className="text-[10px] font-semibold text-primary/70 uppercase tracking-wide mb-1">Script Structure</p>
+            <div className="text-xs space-y-0.5">
+              {adapted.scriptStructure?.framework && <div className="font-medium">{adapted.scriptStructure.framework}</div>}
+              {adapted.scriptStructure?.hookLine && <div>Hook: "{adapted.scriptStructure.hookLine}"</div>}
+              {Array.isArray(adapted.scriptStructure?.agitationPoints) && adapted.scriptStructure.agitationPoints.length > 0 && (
+                <div className="text-muted-foreground">Agitasi: {adapted.scriptStructure.agitationPoints.slice(0, 2).join(' · ')}</div>
+              )}
+              {adapted.scriptStructure?.solutionReveal && <div>Solusi: {adapted.scriptStructure.solutionReveal}</div>}
+              {adapted.scriptStructure?.ctaLine && <div>CTA: "{adapted.scriptStructure.ctaLine}"</div>}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Key Messages */}
+      {(keyMessagesOrig.length > 0 || (adapted.keyMessages && adapted.keyMessages.length > 0)) && (
+        <div className="grid grid-cols-2 gap-0 border-b border-border/40">
+          <div className="px-3 py-2.5 border-r border-border/40">
+            <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-1">Key Messages</p>
+            <ul className="text-xs space-y-0.5 text-foreground/80">
+              {keyMessagesOrig.slice(0, 4).map((m: any, i: number) => (
+                <li key={i}>· {typeof m === 'object' ? asString(m.message) : asString(m)}</li>
+              ))}
+            </ul>
+          </div>
+          <div className="px-3 py-2.5 bg-primary/[0.03]">
+            <p className="text-[10px] font-semibold text-primary/70 uppercase tracking-wide mb-1">Key Messages</p>
+            <ul className="text-xs space-y-0.5">
+              {(adapted.keyMessages ?? []).slice(0, 4).map((m, i) => (
+                <li key={i}>· {m}</li>
+              ))}
+            </ul>
+          </div>
+        </div>
+      )}
+
+      {/* CTA Strategy */}
+      {(ctaOrig || ctaAdapted) && (
+        <ComparisonRow
+          label="CTA Strategy"
+          left={ctaOrig || <span className="text-muted-foreground/50 italic">—</span>}
+          right={ctaAdapted || <span className="text-muted-foreground/50 italic">—</span>}
+        />
+      )}
+
+      {/* Audio Direction */}
+      {(audioOrig || adapted.audioDirection) && (
+        <ComparisonRow
+          label="Audio & Music"
+          left={audioOrig || <span className="text-muted-foreground/50 italic">—</span>}
+          right={adapted.audioDirection || <span className="text-muted-foreground/50 italic">—</span>}
+        />
+      )}
+
+      {/* Script outline (right only) */}
+      {scriptOutline && (
+        <div className="grid grid-cols-2 gap-0">
+          <div className="px-3 py-2.5 border-r border-border/40">
+            <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-1">Script Outline</p>
+            <span className="text-xs text-muted-foreground/50 italic">Lihat kolom kanan →</span>
+          </div>
+          <div className="px-3 py-2.5 bg-primary/[0.03]">
+            <p className="text-[10px] font-semibold text-primary/70 uppercase tracking-wide mb-1">Script Outline ({targetDuration}s)</p>
+            <p className="text-xs leading-relaxed whitespace-pre-wrap text-foreground/80">{scriptOutline}</p>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

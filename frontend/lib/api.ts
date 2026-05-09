@@ -610,6 +610,32 @@ export async function analyzeWinningVideoFromUrl(
   throw new Error('Analisis timeout (>10 menit). Coba mode Audio atau upload file manual.')
 }
 
+export type AdaptedAnalysis = {
+  hookType?: string
+  hookBreakdown?: {
+    first3Seconds?: string
+    hookWords?: string
+    hookMechanism?: string
+    viewerReaction?: string
+  }
+  overallStyle?: string
+  emotionArc?: string
+  scriptStructure?: {
+    framework?: string
+    hookLine?: string
+    agitationPoints?: string[]
+    solutionReveal?: string
+    ctaLine?: string
+  }
+  keyMessages?: string[]
+  ctaStrategy?: {
+    type?: string
+    wording?: string
+    placement?: string
+  }
+  audioDirection?: string
+}
+
 /** Sprint 3 v2 — Translate winning-ad analysis + user intent → tailored GeminiGen video prompt */
 export async function translateVideoPrompt(payload: {
   videoAnalysis: any
@@ -622,13 +648,16 @@ export async function translateVideoPrompt(payload: {
   characterPhotosBase64?: string[]
   /** Product mode: single product photo base64 (raw, no data: prefix) */
   productPhotoBase64?: string
+  /** Target output duration in seconds (multiples of 10, default 30) */
+  targetDuration?: number
 }): Promise<{
   videoPrompt: string
   hookVariants: string[]
   scriptOutline: string
   adaptedScenes: Array<{ scene: number; duration: string; voiceover: string; imagePrompt: string }>
+  adaptedAnalysis: AdaptedAnalysis | null
 }> {
-  const res = await api.post('/scale-video/translate-prompt', payload, { timeout: 60000 })
+  const res = await api.post('/scale-video/translate-prompt', payload, { timeout: 90000 })
   return res.data
 }
 

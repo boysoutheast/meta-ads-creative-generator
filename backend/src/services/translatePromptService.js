@@ -90,7 +90,8 @@ ${valid.map((d, i) => `Photo ${i + 1}: ${d}`).join('\n\n')}`,
  * @param {string[]} [opts.characterPhotosBase64]  - ALL character photos (data URLs or raw base64), up to 10
  * @param {string} [opts.productPhotoBase64]       - single product photo (raw base64) for product mode
  * @param {string} [opts.productPhotoMime]
- * @returns {Promise<{ videoPrompt, hookVariants, scriptOutline, adaptedScenes }>}
+ * @param {number} [opts.targetDuration]           - desired output duration in seconds (multiples of 10, default 30)
+ * @returns {Promise<{ videoPrompt, hookVariants, scriptOutline, adaptedScenes, adaptedAnalysis }>}
  */
 async function translateVideoPrompt({
   videoAnalysis,
@@ -102,6 +103,7 @@ async function translateVideoPrompt({
   characterPhotoBase64 = null,  // legacy fallback
   characterPhotoMime = 'image/jpeg',
   productPhotoBase64 = null,
+  targetDuration = 30,          // new: duration in seconds, multiples of 10
 }) {
   const analysisStr = JSON.stringify({
     overallStyle: videoAnalysis.overallStyle,
@@ -192,6 +194,11 @@ ${productDescription ? `PRODUCT DESCRIPTION: ${productDescription}` : ''}`;
     ? 'Express the concept from user intent — no specific character or product branding'
     : `Showcase product "${productName}"${productVisualDesc ? ' (appearance described above)' : ''}`;
 
+  // ── Duration-aware scene count ────────────────────────────────────────────
+  const safeDuration = Math.max(10, Math.round((targetDuration || 30) / 10) * 10);
+  // Rule of thumb: ~5s per scene, min 2, max 15
+  const targetSceneCount = Math.min(15, Math.max(2, Math.round(safeDuration / 5)));
+
   // ── GPT-4o call ───────────────────────────────────────────────────────────
   const raw = await chatCompletion({
     model: config.models.scalingChat || config.models.chat,
@@ -202,7 +209,7 @@ ${productDescription ? `PRODUCT DESCRIPTION: ${productDescription}` : ''}`;
       },
       {
         role: 'user',
-        content: `A winning ad video has been analyzed. Adapt its creative DNA for a new asset.
+        content: `A winning ad video has been analyzed. Adapt its creative DNA for a new asset with a TARGET DURATION of ${safeDuration} seconds.
 
 WINNING AD DNA:
 ${analysisStr}
@@ -217,20 +224,24 @@ ${assetBlock}
 
 ${characterImagePromptPrefix}
 
+TARGET OUTPUT DURATION: ${safeDuration} seconds total → generate approximately ${targetSceneCount} scenes (each ~${Math.round(safeDuration / targetSceneCount)}s)
+
 YOUR TASKS:
 
 1. VIDEO PROMPT (150-200 words, English) for GeminiGen grok-3:
    - Replicate visual style, pacing, camera movement, color palette of winning ad
    - ${adaptInstruction}
    - Incorporate user intent: "${userIntent}"
+   - Paced for ${safeDuration} seconds total
    - Include cinematic details: shot types, lighting, transitions, music direction
 
 2. HOOK VARIANTS: 3 opening lines (first 3 seconds), adapted from winning ad's hook style.
 
-3. SCRIPT OUTLINE: step-by-step structure (hook → conflict/problem → resolution/solution → CTA)
+3. SCRIPT OUTLINE: step-by-step structure (hook → conflict/problem → resolution/solution → CTA) adapted for ${safeDuration}s
 
-4. ADAPTED SCENES — one per original scene:
-   - voiceover: Bahasa Indonesia VO text, matching emotional arc and timing of original. ALWAYS Indonesian.
+4. ADAPTED SCENES — generate exactly ${targetSceneCount} scenes totaling ~${safeDuration}s:
+   - Each scene: duration, voiceover (Bahasa Indonesia, ALWAYS), imagePrompt (English)
+   - voiceover: match emotional arc + timing of original. ALWAYS Indonesian.
    - imagePrompt: English prompt for GPT-image-2 (image generation AI). Rules:
      ${assetMode === 'character'
        ? `* MUST start with full character description: "CHARACTER '${productName}': [physical appearance]. "
@@ -244,6 +255,16 @@ YOUR TASKS:
        : `* Describe scene: setting, mood, visual style, lighting, camera angle. Under 100 words.`
      }
 
+5. ADAPTED ANALYSIS — mirror the winning ad analysis structure but adapted for this new ${safeDuration}s video:
+   - hookType: adapted hook type label
+   - hookBreakdown: { first3Seconds, hookWords, hookMechanism, viewerReaction }
+   - overallStyle: adapted style description (keep similar visual DNA but for new product)
+   - emotionArc: adapted emotion journey (hook → conflict → relief → excitement → CTA)
+   - scriptStructure: { framework, hookLine, agitationPoints (array), solutionReveal, ctaLine }
+   - keyMessages: array of strings (top 3-4 messages adapted for new product)
+   - ctaStrategy: { type, wording, placement }
+   - audioDirection: string — music/VO direction for the adapted video
+
 Return ONLY valid JSON — no markdown fences:
 {
   "videoPrompt": "150-200 word cinematic video prompt in English",
@@ -256,11 +277,36 @@ Return ONLY valid JSON — no markdown fences:
       "voiceover": "teks VO bahasa Indonesia scene 1",
       "imagePrompt": "GPT-image-2 prompt for scene 1${assetMode === 'character' ? ` — must start with CHARACTER '${productName}': [appearance]...` : ''}"
     }
-  ]
+  ],
+  "adaptedAnalysis": {
+    "hookType": "adapted hook type",
+    "hookBreakdown": {
+      "first3Seconds": "what happens in first 3s of adapted video",
+      "hookWords": "opening words for adapted video",
+      "hookMechanism": "why it stops scroll",
+      "viewerReaction": "intended viewer reaction"
+    },
+    "overallStyle": "visual style description adapted for product",
+    "emotionArc": "emotion journey adapted",
+    "scriptStructure": {
+      "framework": "framework name (e.g. PAS, AIDA)",
+      "hookLine": "adapted hook line",
+      "agitationPoints": ["pain point 1 adapted", "pain point 2 adapted"],
+      "solutionReveal": "how product/character solves it",
+      "ctaLine": "adapted CTA line in Indonesian"
+    },
+    "keyMessages": ["message 1 adapted", "message 2 adapted", "message 3 adapted"],
+    "ctaStrategy": {
+      "type": "CTA type",
+      "wording": "CTA wording in Indonesian",
+      "placement": "when CTA appears"
+    },
+    "audioDirection": "music and VO direction for adapted video"
+  }
 }`,
       },
     ],
-    maxTokens: 2500,
+    maxTokens: 3500,
   });
 
   try {
@@ -268,6 +314,7 @@ Return ONLY valid JSON — no markdown fences:
     if (m) {
       const parsed = JSON.parse(m[0]);
       if (!Array.isArray(parsed.adaptedScenes)) parsed.adaptedScenes = [];
+      if (!parsed.adaptedAnalysis) parsed.adaptedAnalysis = null;
       return parsed;
     }
   } catch (e) {
@@ -279,6 +326,7 @@ Return ONLY valid JSON — no markdown fences:
     hookVariants: [],
     scriptOutline: '',
     adaptedScenes: [],
+    adaptedAnalysis: null,
   };
 }
 

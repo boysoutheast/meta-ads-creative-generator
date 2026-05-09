@@ -356,6 +356,7 @@ router.post('/translate-prompt', async (req, res) => {
     assetMode = 'product',
     characterPhotosBase64 = [],   // array of base64 data URLs or raw base64, all photos, max 10
     productPhotoBase64 = null,    // product mode: single photo
+    targetDuration = 30,          // desired output duration in seconds (multiples of 10)
   } = req.body || {};
   if (!videoAnalysis || !userIntent || !productName) {
     return res.status(400).json({ error: 'videoAnalysis, userIntent, and productName are required' });
@@ -369,6 +370,7 @@ router.post('/translate-prompt', async (req, res) => {
       assetMode,
       characterPhotosBase64: Array.isArray(characterPhotosBase64) ? characterPhotosBase64 : [],
       productPhotoBase64: productPhotoBase64 || null,
+      targetDuration: parseInt(targetDuration) || 30,
     });
     res.json(result);
   } catch (err) {
