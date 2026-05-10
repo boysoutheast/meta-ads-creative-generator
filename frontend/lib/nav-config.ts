@@ -12,6 +12,7 @@ import {
   Package,
   Users,
   User as UserIcon,
+  Drama,
 } from 'lucide-react'
 
 export const navGroups = [
@@ -30,6 +31,7 @@ export const navGroups = [
       { href: '/reels', label: 'Create AI Reels', icon: Film },
       { href: '/scale', label: 'Scale Winning Image', icon: Layers },
       { href: '/scale-video', label: 'Scale Winning Video', icon: Video },
+      { href: '/character-studio', label: 'Character Studio', icon: Drama },
       { href: '/remake', label: 'Video Remake', icon: Wand2 },
       { href: '/generate/single-image', label: 'Single Image', icon: ImageIcon },
       { href: '/create', label: 'Create w/ Reference', icon: Palette },

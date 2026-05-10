@@ -16,11 +16,12 @@ model User {
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @updatedAt @map("updated_at")
 
-  libraryItems    LibraryItem[]
-  generationJobs  GenerationJob[]
-  auditLogs       AuditLog[]
-  products        Product[]
-  characters      Character[]
+  libraryItems     LibraryItem[]
+  generationJobs   GenerationJob[]
+  auditLogs        AuditLog[]
+  products         Product[]
+  characters       Character[]
+  promptTemplates  PromptTemplate[]
 
   @@map("users")
 }
@@ -116,8 +117,36 @@ model Character {
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user            User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  promptTemplates PromptTemplate[]
 
   @@index([userId, createdAt(sort: Desc)])
   @@map("characters")
+}
+
+// Reusable scene prompt templates — linked optionally to a character
+model PromptTemplate {
+  id             String   @id @default(cuid())
+  userId         String   @map("user_id")
+  characterId    String?  @map("character_id")
+  name           String
+  sceneType      String   @map("scene_type")      // hook | body | cta | custom
+  imagePrompt    String   @map("image_prompt") @db.Text
+  voiceover      String?  @db.Text
+  voiceDirection String?  @map("voice_direction")
+  textOverlay    String?  @map("text_overlay")
+  cameraMovement String?  @map("camera_movement")
+  mood           String?
+  style          String?  @db.Text
+  negativePrompt String?  @map("negative_prompt") @db.Text
+  tags           Json?
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  character Character? @relation(fields: [characterId], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([userId, characterId])
+  @@map("prompt_templates")
 }

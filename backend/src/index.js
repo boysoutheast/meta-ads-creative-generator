@@ -73,6 +73,7 @@ app.use('/api/generate', generateRoutes);
 app.use('/api/analyze', analyzeRoutes);
 app.use('/api/scale', scaleRoutes);
 app.use('/api/scale-video', require('./routes/scale-video'));
+app.use('/api/character-studio', require('./routes/character-studio'));
 app.use('/api/create', createRoutes);
 
 // ─── Audit endpoint ─────────────────────────────────────────────────────────

@@ -346,4 +346,4 @@ CRITICAL: adaptedScenes array MUST have exactly ${targetSceneCount} element(s). 
   };
 }
 
-module.exports = { translateVideoPrompt };
+module.exports = { translateVideoPrompt, buildCharacterSheet };

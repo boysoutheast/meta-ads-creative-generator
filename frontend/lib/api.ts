@@ -929,3 +929,100 @@ export async function updateProduct(
 export async function deleteProduct(id: string): Promise<void> {
   await api.delete(`/products/${id}`)
 }
+
+// ─── Character Studio ─────────────────────────────────────────────────────────
+
+export interface CharacterSheet {
+  characterName: string
+  appearanceSummary: string
+  appearance: { face: string; hair: string; build: string; signature: string }
+  outfitSignature: string
+  accessories: string
+  personality: string
+  voiceDirection: string
+  animationStyle: string
+  colorPalette: string[]
+  constraints: string[]
+  negativePrompt: string
+  promptPrefix: string
+}
+
+export interface PromptTemplate {
+  id: string
+  characterId: string | null
+  name: string
+  sceneType: string
+  imagePrompt: string
+  voiceover: string | null
+  voiceDirection: string | null
+  textOverlay: string | null
+  cameraMovement: string | null
+  mood: string | null
+  style: string | null
+  negativePrompt: string | null
+  tags: string[]
+  createdAt: string
+  updatedAt: string
+  character?: { id: string; name: string } | null
+}
+
+export interface StoryboardScene {
+  scene: number
+  duration: string
+  sceneType: string
+  imagePrompt: string
+  voiceover: string
+  voiceDirection: string
+  textOverlay: string
+  cameraMovement: string
+  mood: string
+  notes: string
+}
+
+export interface Storyboard {
+  title: string
+  totalDuration: number
+  style: string
+  scenes: StoryboardScene[]
+}
+
+export async function buildCharacterSheet(data: {
+  characterId?: string
+  characterName: string
+  photosBase64?: string[]
+}): Promise<{ characterSheet: CharacterSheet; rawAppearance: string }> {
+  const res = await api.post('/character-studio/build-sheet', data, { timeout: 90000 })
+  return res.data
+}
+
+export async function getPromptTemplates(characterId?: string): Promise<PromptTemplate[]> {
+  const res = await api.get('/character-studio/templates', { params: characterId ? { characterId } : {} })
+  return res.data.templates
+}
+
+export async function createPromptTemplate(data: Omit<PromptTemplate, 'id' | 'createdAt' | 'updatedAt' | 'character'>): Promise<PromptTemplate> {
+  const res = await api.post('/character-studio/templates', data)
+  return res.data.template
+}
+
+export async function updatePromptTemplate(id: string, data: Partial<PromptTemplate>): Promise<PromptTemplate> {
+  const res = await api.put(`/character-studio/templates/${id}`, data)
+  return res.data.template
+}
+
+export async function deletePromptTemplate(id: string): Promise<void> {
+  await api.delete(`/character-studio/templates/${id}`)
+}
+
+export async function buildSceneConfig(data: {
+  brief: string
+  characterSheet?: CharacterSheet | null
+  productDesc?: string
+  sceneCount?: number
+  style?: string
+  mood?: string
+  templateIds?: string[]
+}): Promise<{ storyboard: Storyboard }> {
+  const res = await api.post('/character-studio/build-scene', data, { timeout: 120000 })
+  return res.data
+}
