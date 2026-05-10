@@ -1214,34 +1214,48 @@ function toGeminiAR(ar) {
 
 async function batchGenerateVideos(variations, aspectRatio = '9:16', productImageUrl = null) {
   const geminiAR = toGeminiAR(aspectRatio);
+  // Batch size 3: submit 3 clips to GeminiGen concurrently, then wait before next batch.
+  // Prevents rate-limit errors when generating 6+ clips.
+  const BATCH_SIZE = 3;
+  const allResults = new Array(variations.length).fill(null);
 
-  const results = await Promise.allSettled(
-    variations.map(async (v) => {
-      if (!v.imagePrompt) return { ...v, videoUrl: null, videoError: 'No prompt generated' };
-      try {
-        const imageUrls = productImageUrl ? [productImageUrl] : [];
-        const { uuid } = await generateFirstClip({
-          prompt: v.imagePrompt,
-          mode: 'normal',
-          imageUrls,
-          aspectRatio: geminiAR,
-          resolution: '720p',
-          clipDuration: 10,
-        });
-        console.log(`[batchGenerateVideos] GeminiGen job: ${uuid}`);
-        const { videoUrl } = await pollUntilComplete(uuid);
-        return { ...v, videoUrl: videoUrl || null, videoError: videoUrl ? null : 'Completed but no URL' };
-      } catch (e) {
-        return { ...v, videoUrl: null, videoError: e.message };
-      }
-    })
-  );
+  async function generateOne(v) {
+    if (!v.imagePrompt) return { ...v, videoUrl: null, videoError: 'No prompt generated' };
+    try {
+      // Priority: per-scene storyboard image (GPT-image-2) > product/character photo
+      const imageUrls = v.sceneImageUrl
+        ? [v.sceneImageUrl]
+        : productImageUrl
+        ? [productImageUrl]
+        : [];
+      if (v.sceneImageUrl) console.log(`[batchGenerateVideos] Using scene storyboard image: ${v.sceneImageUrl.slice(0, 60)}`);
+      const { uuid } = await generateFirstClip({
+        prompt: v.imagePrompt,
+        mode: 'normal',
+        imageUrls,
+        aspectRatio: geminiAR,
+        resolution: '720p',
+        clipDuration: 10,
+      });
+      console.log(`[batchGenerateVideos] GeminiGen job: ${uuid}`);
+      const { videoUrl } = await pollUntilComplete(uuid);
+      return { ...v, videoUrl: videoUrl || null, videoError: videoUrl ? null : 'Completed but no URL' };
+    } catch (e) {
+      return { ...v, videoUrl: null, videoError: e.message };
+    }
+  }
 
-  return results.map((r, i) =>
-    r.status === 'fulfilled'
-      ? r.value
-      : { ...variations[i], videoUrl: null, videoError: 'Unexpected error' }
-  );
+  for (let i = 0; i < variations.length; i += BATCH_SIZE) {
+    const batch = variations.slice(i, i + BATCH_SIZE);
+    const batchResults = await Promise.allSettled(batch.map(generateOne));
+    batchResults.forEach((r, j) => {
+      allResults[i + j] = r.status === 'fulfilled'
+        ? r.value
+        : { ...variations[i + j], videoUrl: null, videoError: 'Unexpected error' };
+    });
+  }
+
+  return allResults;
 }
 
 module.exports = {

@@ -673,11 +673,12 @@ export async function generateScaleVideoSceneImages(
   voiceover: string
   imagePrompt: string
   imageUrl: string | null
+  imgError?: string | null
 }>> {
   const res = await api.post(
     '/scale-video/generate-scene-images',
     { adaptedScenes, assetPhotosBase64 },
-    { timeout: 300000 },
+    { timeout: 120000 }, // 2 min per scene (called one-by-one)
   )
   return res.data.scenes
 }
@@ -736,6 +737,7 @@ export interface ScaleVideoGenerateResponse {
   totalVariations: number
   variations: import('./types').AngleVariation[]
   productVisualDescription?: string | null
+  mode?: 'scenes' | 'refined' | 'angles' // which generation path was used
 }
 
 export async function generateScaleVideoJob(payload: {
@@ -746,14 +748,12 @@ export async function generateScaleVideoJob(payload: {
   aspectRatio?: string
   productPhotoBase64?: string
   productPhotoMime?: string
-  /** Asset mode: product / character / none */
   assetMode?: 'product' | 'character' | 'none'
-  /** Character mode: all character photo base64 strings (max 10), no data: prefix */
   characterPhotosBase64?: string[]
-  /** Sprint 3 v2 — when set, every variation uses this prompt instead of the auto-built one */
   customVideoPrompt?: string | null
+  /** Per-scene adapted scenes — each scene = 1 GeminiGen 10s clip */
+  adaptedScenes?: Array<{ scene: number; duration: string; voiceover: string; imagePrompt: string; imageUrl?: string | null }>
 }): Promise<ScaleVideoGenerateResponse> {
-  // Videos take longer — 10s each × N angles × GeminiGen grok-3 queue time = up to 10 min
   const res = await api.post('/scale-video/generate', payload, { timeout: 600000 })
   return res.data
 }

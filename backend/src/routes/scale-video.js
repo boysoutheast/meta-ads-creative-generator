@@ -69,7 +69,8 @@ router.post('/generate', async (req, res) => {
     productPhotoMime = 'image/jpeg',
     assetMode = 'product',
     characterPhotosBase64 = [],   // array of base64 strings (no data: prefix), max 10
-    customVideoPrompt = null,
+    customVideoPrompt = null,     // global refined prompt (used as style context when adaptedScenes exist)
+    adaptedScenes = null,         // per-scene adapted scenes from translatePrompt — takes priority
   } = req.body;
 
   if (!videoAnalysis) {
@@ -137,9 +138,45 @@ router.post('/generate', async (req, res) => {
     }
   }
 
-  // ── Fast path: refined prompt → 1 video only, skip angle variation machine ──
+  // ── Primary path: per-scene adapted scenes → 1 GeminiGen clip per scene ──
+  // Each scene's imagePrompt + voiceover → one 10s clip. N scenes = N clips.
+  if (Array.isArray(adaptedScenes) && adaptedScenes.length > 0) {
+    console.log(`[scale-video/generate] ${adaptedScenes.length} adapted scene(s) → generating ${adaptedScenes.length} clip(s)`);
+    const sceneVariations = adaptedScenes.map((s) => {
+      // Escape VO: remove quotes and newlines that would corrupt the prompt string
+      const safeVO = (s.voiceover || '').replace(/[\r\n]+/g, ' ').replace(/"/g, "'").trim();
+      // Inject VO + optional global style context from refinedPrompt
+      const styleContext = customVideoPrompt
+        ? `\n\nGLOBAL STYLE REFERENCE: ${customVideoPrompt.slice(0, 300)}`
+        : '';
+      const fullPrompt = `${s.imagePrompt}${styleContext}\n\nNARRATION (Bahasa Indonesia): ${safeVO || '(no voiceover)'}`;
+      // GPT-image-2 storyboard URL — passed as reference image to GeminiGen (must be public http URL)
+      const sceneImageUrl = (s.imageUrl && typeof s.imageUrl === 'string' && s.imageUrl.startsWith('http')) ? s.imageUrl : null;
+      return {
+        imagePrompt: fullPrompt,
+        angle: `scene_${s.scene}`,
+        headline: productName,
+        subheadline: s.duration,
+        bodyText: safeVO,
+        cta: '',
+        translatedConcept: `Clip ${s.scene} (${s.duration}) for "${productName}"`,
+        sceneImageUrl,
+      };
+    });
+    const finalVariations = await batchGenerateVideos(sceneVariations, aspectRatio, productImageUrl);
+    return res.json({
+      productName,
+      aspectRatio,
+      totalVariations: finalVariations.length,
+      variations: finalVariations,
+      productVisualDescription: productVisualDescription || null,
+      mode: 'scenes',
+    });
+  }
+
+  // ── Fallback: single refined prompt → 1 video ──
   if (customVideoPrompt) {
-    console.log('[scale-video/generate] refined prompt detected — generating 1 video directly');
+    console.log('[scale-video/generate] single refined prompt → 1 video');
     const singleVar = [{
       imagePrompt: customVideoPrompt,
       angle: 'refined',
@@ -425,16 +462,26 @@ router.post('/generate-scene-images', async (req, res) => {
     console.log(`[scene-images] using ${referenceImages.length} asset reference image(s)`);
   }
 
-  // Generate images in parallel — cap at 10 scenes
+  // Generate one scene at a time (called per-scene from frontend retry or sequential loop)
+  // Cap at 12 scenes (max 120s / 10s per clip)
   const results = await Promise.all(
-    adaptedScenes.slice(0, 10).map(async (s) => {
-      const imageUrl = s.imagePrompt
-        ? await generateSceneImage(s.imagePrompt, referenceImages).catch((e) => {
-            console.warn(`[scene-images] scene ${s.scene} gen failed:`, e.message);
-            return null;
-          })
-        : null;
-      return { ...s, imageUrl };
+    adaptedScenes.slice(0, 12).map(async (s) => {
+      if (!s.imagePrompt) return { ...s, imageUrl: null, imgError: 'imagePrompt kosong' };
+      try {
+        const imageUrl = await generateSceneImage(s.imagePrompt, referenceImages);
+        return { ...s, imageUrl: imageUrl || null, imgError: imageUrl ? null : 'API return kosong' };
+      } catch (e) {
+        const msg = e.message || 'Generate gagal';
+        console.warn(`[scene-images] scene ${s.scene} gagal:`, msg);
+        // Categorise common errors
+        let friendlyError = msg;
+        if (msg.includes('content_policy') || msg.includes('safety')) friendlyError = 'Konten ditolak safety filter. Coba edit imagePrompt.';
+        else if (msg.includes('timeout') || msg.includes('ETIMEDOUT')) friendlyError = 'Timeout — server GPT-image-2 lambat. Coba retry.';
+        else if (msg.includes('rate_limit') || msg.includes('429')) friendlyError = 'Rate limit API. Tunggu beberapa detik lalu retry.';
+        else if (msg.includes('invalid_api_key') || msg.includes('401')) friendlyError = 'API key tidak valid. Cek konfigurasi server.';
+        else if (msg.includes('quota') || msg.includes('insufficient')) friendlyError = 'Kuota API habis. Cek billing.';
+        return { ...s, imageUrl: null, imgError: friendlyError };
+      }
     })
   );
 

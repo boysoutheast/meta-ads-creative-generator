@@ -54,6 +54,41 @@ function phaseColor(phase: string): string {
   return 'text-blue-500'
 }
 
+type SceneItem = {
+  scene: number; duration: string; voiceover: string; imagePrompt: string
+  imageUrl?: string | null; imgStatus?: 'idle' | 'generating' | 'done' | 'error'; imgError?: string | null
+}
+
+/** Generate images one-by-one, updating state after each scene so UI is live.
+ *  abortRef: { current: boolean } — set to true to cancel the loop mid-run (e.g. when user triggers new refine). */
+async function generateSceneImagesSequential(
+  scenes: SceneItem[],
+  assetPhotosBase64: string[] | undefined,
+  setScenes: React.Dispatch<React.SetStateAction<SceneItem[]>>,
+  abortRef: { current: boolean },
+) {
+  for (let i = 0; i < scenes.length; i++) {
+    if (abortRef.current) break  // cancelled — stop generating
+    const s = scenes[i]
+    // mark this scene as generating
+    setScenes((prev) => prev.map((x) => x.scene === s.scene ? { ...x, imgStatus: 'generating', imgError: null } : x))
+    try {
+      const result = await generateScaleVideoSceneImages([s], assetPhotosBase64)
+      if (abortRef.current) break  // check again after async call
+      const { imageUrl = null, imgError = null } = result[0] ?? {}
+      setScenes((prev) => prev.map((x) =>
+        x.scene === s.scene ? { ...x, imageUrl, imgStatus: imageUrl ? 'done' : 'error', imgError: imgError || (imageUrl ? null : 'Gambar tidak berhasil di-generate') } : x
+      ))
+    } catch (e: any) {
+      if (abortRef.current) break
+      const msg = e?.response?.data?.error || e.message || 'Generate gagal'
+      setScenes((prev) => prev.map((x) =>
+        x.scene === s.scene ? { ...x, imageUrl: null, imgStatus: 'error', imgError: msg } : x
+      ))
+    }
+  }
+}
+
 export default function ScaleVideoPage() {
   // Step 1 — upload + analyze
   const [file, setFile] = useState<File | null>(null)
@@ -96,9 +131,13 @@ export default function ScaleVideoPage() {
   const [scriptOutline, setScriptOutline] = useState('')
   const [showIntentStep, setShowIntentStep] = useState(false)
   const [adaptedScenes, setAdaptedScenes] = useState<Array<{
-    scene: number; duration: string; voiceover: string; imagePrompt: string; imageUrl?: string | null
+    scene: number; duration: string; voiceover: string; imagePrompt: string
+    imageUrl?: string | null
+    imgStatus?: 'idle' | 'generating' | 'done' | 'error'
+    imgError?: string | null
   }>>([])
   const [generatingSceneImages, setGeneratingSceneImages] = useState(false)
+  const sceneImgAbortRef = useRef<{ current: boolean }>({ current: false })
   // Duration-aware comparison
   const [targetDuration, setTargetDuration] = useState<number>(10)
   const [adaptedAnalysis, setAdaptedAnalysis] = useState<AdaptedAnalysis | null>(null)
@@ -131,12 +170,12 @@ export default function ScaleVideoPage() {
     }
   }, [liveLog])
 
-  // Auto-set duration from analysis (round to nearest 10s, min 10s)
+  // Auto-set duration from analysis (round to nearest 10s, clamp 10–120s)
   useEffect(() => {
     if (videoAnalysis) {
       const raw = videoAnalysis.recommendedDuration
         ?? (Array.isArray(videoAnalysis.scenes) ? videoAnalysis.scenes.length * 5 : 30)
-      const rounded = Math.max(10, Math.round(raw / 10) * 10)
+      const rounded = Math.min(120, Math.max(10, Math.round(raw / 10) * 10))
       setTargetDuration(rounded)
     }
   }, [videoAnalysis])
@@ -237,12 +276,16 @@ export default function ScaleVideoPage() {
         if (charPhotos.length > 0) assetPhotosBase64 = charPhotos.slice(0, 10)
       }
 
-      // Auto-generate storyboard images in background
+      // Auto-generate storyboard images one-by-one with per-scene live status
       if (scenes.length > 0) {
+        // Cancel any previous in-flight sequential generation
+        sceneImgAbortRef.current.current = true
+        const abortRef = { current: false }
+        sceneImgAbortRef.current = abortRef
         setGeneratingSceneImages(true)
-        generateScaleVideoSceneImages(scenes, assetPhotosBase64)
-          .then((withImages) => setAdaptedScenes(withImages))
-          .catch((e) => console.warn('[scene-images] gen failed:', e.message))
+        const initialScenes = scenes.map((s: any) => ({ ...s, imgStatus: 'generating' as const, imgError: null }))
+        setAdaptedScenes(initialScenes)
+        generateSceneImagesSequential(initialScenes, assetPhotosBase64, setAdaptedScenes, abortRef)
           .finally(() => setGeneratingSceneImages(false))
       }
     } catch (e: any) {
@@ -252,8 +295,40 @@ export default function ScaleVideoPage() {
     }
   }
 
+  const handleRetrySceneImage = async (sceneNum: number) => {
+    const scene = adaptedScenes.find((s) => s.scene === sceneNum)
+    if (!scene) return
+    let assetPhotosBase64: string[] | undefined
+    if (assetMode === 'product' && selectedProduct?.photos?.length) {
+      assetPhotosBase64 = selectedProduct.photos.slice(0, 10)
+    } else if (assetMode === 'character') {
+      const charPhotos = selectedCharacter?.photos ?? characterPhotos
+      if (charPhotos.length > 0) assetPhotosBase64 = charPhotos.slice(0, 10)
+    }
+    setAdaptedScenes((prev) => prev.map((x) => x.scene === sceneNum ? { ...x, imgStatus: 'generating', imgError: null } : x))
+    try {
+      const result = await generateScaleVideoSceneImages([scene], assetPhotosBase64)
+      const { imageUrl = null, imgError = null } = result[0] ?? {}
+      setAdaptedScenes((prev) => prev.map((x) =>
+        x.scene === sceneNum ? { ...x, imageUrl, imgStatus: imageUrl ? 'done' : 'error', imgError: imgError || (imageUrl ? null : 'Gambar tidak berhasil di-generate') } : x
+      ))
+    } catch (e: any) {
+      const msg = e?.response?.data?.error || e.message || 'Generate gagal'
+      setAdaptedScenes((prev) => prev.map((x) =>
+        x.scene === sceneNum ? { ...x, imageUrl: null, imgStatus: 'error', imgError: msg } : x
+      ))
+    }
+  }
+
   const handleGenerate = async () => {
-    if (!videoAnalysis) return
+    if (!videoAnalysis) {
+      setError('Analisis video belum selesai. Kembali ke Step 1 dan analyze video dulu.')
+      return
+    }
+    if (adaptedScenes.length === 0 && !refinedPrompt) {
+      setError('Belum ada prompt. Kembali ke Step 3 dan klik "Refine dengan AI" dulu.')
+      return
+    }
     setError(null)
     setGenerating(true)
     setResult(null)
@@ -292,13 +367,17 @@ export default function ScaleVideoPage() {
         videoAnalysis,
         productName,
         productDescription,
-        selectedAngles: availableAngles.map((a) => a.key), // auto-select all angles
         aspectRatio,
         productPhotoBase64,
         productPhotoMime,
         characterPhotosBase64,
         assetMode,
         customVideoPrompt: refinedPrompt || undefined,
+        // Pass per-scene adapted scenes → each = 1 GeminiGen clip
+        // Include imageUrl (GPT-image-2 storyboard) so backend passes it as file_urls[] to GeminiGen
+        adaptedScenes: adaptedScenes.length > 0
+          ? adaptedScenes.map(({ scene, duration, voiceover, imagePrompt, imageUrl }) => ({ scene, duration, voiceover, imagePrompt, imageUrl: imageUrl || null }))
+          : undefined,
       })
       setResult(resp)
     } catch (e: any) {
@@ -743,8 +822,10 @@ export default function ScaleVideoPage() {
                         description: s.imagePrompt,
                         voiceover: s.voiceover,
                         imageUrl: s.imageUrl ?? null,
-                        generatingImage: generatingSceneImages && !s.imageUrl,
+                        imgStatus: s.imgStatus ?? 'idle',
+                        imgError: s.imgError ?? null,
                         hook: s.scene === 1,
+                        onRetry: () => handleRetrySceneImage(s.scene),
                       })),
                     }} />
                   )}
@@ -794,10 +875,22 @@ export default function ScaleVideoPage() {
               4. Generate Video
             </CardTitle>
             <CardDescription>
-              Semua siap. Klik Generate untuk buat 1 video 10 detik.
+              Semua siap. Klik Generate untuk buat {adaptedScenes.length > 0 ? `${adaptedScenes.length} clip × 10 detik` : '1 video 10 detik'}.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
+            {/* Scene count mismatch warning */}
+            {adaptedScenes.length > 0 && adaptedScenes.length !== targetDuration / 10 && (
+              <div className="rounded-lg border border-amber-200 bg-amber-50 dark:bg-amber-900/20 px-3 py-2.5 text-xs text-amber-700 dark:text-amber-400">
+                ⚠ AI generate {adaptedScenes.length} scene untuk durasi {targetDuration}s (expected {targetDuration / 10}).
+                {' '}<button className="underline" onClick={() => setStep(3)}>Refine ulang</button> jika ingin disesuaikan.
+              </div>
+            )}
+            {adaptedScenes.length === 0 && (
+              <div className="rounded-lg border border-amber-200 bg-amber-50 dark:bg-amber-900/20 px-3 py-2.5 text-xs text-amber-700 dark:text-amber-400">
+                ⚠ Belum ada adapted scenes. Kembali ke Step 3 dan klik "Refine dengan AI".
+              </div>
+            )}
             {/* Config summary */}
             <div className="rounded-xl border divide-y text-sm overflow-hidden">
               <div className="flex items-center justify-between px-4 py-2.5 bg-muted/20">
@@ -841,7 +934,7 @@ export default function ScaleVideoPage() {
             <div className="flex gap-2">
               <Button variant="outline" size="sm" onClick={() => setStep(3)} className="shrink-0">← Edit Prompt</Button>
               <Button className="flex-1" size="lg" onClick={handleGenerate}>
-                <Video className="h-4 w-4" /> Generate Video 10 Detik
+                <Video className="h-4 w-4" /> Generate {adaptedScenes.length > 1 ? `${adaptedScenes.length} Clips · ${targetDuration}s` : '1 Clip · 10s'}
               </Button>
             </div>
           </CardContent>
@@ -859,8 +952,8 @@ export default function ScaleVideoPage() {
                 <Video className="absolute inset-0 m-auto h-5 w-5 text-primary" />
               </div>
               <div>
-                <p className="font-semibold">Generating video 10 detik…</p>
-                <p className="text-sm text-muted-foreground">GeminiGen grok-3 · estimasi 2–5 menit</p>
+                <p className="font-semibold">Generating {adaptedScenes.length > 0 ? `${adaptedScenes.length} clip${adaptedScenes.length > 1 ? 's' : ''} × 10 detik` : 'video 10 detik'}…</p>
+                <p className="text-sm text-muted-foreground">GeminiGen grok-3 · estimasi {adaptedScenes.length > 0 ? `${adaptedScenes.length * 2}–${adaptedScenes.length * 5}` : '2–5'} menit</p>
               </div>
             </div>
             <div className="space-y-2.5">
@@ -899,40 +992,58 @@ export default function ScaleVideoPage() {
             </CardTitle>
           </CardHeader>
 
-          <div className="relative bg-black flex items-center justify-center min-h-[320px]">
-            {result.variations[0]?.videoUrl ? (
-              <video src={result.variations[0].videoUrl} controls autoPlay loop
-                className="max-h-[520px] w-full object-contain" />
-            ) : (
-              <div className="flex flex-col items-center gap-3 py-16 text-destructive/70">
-                <AlertCircle className="h-8 w-8" />
-                <p className="text-sm">{result.variations[0]?.videoError || 'Video tidak tersedia'}</p>
+          {/* N clips — one card per scene */}
+          <div className="divide-y divide-border">
+            {(result.variations || []).map((v: any, idx: number) => (
+              <div key={idx} className="bg-black">
+                {/* Clip label */}
+                <div className="flex items-center gap-2 px-4 py-2 bg-background/5">
+                  <Badge variant="outline" className="text-[10px] border-white/20 text-white/70">
+                    Clip {idx + 1}{result.variations.length > 1 ? ` · ${adaptedScenes[idx]?.duration ?? `${idx * 10}–${(idx + 1) * 10}s`}` : ''}
+                  </Badge>
+                  {adaptedScenes[idx]?.voiceover && (
+                    <span className="text-[10px] text-white/50 italic truncate max-w-xs">"{adaptedScenes[idx].voiceover.slice(0, 60)}…"</span>
+                  )}
+                </div>
+                {v.videoUrl ? (
+                  <video src={v.videoUrl} controls loop
+                    className="max-h-[480px] w-full object-contain" />
+                ) : (
+                  <div className="flex flex-col items-center gap-3 py-12 text-red-400/70">
+                    <AlertCircle className="h-7 w-7" />
+                    <p className="text-xs text-center px-4">{v.videoError || 'Clip tidak tersedia'}</p>
+                  </div>
+                )}
               </div>
-            )}
+            ))}
           </div>
 
           <CardContent className="p-4 space-y-3">
-            <div className="flex gap-2">
-              {result.variations[0]?.videoUrl && (
-                <Button className="flex-1" onClick={async () => {
-                  try {
-                    const r = await fetch(result.variations[0].videoUrl!)
-                    const blob = await r.blob()
-                    const url = URL.createObjectURL(blob)
-                    const a = document.createElement('a')
-                    a.href = url
-                    a.download = `scale-video-${result.productName}-${Date.now()}.mp4`
-                    document.body.appendChild(a); a.click(); document.body.removeChild(a)
-                    URL.revokeObjectURL(url)
-                  } catch { window.open(result.variations[0].videoUrl!, '_blank') }
-                }}>
-                  <Download className="h-4 w-4" /> Download Video
-                </Button>
+            <div className="flex gap-2 flex-wrap">
+              {(result.variations || []).some((v: any) => v.videoUrl) && (
+                (result.variations || []).filter((v: any) => v.videoUrl).map((v: any, idx: number) => (
+                  <Button key={idx} size="sm" variant="outline" onClick={async () => {
+                    try {
+                      const r = await fetch(v.videoUrl)
+                      const blob = await r.blob()
+                      const url = URL.createObjectURL(blob)
+                      const a = document.createElement('a')
+                      a.href = url
+                      a.download = `clip-${idx + 1}-${result.productName}-${Date.now()}.mp4`
+                      document.body.appendChild(a); a.click(); document.body.removeChild(a)
+                      URL.revokeObjectURL(url)
+                    } catch { window.open(v.videoUrl, '_blank') }
+                  }}>
+                    <Download className="h-3.5 w-3.5" /> Clip {idx + 1}
+                  </Button>
+                ))
               )}
-              <Button variant="outline" onClick={() => { setResult(null); setStep(3); setRefinedPrompt(''); setAdaptedScenes([]); setHookVariants([]); setScriptOutline(''); setUserIntent('') }}>
+            </div>
+            <div className="flex gap-2">
+              <Button variant="outline" className="flex-1" onClick={() => { setResult(null); setStep(3); setRefinedPrompt(''); setAdaptedScenes([]); setHookVariants([]); setScriptOutline(''); setUserIntent('') }}>
                 Refine Ulang
               </Button>
-              <Button variant="outline" onClick={() => { setResult(null); setStep(4) }}>
+              <Button variant="outline" className="flex-1" onClick={() => { setResult(null); setStep(4) }}>
                 Generate Ulang
               </Button>
             </div>
@@ -1529,14 +1640,48 @@ function AnalysisCard({ analysis }: { analysis: AnyAnalysis }) {
               {scenes.map((s, i) => (
                 <div key={i} className="rounded-md border bg-muted/30 overflow-hidden text-[11.5px] leading-relaxed">
                   {/* Scene header */}
-                  <div className="flex items-center gap-2 px-2.5 pt-2.5 pb-1.5">
+                  <div className="flex items-center gap-2 px-2.5 pt-2.5 pb-1.5 flex-wrap">
                     <Badge className="text-[10px]">Scene {s.sceneNumber ?? i + 1}</Badge>
                     {s.duration && <span className="text-muted-foreground text-[10px] font-mono">{s.duration}</span>}
                     {s.title && <span className="font-semibold">{s.title}</span>}
                     {s.hook && <Badge variant="outline" className="text-[9px] bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300 border-amber-300">HOOK</Badge>}
-                    {s.generatingImage && <span className="text-[9px] text-primary flex items-center gap-1"><span className="animate-spin inline-block">⏳</span> generating…</span>}
+                    {/* Per-scene image status */}
+                    {s.imgStatus === 'generating' && (
+                      <span className="flex items-center gap-1 text-[9px] text-primary ml-auto">
+                        <Loader2 className="h-2.5 w-2.5 animate-spin" /> Generating image…
+                      </span>
+                    )}
+                    {s.imgStatus === 'done' && (
+                      <span className="text-[9px] text-emerald-600 ml-auto">✓ Image ready</span>
+                    )}
+                    {s.imgStatus === 'error' && (
+                      <span className="flex items-center gap-1.5 ml-auto">
+                        <span className="text-[9px] text-red-500">✗ Gagal</span>
+                        {s.onRetry && (
+                          <button onClick={s.onRetry} className="text-[9px] text-primary underline hover:no-underline">Retry</button>
+                        )}
+                      </span>
+                    )}
                   </div>
-                  {/* Image preview — shown if available */}
+                  {/* Image preview or placeholder */}
+                  {s.imgStatus === 'generating' && !s.imageUrl && (
+                    <div className="w-full bg-muted/40 flex items-center justify-center py-8 gap-2 text-xs text-muted-foreground">
+                      <Loader2 className="h-4 w-4 animate-spin text-primary" />
+                      <span>Generating storyboard image…</span>
+                    </div>
+                  )}
+                  {s.imgStatus === 'error' && (
+                    <div className="w-full bg-red-50 dark:bg-red-950/20 border-y border-red-200 dark:border-red-900 px-3 py-3 space-y-1.5">
+                      <p className="text-[11px] text-red-600 dark:text-red-400 font-medium">⚠ Image generation gagal</p>
+                      {s.imgError && <p className="text-[10px] text-red-500/80 leading-relaxed">{s.imgError}</p>}
+                      {s.onRetry && (
+                        <button onClick={s.onRetry}
+                          className="text-[10px] font-semibold text-primary border border-primary/30 rounded px-2 py-0.5 hover:bg-primary/10 transition-colors">
+                          ↺ Retry Generate
+                        </button>
+                      )}
+                    </div>
+                  )}
                   {s.imageUrl && (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img src={s.imageUrl} alt={`Scene ${s.sceneNumber ?? i + 1}`} className="w-full object-cover max-h-48" />
