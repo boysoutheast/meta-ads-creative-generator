@@ -34,6 +34,36 @@ function bytesMb(bytes) {
 }
 
 /**
+ * Write IG_COOKIES env var content to a temp file so yt-dlp can use it.
+ * Called once per process — result is cached in module scope.
+ */
+let _igCookiesFile = null;
+function resolveIgCookiesFile() {
+  if (_igCookiesFile) return _igCookiesFile;
+
+  // Priority 1: explicit file path env var
+  if (process.env.YT_DLP_COOKIES_FILE && fs.existsSync(process.env.YT_DLP_COOKIES_FILE)) {
+    _igCookiesFile = process.env.YT_DLP_COOKIES_FILE;
+    return _igCookiesFile;
+  }
+
+  // Priority 2: inline cookie content in env var (paste contents of cookies.txt)
+  if (process.env.IG_COOKIES) {
+    const tmpPath = path.join(os.tmpdir(), 'ig_cookies.txt');
+    try {
+      fs.writeFileSync(tmpPath, process.env.IG_COOKIES, 'utf8');
+      _igCookiesFile = tmpPath;
+      console.log('[yt-dlp] IG_COOKIES written to', tmpPath);
+    } catch (e) {
+      console.warn('[yt-dlp] Failed to write IG_COOKIES to temp file:', e.message);
+    }
+    return _igCookiesFile;
+  }
+
+  return null;
+}
+
+/**
  * Run yt-dlp with a chain of progressively-more-lenient format selectors.
  * Uses async exec so the Node.js event loop is NEVER blocked — keepalive
  * pings keep firing during the download.
@@ -43,11 +73,11 @@ async function ytDlpDownload(url, outFile, { audioOnly = false, onProgress = NOO
   // Mobile Safari iOS UA — sometimes bypasses IG/TikTok desktop-only checks.
   const ua = '"Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1"';
   const headers = '--add-header "Accept-Language:en-US,en;q=0.9"';
-  const cookiesFromEnv = process.env.YT_DLP_COOKIES_FILE && require('fs').existsSync(process.env.YT_DLP_COOKIES_FILE)
-    ? `--cookies "${process.env.YT_DLP_COOKIES_FILE}"`
-    : '';
 
-  const flagsCommon = `--no-playlist --max-filesize 200M --no-warnings --retries 2 --user-agent ${ua} ${headers} ${cookiesFromEnv} --output "${outFile}"`;
+  const cookiesFile = resolveIgCookiesFile();
+  const cookiesFlag = cookiesFile ? `--cookies "${cookiesFile}"` : '';
+
+  const flagsCommon = `--no-playlist --max-filesize 200M --no-warnings --retries 2 --user-agent ${ua} ${headers} ${cookiesFlag} --output "${outFile}"`;
 
   // Format chains — tried in order until one works
   const chains = audioOnly
@@ -103,9 +133,11 @@ async function ytDlpDownload(url, outFile, { audioOnly = false, onProgress = NOO
 
   // Instagram-specific: login wall / rate-limit
   if (errMsg.includes('rate-limit reached') || errMsg.includes('login required') || errMsg.includes('Restricted Video') || errMsg.includes('Use --cookies')) {
+    const hasCookies = !!resolveIgCookiesFile();
     throw new Error(
-      'Instagram saat ini wajib login untuk download (yt-dlp limitation 2024+). ' +
-      'Coba: (1) URL TikTok/YouTube/Facebook (gratis tanpa login), atau (2) Download manual dari Instagram lalu pakai tab "Upload File".'
+      hasCookies
+        ? 'Instagram cookies expired atau tidak valid. Set ulang env var IG_COOKIES di Railway dengan cookies terbaru dari browser kamu.'
+        : 'Instagram wajib login (yt-dlp limitation 2024+). Set env var IG_COOKIES di Railway, atau download manual lalu pakai tab "Upload File".'
     );
   }
 
