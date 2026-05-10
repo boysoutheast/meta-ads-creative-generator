@@ -102,6 +102,12 @@ async function generateFirstClip({
   resolution = '720p',
   clipDuration = 10,
 }) {
+  // Log full prompt for debugging
+  console.log(`[GeminiGen] generateFirstClip →`);
+  console.log(`  aspect_ratio: ${aspectRatio} | resolution: ${resolution} | duration: ${clipDuration}s | mode: ${mode}`);
+  console.log(`  file_urls: ${imageUrls.length > 0 ? imageUrls.map(u => u.slice(0, 80)).join(', ') : '(none)'}`);
+  console.log(`  prompt (${prompt.length} chars): ${prompt.slice(0, 500)}${prompt.length > 500 ? '…' : ''}`);
+
   const form = new FormData();
   form.append('prompt', prompt);
   form.append('model', 'grok-3');

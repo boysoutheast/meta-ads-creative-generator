@@ -654,10 +654,17 @@ export async function translateVideoPrompt(payload: {
   videoPrompt: string
   hookVariants: string[]
   scriptOutline: string
-  adaptedScenes: Array<{ scene: number; duration: string; voiceover: string; imagePrompt: string }>
+  adaptedScenes: Array<{
+    scene: number
+    duration: string
+    voiceover: string
+    imagePrompt: string
+    textOverlay?: string | null
+    voiceDirection?: string | null
+  }>
   adaptedAnalysis: AdaptedAnalysis | null
 }> {
-  const res = await api.post('/scale-video/translate-prompt', payload, { timeout: 90000 })
+  const res = await api.post('/scale-video/translate-prompt', payload, { timeout: 120000 })
   return res.data
 }
 
@@ -752,7 +759,10 @@ export async function generateScaleVideoJob(payload: {
   characterPhotosBase64?: string[]
   customVideoPrompt?: string | null
   /** Per-scene adapted scenes — each scene = 1 GeminiGen 10s clip */
-  adaptedScenes?: Array<{ scene: number; duration: string; voiceover: string; imagePrompt: string; imageUrl?: string | null }>
+  adaptedScenes?: Array<{
+    scene: number; duration: string; voiceover: string; imagePrompt: string
+    imageUrl?: string | null; textOverlay?: string | null; voiceDirection?: string | null
+  }>
 }): Promise<ScaleVideoGenerateResponse> {
   const res = await api.post('/scale-video/generate', payload, { timeout: 600000 })
   return res.data

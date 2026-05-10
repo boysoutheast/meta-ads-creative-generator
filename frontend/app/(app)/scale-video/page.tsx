@@ -56,6 +56,7 @@ function phaseColor(phase: string): string {
 
 type SceneItem = {
   scene: number; duration: string; voiceover: string; imagePrompt: string
+  textOverlay?: string | null; voiceDirection?: string | null
   imageUrl?: string | null; imgStatus?: 'idle' | 'generating' | 'done' | 'error'; imgError?: string | null
 }
 
@@ -376,7 +377,12 @@ export default function ScaleVideoPage() {
         // Pass per-scene adapted scenes → each = 1 GeminiGen clip
         // Include imageUrl (GPT-image-2 storyboard) so backend passes it as file_urls[] to GeminiGen
         adaptedScenes: adaptedScenes.length > 0
-          ? adaptedScenes.map(({ scene, duration, voiceover, imagePrompt, imageUrl }) => ({ scene, duration, voiceover, imagePrompt, imageUrl: imageUrl || null }))
+          ? adaptedScenes.map(({ scene, duration, voiceover, imagePrompt, imageUrl, textOverlay, voiceDirection }) => ({
+              scene, duration, voiceover, imagePrompt,
+              imageUrl: imageUrl || null,
+              textOverlay: textOverlay || null,
+              voiceDirection: voiceDirection || null,
+            }))
           : undefined,
       })
       setResult(resp)

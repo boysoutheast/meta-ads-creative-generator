@@ -145,11 +145,19 @@ router.post('/generate', async (req, res) => {
     const sceneVariations = adaptedScenes.map((s) => {
       // Escape VO: remove quotes and newlines that would corrupt the prompt string
       const safeVO = (s.voiceover || '').replace(/[\r\n]+/g, ' ').replace(/"/g, "'").trim();
-      // Inject VO + optional global style context from refinedPrompt
+      // Optional global style context from refinedPrompt
       const styleContext = customVideoPrompt
         ? `\n\nGLOBAL STYLE REFERENCE: ${customVideoPrompt.slice(0, 300)}`
         : '';
-      const fullPrompt = `${s.imagePrompt}${styleContext}\n\nNARRATION (Bahasa Indonesia): ${safeVO || '(no voiceover)'}`;
+      // Text overlay injection
+      const textOverlayBlock = s.textOverlay
+        ? `\n\n[TEXT OVERLAY IN VIDEO]: "${s.textOverlay.replace(/"/g, "'")}" — display prominently, clean font, no typos`
+        : '';
+      // Voice direction for VO
+      const voiceBlock = s.voiceDirection
+        ? `\n[VO VOICE CHARACTER]: ${s.voiceDirection}`
+        : '';
+      const fullPrompt = `${s.imagePrompt}${styleContext}${textOverlayBlock}\n\nNARRATION (Bahasa Indonesia):${voiceBlock}\n${safeVO || '(no voiceover)'}`;
       // GPT-image-2 storyboard URL — passed as reference image to GeminiGen (must be public http URL)
       const sceneImageUrl = (s.imageUrl && typeof s.imageUrl === 'string' && s.imageUrl.startsWith('http')) ? s.imageUrl : null;
       return {

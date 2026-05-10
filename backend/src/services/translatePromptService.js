@@ -206,128 +206,123 @@ ${productDescription ? `PRODUCT DESCRIPTION: ${productDescription}` : ''}`;
     messages: [
       {
         role: 'system',
-        content: 'You are an expert video ad director, copywriter, and AI prompt engineer. Your imagePrompts will be used directly with GPT-image-2 + character reference photos to generate storyboard frames. Be extremely specific about visual appearance. Return only valid JSON, no markdown.',
+        content: `You are a senior video ad director, AI prompt engineer, and Indonesian copywriter.
+Your imagePrompts go directly to GeminiGen grok-3 (video generation) AND GPT-image-2 (storyboard preview).
+Write prompts like a real director giving detailed instructions to an animator — specific, cinematic, complete.
+Return ONLY valid JSON. No markdown, no code fences, no explanation outside the JSON.`,
       },
       {
         role: 'user',
-        content: `A winning ad video has been analyzed. Adapt its creative DNA for a new asset.
+        content: `A winning ad video has been analyzed. Adapt its creative DNA for a new ${safeDuration}s video.
 
-CRITICAL OUTPUT CONSTRAINT: GeminiGen grok-3 generates ONE 10-second clip per scene.
-- Total video = ${safeDuration} seconds = ${targetSceneCount} separate GeminiGen clip(s)
-- Each scene = one standalone 10s video clip (NOT a moment within a longer clip)
-- Scene 1 = clip 1 (0-10s), Scene 2 = clip 2 (10-20s), etc.
-- Each scene's imagePrompt = the FULL visual prompt for that 10s clip
-- Each scene's voiceover = the COMPLETE VO script for that 10s clip
-
-WINNING AD DNA:
+═══ WINNING AD DNA ═══
 ${analysisStr}
 
-ORIGINAL SCENES + VOICEOVER (from winning ad):
+═══ ORIGINAL SCENES + VO ═══
 ${scenesVoContext}
 
-USER INTENT:
+═══ USER INTENT ═══
 "${userIntent}"
 
+═══ ASSET ═══
 ${assetBlock}
 
 ${characterImagePromptPrefix}
 
-TARGET OUTPUT: ${safeDuration} seconds total = ${targetSceneCount} clip(s) × 10s each
-- Clip 1 (0-10s): HOOK — grab attention immediately
-${targetSceneCount >= 2 ? `- Clip 2 (10-20s): BODY — agitate problem, present solution` : ''}
-${targetSceneCount >= 3 ? `- Clip 3 (20-30s): CTA — drive action` : ''}
+═══ OUTPUT STRUCTURE ═══
+Total: ${safeDuration}s = ${targetSceneCount} clip(s) × 10s each (GeminiGen generates ONE 10s clip per scene)
+${Array.from({ length: targetSceneCount }, (_, i) => {
+  const roles = ['HOOK — grab attention, stop the scroll instantly', 'BODY — agitate problem, reveal solution', 'CTA — drive action, close the sale'];
+  const role = roles[Math.min(i, roles.length - 1)];
+  return `- Clip ${i + 1} (${i * 10}-${(i + 1) * 10}s): ${role}`;
+}).join('\n')}
 
-YOUR TASKS:
+═══ YOUR TASKS ═══
 
-1. VIDEO PROMPT (150-200 words, English) for GeminiGen grok-3:
-   - Replicate visual style, pacing, camera movement, color palette of winning ad
+1. VIDEO PROMPT (200-300 words, English):
+   Cinematic brief for the ENTIRE ${safeDuration}s video. Include:
+   - Visual style, animation quality, color palette from winning ad DNA
    - ${adaptInstruction}
-   - Incorporate user intent: "${userIntent}"
-   - Paced for ${safeDuration} seconds total
-   - Include cinematic details: shot types, lighting, transitions, music direction
+   - Shot progression across all ${targetSceneCount} clips
+   - Lighting direction, music feel, overall mood
 
-2. HOOK VARIANTS: 3 opening lines (first 3 seconds), adapted from winning ad's hook style.
+2. HOOK VARIANTS: 3 punchy opening lines (first 3s), adapted from winning ad hook style.
 
-3. SCRIPT OUTLINE: step-by-step structure (hook → conflict/problem → resolution/solution → CTA) adapted for ${safeDuration}s
+3. SCRIPT OUTLINE: hook → conflict → solution → CTA for ${safeDuration}s
 
-4. ADAPTED SCENES — exactly ${targetSceneCount} scene(s), each = one standalone 10s GeminiGen clip:
-   - duration: "0-10s", "10-20s", "20-30s" etc. — each exactly 10s
-   - voiceover: Bahasa Indonesia VO script for this FULL 10s clip. ALWAYS Indonesian.
-     MANDATORY: minimum 3 kalimat padat per scene. Dense, persuasive, adapted from winning ad VO style.
-     Contoh format: "Kalimat hook kuat. Kalimat agitasi masalah. Kalimat solusi/produk. CTA singkat."
-   - imagePrompt: English visual prompt for this standalone 10s GeminiGen clip. Also used as GPT-image-2 storyboard reference. Rules:
-     ${assetMode === 'character'
-       ? `* MUST start with full character description: "CHARACTER '${productName}': [physical appearance]. "
-       * Then describe: exact pose/action in this scene, setting/environment, lighting, color grade, camera angle
-       * Include enough visual detail that GPT-image-2 can draw the scene without additional info
-       * Under 120 words per scene`
-       : assetMode === 'product'
-       ? `* Describe the scene including the product "${productName}" prominently
-       * Include: setting, lighting, color grade, camera angle, mood
-       * Under 120 words per scene`
-       : `* Describe scene: setting, mood, visual style, lighting, camera angle. Under 100 words.`
-     }
+4. ADAPTED SCENES — EXACTLY ${targetSceneCount} object(s) in the array. DO NOT return fewer.
+   Each scene = one standalone 10s GeminiGen clip. Fields:
 
-5. ADAPTED ANALYSIS — mirror the winning ad analysis structure EXACTLY (same fields as input analysis) but adapted for this new ${safeDuration}s video:
-   - hookType: adapted hook type label
-   - hookBreakdown: { first3Seconds, hookWords, hookMechanism, viewerReaction }
-   - overallStyle: adapted visual style (keep similar DNA but for new product)
-   - pacing: adapted pacing description (fast/medium/slow + rhythm note)
-   - toneOfVoice: adapted tone (casual / formal / urgent / storytelling / educational)
-   - colorPalette: array of 3 colors that fit the adapted video mood
-   - emotionArc: adapted emotion journey (phase 1 → phase 2 → phase 3 → resolution)
-   - musicVibe: adapted music direction (genre, tempo, mood)
-   - scriptStructure: { framework, hookLine, agitationPoints (array), solutionReveal, ctaLine }
-   - keyMessages: array of strings (top 3-4 messages adapted for new product)
-   - ctaStrategy: { type, wording, placement }
-   - audioDirection: full music + VO direction for the adapted video
+   a) voiceover (BAHASA INDONESIA — MANDATORY):
+      - MINIMUM 3 kalimat padat per scene, dense and persuasive
+      - Format: "[VOICE: tone karakter, contoh: suara laki-laki lucu energik] Kalimat 1. Kalimat 2. Kalimat 3."
+      - Adapted from winning ad VO rhythm and energy
 
-Return ONLY valid JSON — no markdown fences:
+   b) imagePrompt (English — for GeminiGen video generation + GPT-image-2 storyboard):
+      STRUCTURE YOUR imagePrompt LIKE THIS (use these exact section headers):
+      [STYLE] Animation style, render quality, aspect ratio 9:16 vertical
+      ${assetMode === 'character'
+        ? `[CHARACTER] "${productName}" full appearance: ${characterSheet ? characterSheet.slice(0, 150) + '...' : 'describe based on name'} — DO NOT alter appearance`
+        : assetMode === 'product'
+        ? `[PRODUCT] "${productName}" exact appearance — DO NOT alter product look`
+        : '[CONCEPT] Main visual concept for this scene'
+      }
+      [ENVIRONMENT] Detailed setting: location, atmosphere, background elements, particles, lighting mood
+      [MOTION] Specific character/object movements in this 10s clip: entry, action, reaction, exit. Be very specific (e.g. "walks into frame from left, stops center, raises product toward camera, smiles confidently")
+      [CAMERA] Shot type + movement (e.g. "Medium shot following character entry → slow push-in toward product in hand → end on product close-up")
+      [MOOD] Emotional tone keywords
+      [TEXT OVERLAY] Exact text to display in video (headline + subtext if applicable)
+      [NEGATIVE] No gore, no horror, no realistic wounds, no medical imagery, no text errors
+
+      Length: 250-400 words. More detail = better video quality.
+
+   c) textOverlay: exact text shown in video (same as [TEXT OVERLAY] in imagePrompt, for frontend display)
+
+   d) voiceDirection: one-line English description of the VO voice character (e.g. "Friendly male mascot voice, energetic, warm, like an edutainment host")
+
+5. ADAPTED ANALYSIS (mirror exact fields from winning ad analysis):
+   hookType, hookBreakdown {first3Seconds, hookWords, hookMechanism, viewerReaction},
+   overallStyle, pacing, toneOfVoice, colorPalette (array of 3),
+   emotionArc, musicVibe,
+   scriptStructure {framework, hookLine, agitationPoints[], solutionReveal, ctaLine},
+   keyMessages (array 3-4), ctaStrategy {type, wording, placement}, audioDirection
+
+═══ JSON SCHEMA ═══
+Return ONLY this JSON (no markdown):
 {
-  "videoPrompt": "150-200 word cinematic video prompt in English",
+  "videoPrompt": "200-300 word cinematic brief in English",
   "hookVariants": ["hook 1", "hook 2", "hook 3"],
-  "scriptOutline": "1) hook: ... 2) conflict: ... 3) solution: ... 4) CTA: ...",
+  "scriptOutline": "hook → conflict → solution → CTA outline",
   "adaptedScenes": [
     {
       "scene": 1,
-      "duration": "0-Xs",
-      "voiceover": "teks VO bahasa Indonesia scene 1",
-      "imagePrompt": "GPT-image-2 prompt for scene 1${assetMode === 'character' ? ` — must start with CHARACTER '${productName}': [appearance]...` : ''}"
+      "duration": "0-10s",
+      "voiceover": "[VOICE: karakter suara] Kalimat 1. Kalimat 2. Kalimat 3.",
+      "imagePrompt": "[STYLE] ... [CHARACTER/PRODUCT/CONCEPT] ... [ENVIRONMENT] ... [MOTION] ... [CAMERA] ... [MOOD] ... [TEXT OVERLAY] ... [NEGATIVE] ...",
+      "textOverlay": "HEADLINE TEXT / subtext",
+      "voiceDirection": "English voice character description"
     }
   ],
   "adaptedAnalysis": {
-    "hookType": "adapted hook type",
-    "hookBreakdown": {
-      "first3Seconds": "what happens in first 3s of adapted video",
-      "hookWords": "opening words for adapted video",
-      "hookMechanism": "why it stops scroll",
-      "viewerReaction": "intended viewer reaction"
-    },
-    "overallStyle": "visual style description adapted for product",
-    "pacing": "fast/medium/slow — adapted rhythm description",
-    "toneOfVoice": "adapted tone label",
-    "colorPalette": ["primary color", "secondary color", "accent color"],
-    "emotionArc": "emotion journey adapted for new product",
-    "musicVibe": "adapted music genre, tempo, mood",
-    "scriptStructure": {
-      "framework": "framework name (e.g. PAS, AIDA)",
-      "hookLine": "adapted hook line",
-      "agitationPoints": ["pain point 1 adapted", "pain point 2 adapted"],
-      "solutionReveal": "how product/character solves it",
-      "ctaLine": "adapted CTA line in Indonesian"
-    },
-    "keyMessages": ["message 1 adapted", "message 2 adapted", "message 3 adapted"],
-    "ctaStrategy": {
-      "type": "CTA type",
-      "wording": "CTA wording in Indonesian",
-      "placement": "when CTA appears"
-    },
-    "audioDirection": "music and VO direction for adapted video"
+    "hookType": "...",
+    "hookBreakdown": { "first3Seconds": "...", "hookWords": "...", "hookMechanism": "...", "viewerReaction": "..." },
+    "overallStyle": "...",
+    "pacing": "...",
+    "toneOfVoice": "...",
+    "colorPalette": ["color1", "color2", "color3"],
+    "emotionArc": "...",
+    "musicVibe": "...",
+    "scriptStructure": { "framework": "...", "hookLine": "...", "agitationPoints": ["...", "..."], "solutionReveal": "...", "ctaLine": "..." },
+    "keyMessages": ["...", "...", "..."],
+    "ctaStrategy": { "type": "...", "wording": "...", "placement": "..." },
+    "audioDirection": "..."
   }
-}`,
+}
+
+CRITICAL: adaptedScenes array MUST have exactly ${targetSceneCount} element(s). Count before returning.`,
       },
     ],
-    maxTokens: 3500,
+    maxTokens: 6000,
   });
 
   try {
