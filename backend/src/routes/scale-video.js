@@ -393,7 +393,7 @@ router.post('/translate-prompt', async (req, res) => {
       assetMode,
       characterPhotosBase64: Array.isArray(characterPhotosBase64) ? characterPhotosBase64 : [],
       productPhotoBase64: productPhotoBase64 || null,
-      targetDuration: 10,   // GeminiGen always generates 10-second clips — hardlock
+      targetDuration: Math.min(120, Math.max(10, Math.round((parseInt(targetDuration) || 10) / 10) * 10)), // 10-120s, multiples of 10
     });
     res.json(result);
   } catch (err) {

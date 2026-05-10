@@ -612,6 +612,38 @@ export default function ScaleVideoPage() {
               </div>
             </div>
 
+            {/* Durasi video */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Durasi Video</Label>
+                <span className="text-sm font-bold text-primary">{targetDuration}s <span className="text-xs font-normal text-muted-foreground">· {targetDuration / 10} clip{targetDuration > 10 ? 's' : ''}</span></span>
+              </div>
+              <input
+                type="range" min={10} max={120} step={10}
+                value={targetDuration}
+                onChange={(e) => setTargetDuration(Number(e.target.value))}
+                className="w-full accent-primary h-2 cursor-pointer"
+              />
+              <div className="flex justify-between text-[10px] text-muted-foreground px-0.5">
+                <span>10s</span><span>30s</span><span>60s</span><span>90s</span><span>120s</span>
+              </div>
+              <p className="text-[11px] text-muted-foreground">Tiap 10s = 1 GeminiGen clip. {targetDuration}s = {targetDuration / 10} video di-generate lalu digabung.</p>
+            </div>
+
+            {/* Analysis reference — full card */}
+            {videoAnalysis && (
+              <details className="group" open>
+                <summary className="cursor-pointer list-none flex items-center gap-2 rounded-xl border bg-muted/30 px-4 py-3 text-sm font-medium hover:bg-muted/50 transition-colors">
+                  <Sparkles className="h-4 w-4 text-primary shrink-0" />
+                  <span className="flex-1">Hasil analisis video winning</span>
+                  <ChevronRight className="h-4 w-4 text-muted-foreground group-open:rotate-90 transition-transform" />
+                </summary>
+                <div className="mt-2">
+                  <AnalysisCard analysis={videoAnalysis} />
+                </div>
+              </details>
+            )}
+
             <div className="flex gap-2 pt-1">
               <Button variant="outline" size="sm" onClick={() => setStep(1)} className="shrink-0">← Kembali</Button>
               <Button className="flex-1" onClick={() => setStep(3)}>
@@ -778,7 +810,7 @@ export default function ScaleVideoPage() {
               </div>
               <div className="flex items-center justify-between px-4 py-2.5">
                 <span className="text-xs text-muted-foreground">Format · Durasi</span>
-                <span className="text-xs font-semibold">{aspectRatio} · 10 detik</span>
+                <span className="text-xs font-semibold">{aspectRatio} · {targetDuration}s · {targetDuration / 10} clip</span>
               </div>
               <div className="flex items-center justify-between px-4 py-2.5">
                 <span className="text-xs text-muted-foreground">Model</span>
@@ -863,7 +895,7 @@ export default function ScaleVideoPage() {
             <CardTitle className="text-base flex items-center gap-2">
               <span className="h-2.5 w-2.5 rounded-full bg-emerald-500 inline-block" />
               Video Siap!
-              <span className="ml-auto text-xs font-normal text-muted-foreground">{result.productName} · {result.aspectRatio} · 10s</span>
+              <span className="ml-auto text-xs font-normal text-muted-foreground">{result.productName} · {result.aspectRatio} · {targetDuration}s</span>
             </CardTitle>
           </CardHeader>
 
