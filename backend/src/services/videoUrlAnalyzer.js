@@ -185,6 +185,8 @@ function buildGeminiPrompt() {
 
 Watch the entire video — analyze visuals, audio/speech, music, on-screen text, and pacing.
 
+SCENE RULE: Break the video into 10-second segments (each scene = exactly 10s). A 30s video = 3 scenes, a 60s video = 6 scenes. Each scene must capture what a GeminiGen AI would need to recreate that 10-second clip.
+
 OUTPUT RULES:
 - Return ONLY a single valid JSON object. No markdown fences, no prose outside JSON.
 - Use double-quotes for all strings. No literal newlines inside string values.
@@ -197,12 +199,12 @@ OUTPUT RULES:
   "scenes": [
     {
       "sceneNumber": 1,
-      "duration": "0-3s",
-      "description": "what happens visually + audio in this scene",
-      "dialogue": "exact spoken words / voiceover in this scene, empty string if silent",
+      "duration": "0-10s",
+      "description": "what happens visually in this 10s clip — shot types, action, setting, transitions",
+      "voiceover": "exact spoken words / VO in this 10s clip, empty string if silent",
       "hook": true,
       "visualElements": ["element1", "element2"],
-      "emotion": "specific emotion targeted"
+      "emotion": "specific emotion targeted in this 10s clip"
     }
   ],
   "overallStyle": "visual aesthetic, lighting, art direction, live-action or animation style",

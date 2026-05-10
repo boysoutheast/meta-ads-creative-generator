@@ -701,55 +701,28 @@ export default function ScaleVideoPage() {
                     </div>
                   )}
 
-                  {/* Script outline */}
+                  {/* Adapted Analysis Card — same format as winning video, scenes have image previews */}
+                  {(adaptedAnalysis || adaptedScenes.length > 0) && (
+                    <AnalysisCard analysis={{
+                      ...(adaptedAnalysis || {}),
+                      scenes: adaptedScenes.map((s) => ({
+                        sceneNumber: s.scene,
+                        duration: s.duration,
+                        description: s.imagePrompt,
+                        voiceover: s.voiceover,
+                        imageUrl: s.imageUrl ?? null,
+                        generatingImage: generatingSceneImages && !s.imageUrl,
+                        hook: s.scene === 1,
+                      })),
+                    }} />
+                  )}
+
+                  {/* Script outline collapsible */}
                   {scriptOutline && (
                     <details>
                       <summary className="cursor-pointer text-xs text-muted-foreground hover:text-foreground select-none">Script outline ↓</summary>
                       <p className="mt-1.5 rounded-lg border bg-muted p-2.5 text-xs leading-relaxed whitespace-pre-wrap">{scriptOutline}</p>
                     </details>
-                  )}
-
-                  {/* Storyboard — 3-col grid, portrait aspect */}
-                  {adaptedScenes.length > 0 && (
-                    <div className="space-y-2">
-                      <p className="text-xs font-semibold text-muted-foreground flex items-center gap-1.5">
-                        🎬 Storyboard — {adaptedScenes.length} scene · 10 detik
-                        {generatingSceneImages && (
-                          <span className="flex items-center gap-1 text-[10px] text-primary">
-                            <Loader2 className="h-2.5 w-2.5 animate-spin" /> generating…
-                          </span>
-                        )}
-                      </p>
-                      <div className="grid grid-cols-3 gap-2">
-                        {adaptedScenes.map((item, i) => (
-                          <div key={i} className="rounded-xl border bg-background overflow-hidden">
-                            <div className="relative bg-muted flex items-center justify-center" style={{ aspectRatio: '9/16' }}>
-                              {item.imageUrl
-                                ? <img src={item.imageUrl} alt={`Scene ${item.scene}`} className="w-full h-full object-cover" /> // eslint-disable-line @next/next/no-img-element
-                                : (
-                                  <div className="flex flex-col items-center gap-1 text-muted-foreground">
-                                    {generatingSceneImages ? <Loader2 className="h-4 w-4 animate-spin text-primary" /> : <ImageIcon className="h-4 w-4 opacity-30" />}
-                                    <span className="text-[9px]">{generatingSceneImages ? 'Generating…' : '—'}</span>
-                                  </div>
-                                )}
-                              <div className="absolute top-1 left-1 flex gap-1">
-                                <span className="text-[9px] font-bold bg-primary text-primary-foreground rounded px-1.5 py-0.5">S{item.scene}</span>
-                                <span className="text-[9px] bg-black/60 text-white rounded px-1 py-0.5">{item.duration}</span>
-                              </div>
-                            </div>
-                            <div className="p-2 space-y-1">
-                              <p className="text-[10px] leading-snug italic text-foreground/80 line-clamp-3">"{item.voiceover}"</p>
-                              {item.imagePrompt && (
-                                <details>
-                                  <summary className="cursor-pointer text-[9px] text-muted-foreground select-none">prompt ↓</summary>
-                                  <p className="mt-0.5 text-[9px] leading-relaxed text-muted-foreground bg-muted rounded p-1">{item.imagePrompt.slice(0, 140)}…</p>
-                                </details>
-                              )}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
                   )}
 
                   <div className="flex gap-2 pt-1">
@@ -1522,37 +1495,47 @@ function AnalysisCard({ analysis }: { analysis: AnyAnalysis }) {
             </summary>
             <div className="mt-2 space-y-2.5">
               {scenes.map((s, i) => (
-                <div key={i} className="rounded-md border bg-muted/30 p-2.5 space-y-1 text-[11.5px] leading-relaxed">
-                  <div className="flex items-center gap-2 mb-1">
+                <div key={i} className="rounded-md border bg-muted/30 overflow-hidden text-[11.5px] leading-relaxed">
+                  {/* Scene header */}
+                  <div className="flex items-center gap-2 px-2.5 pt-2.5 pb-1.5">
                     <Badge className="text-[10px]">Scene {s.sceneNumber ?? i + 1}</Badge>
                     {s.duration && <span className="text-muted-foreground text-[10px] font-mono">{s.duration}</span>}
                     {s.title && <span className="font-semibold">{s.title}</span>}
                     {s.hook && <Badge variant="outline" className="text-[9px] bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300 border-amber-300">HOOK</Badge>}
+                    {s.generatingImage && <span className="text-[9px] text-primary flex items-center gap-1"><span className="animate-spin inline-block">⏳</span> generating…</span>}
                   </div>
-                  {s.description && <div><b>Action:</b> {asString(s.description)}</div>}
-                  {s.action && s.action !== s.description && <div><b>Action:</b> {asString(s.action)}</div>}
-                  {s.setting && <div><b>Setting:</b> {asString(s.setting)}</div>}
-                  {s.characters && (
-                    <div><b>Characters:</b> {Array.isArray(s.characters) ? s.characters.map((c: any) => typeof c === 'object' ? `${c.role || ''}: ${c.appearance || ''}` : c).join('; ') : asString(s.characters)}</div>
+                  {/* Image preview — shown if available */}
+                  {s.imageUrl && (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={s.imageUrl} alt={`Scene ${s.sceneNumber ?? i + 1}`} className="w-full object-cover max-h-48" />
                   )}
-                  {s.dialogue && <div><b>Dialogue:</b> "{asString(s.dialogue)}"</div>}
-                  {s.textOverlay && <div><b>Text overlay:</b> "{asString(s.textOverlay)}"</div>}
-                  {s.cameraShot && <div><b>Camera:</b> {asString(s.cameraShot)} {s.cameraMovement ? `· ${asString(s.cameraMovement)}` : ''}</div>}
-                  {s.lighting && <div><b>Lighting:</b> {asString(s.lighting)}</div>}
-                  {s.colorGrading && <div><b>Color grade:</b> {asString(s.colorGrading)}</div>}
-                  {Array.isArray(s.soundEffects) && s.soundEffects.length > 0 && (
-                    <div><b>SFX:</b> {s.soundEffects.join(', ')}</div>
-                  )}
-                  {s.musicCue && <div><b>Music cue:</b> {asString(s.musicCue)}</div>}
-                  {s.transition && <div><b>Transition:</b> {asString(s.transition)}</div>}
-                  {Array.isArray(s.visualEffects) && s.visualEffects.length > 0 && (
-                    <div><b>Effects:</b> {s.visualEffects.join(', ')}</div>
-                  )}
-                  {Array.isArray(s.visualElements) && s.visualElements.length > 0 && (
-                    <div><b>Visual elements:</b> {s.visualElements.join(', ')}</div>
-                  )}
-                  {s.purpose && <div><b>Purpose:</b> {asString(s.purpose)}</div>}
-                  {s.emotion && <div><b>Emotion:</b> {asString(s.emotion)}</div>}
+                  {/* Text fields */}
+                  <div className="px-2.5 pb-2.5 pt-1 space-y-1">
+                    {s.description && <div><b>Action:</b> {asString(s.description)}</div>}
+                    {s.action && s.action !== s.description && <div><b>Action:</b> {asString(s.action)}</div>}
+                    {s.setting && <div><b>Setting:</b> {asString(s.setting)}</div>}
+                    {s.characters && (
+                      <div><b>Characters:</b> {Array.isArray(s.characters) ? s.characters.map((c: any) => typeof c === 'object' ? `${c.role || ''}: ${c.appearance || ''}` : c).join('; ') : asString(s.characters)}</div>
+                    )}
+                    {(s.voiceover || s.dialogue) && <div><b>Voiceover:</b> <i>"{asString(s.voiceover || s.dialogue)}"</i></div>}
+                    {s.textOverlay && <div><b>Text overlay:</b> "{asString(s.textOverlay)}"</div>}
+                    {s.cameraShot && <div><b>Camera:</b> {asString(s.cameraShot)} {s.cameraMovement ? `· ${asString(s.cameraMovement)}` : ''}</div>}
+                    {s.lighting && <div><b>Lighting:</b> {asString(s.lighting)}</div>}
+                    {s.colorGrading && <div><b>Color grade:</b> {asString(s.colorGrading)}</div>}
+                    {Array.isArray(s.soundEffects) && s.soundEffects.length > 0 && (
+                      <div><b>SFX:</b> {s.soundEffects.join(', ')}</div>
+                    )}
+                    {s.musicCue && <div><b>Music cue:</b> {asString(s.musicCue)}</div>}
+                    {s.transition && <div><b>Transition:</b> {asString(s.transition)}</div>}
+                    {Array.isArray(s.visualEffects) && s.visualEffects.length > 0 && (
+                      <div><b>Effects:</b> {s.visualEffects.join(', ')}</div>
+                    )}
+                    {Array.isArray(s.visualElements) && s.visualElements.length > 0 && (
+                      <div><b>Visual elements:</b> {s.visualElements.join(', ')}</div>
+                    )}
+                    {s.purpose && <div><b>Purpose:</b> {asString(s.purpose)}</div>}
+                    {s.emotion && <div><b>Emotion:</b> {asString(s.emotion)}</div>}
+                  </div>
                 </div>
               ))}
             </div>

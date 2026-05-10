@@ -126,10 +126,10 @@ async function translateVideoPrompt({
         .map((s) => {
           const sceneNum = s.sceneNumber ?? '?';
           const dur = s.duration ?? '';
-          const dialogue = (s.dialogue || '').trim();
+          const voiceover = (s.voiceover || s.dialogue || '').trim();
           const desc = (s.description || '').slice(0, 80);
-          return dialogue
-            ? `Scene ${sceneNum} (${dur}): "${dialogue}" [visual: ${desc}]`
+          return voiceover
+            ? `Scene ${sceneNum} (${dur}): VO="${voiceover}" [visual: ${desc}]`
             : `Scene ${sceneNum} (${dur}): [silent / no VO] [visual: ${desc}]`;
         })
         .join('\n')
@@ -262,15 +262,19 @@ YOUR TASKS:
        : `* Describe scene: setting, mood, visual style, lighting, camera angle. Under 100 words.`
      }
 
-5. ADAPTED ANALYSIS — mirror the winning ad analysis structure but adapted for this new ${safeDuration}s video:
+5. ADAPTED ANALYSIS — mirror the winning ad analysis structure EXACTLY (same fields as input analysis) but adapted for this new ${safeDuration}s video:
    - hookType: adapted hook type label
    - hookBreakdown: { first3Seconds, hookWords, hookMechanism, viewerReaction }
-   - overallStyle: adapted style description (keep similar visual DNA but for new product)
-   - emotionArc: adapted emotion journey (hook → conflict → relief → excitement → CTA)
+   - overallStyle: adapted visual style (keep similar DNA but for new product)
+   - pacing: adapted pacing description (fast/medium/slow + rhythm note)
+   - toneOfVoice: adapted tone (casual / formal / urgent / storytelling / educational)
+   - colorPalette: array of 3 colors that fit the adapted video mood
+   - emotionArc: adapted emotion journey (phase 1 → phase 2 → phase 3 → resolution)
+   - musicVibe: adapted music direction (genre, tempo, mood)
    - scriptStructure: { framework, hookLine, agitationPoints (array), solutionReveal, ctaLine }
    - keyMessages: array of strings (top 3-4 messages adapted for new product)
    - ctaStrategy: { type, wording, placement }
-   - audioDirection: string — music/VO direction for the adapted video
+   - audioDirection: full music + VO direction for the adapted video
 
 Return ONLY valid JSON — no markdown fences:
 {
@@ -294,7 +298,11 @@ Return ONLY valid JSON — no markdown fences:
       "viewerReaction": "intended viewer reaction"
     },
     "overallStyle": "visual style description adapted for product",
-    "emotionArc": "emotion journey adapted",
+    "pacing": "fast/medium/slow — adapted rhythm description",
+    "toneOfVoice": "adapted tone label",
+    "colorPalette": ["primary color", "secondary color", "accent color"],
+    "emotionArc": "emotion journey adapted for new product",
+    "musicVibe": "adapted music genre, tempo, mood",
     "scriptStructure": {
       "framework": "framework name (e.g. PAS, AIDA)",
       "hookLine": "adapted hook line",
