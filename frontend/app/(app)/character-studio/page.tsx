@@ -13,7 +13,7 @@ import {
 import {
   getCharacters, getProducts,
   buildCharacterSheet, getPromptTemplates, createPromptTemplate, updatePromptTemplate, deletePromptTemplate, buildSceneConfig,
-  generateScaleVideoSceneImages, generateStudioVideo, getStudioJobStatus,
+  generateScaleVideoSceneImages, generateStudioVideo, getStudioJobStatus, retryStudioVideoJob,
   type Character, type Product, type CharacterSheet, type PromptTemplate, type Storyboard, type StoryboardScene,
   type StudioJobStatus,
 } from '@/lib/api'
@@ -622,6 +622,33 @@ function StoryboardBuilderTab({ characters, products, onError }: { characters: C
     }
   }
 
+  // Retry only failed clips from existing job
+  const handleRetryVideo = async () => {
+    if (!videoJob?.id) return
+    setGeneratingVideos(true)
+    onError('')
+
+    videoPollRef.current.current = true
+    const newPoll = { current: false }
+    videoPollRef.current = newPoll
+
+    try {
+      await retryStudioVideoJob(videoJob.id)
+      // Poll same jobId
+      while (!newPoll.current) {
+        await new Promise(r => setTimeout(r, 4000))
+        if (newPoll.current) break
+        const job = await getStudioJobStatus(videoJob.id)
+        setVideoJob(job)
+        if (job.status === 'done' || job.status === 'failed') break
+      }
+    } catch (e: any) {
+      onError(e?.response?.data?.error || e.message || 'Gagal retry clip')
+    } finally {
+      setGeneratingVideos(false)
+    }
+  }
+
   const exportJson = () => {
     if (!scenes.length) return
     const data = { ...storyboardMeta, scenes: scenes.map(({ imageUrl, imgStatus, imgError, ...s }) => s) }
@@ -856,15 +883,23 @@ function StoryboardBuilderTab({ characters, products, onError }: { characters: C
                 {/* Active / done job status */}
                 {videoJob && (
                   <div className="space-y-3">
-                    <div className="flex items-center justify-between text-sm">
-                      <span className="font-medium">
-                        {videoJob.status === 'generating' && '🎬 Generating clips…'}
-                        {videoJob.status === 'merging' && '🔗 Merging clips…'}
-                        {videoJob.status === 'done' && '✅ Done!'}
-                        {videoJob.status === 'failed' && '❌ Failed'}
-                      </span>
-                      <span className="text-xs text-muted-foreground tabular-nums">{videoJob.progress}%</span>
-                    </div>
+                    {(() => {
+                      const failedCount = videoJob.clips.filter(c => !c.videoUrl && c.videoError).length
+                      const successCount = videoJob.clips.filter(c => c.videoUrl).length
+                      const isPartial = videoJob.status === 'done' && failedCount > 0
+                      return (
+                        <div className="flex items-center justify-between text-sm">
+                          <span className="font-medium">
+                            {videoJob.status === 'generating' && '🎬 Generating clips…'}
+                            {videoJob.status === 'merging' && '🔗 Merging clips…'}
+                            {videoJob.status === 'done' && !isPartial && '✅ Done!'}
+                            {isPartial && `⚠️ Partial (${successCount}/${scenes.length} clips)`}
+                            {videoJob.status === 'failed' && '❌ Failed'}
+                          </span>
+                          <span className="text-xs text-muted-foreground tabular-nums">{videoJob.progress}%</span>
+                        </div>
+                      )
+                    })()}
 
                     {/* Progress bar */}
                     <div className="w-full bg-muted rounded-full h-1.5">
@@ -884,7 +919,7 @@ function StoryboardBuilderTab({ characters, products, onError }: { characters: C
                                 <Play className="h-3 w-3 inline mr-0.5" />Clip {clip.scene} ✓
                               </a>
                             ) : clip.videoError ? (
-                              <span className="text-red-500 truncate">{clip.videoError}</span>
+                              <span className="text-red-500 truncate" title={clip.videoError}>❌ Clip {clip.scene} gagal</span>
                             ) : (
                               <span className="text-muted-foreground animate-pulse">generating…</span>
                             )}
@@ -893,12 +928,22 @@ function StoryboardBuilderTab({ characters, products, onError }: { characters: C
                       </div>
                     )}
 
+                    {/* Retry failed clips button — shown when done but some clips failed */}
+                    {videoJob.status === 'done' && videoJob.clips.some(c => !c.videoUrl && c.videoError) && (
+                      <Button size="sm" variant="outline" onClick={handleRetryVideo}
+                        disabled={generatingVideos} className="w-full border-amber-400 text-amber-700 hover:bg-amber-50">
+                        {generatingVideos
+                          ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Retrying…</>
+                          : <><RefreshCw className="h-3.5 w-3.5" /> Retry {videoJob.clips.filter(c => !c.videoUrl && c.videoError).length} Failed Clip(s)</>}
+                      </Button>
+                    )}
+
                     {/* Final merged video */}
                     {videoJob.finalVideoUrl && (
                       <div className="rounded-lg border overflow-hidden">
                         <video src={videoJob.finalVideoUrl} controls className="w-full" style={{ maxHeight: 480 }} />
                         <div className="px-3 py-2 flex items-center justify-between bg-muted/30 text-xs">
-                          <span className="font-semibold">Final Video — {scenes.length * 10}s</span>
+                          <span className="font-semibold">Final Video — {videoJob.clips.filter(c => c.videoUrl).length * 10}s ({videoJob.clips.filter(c => c.videoUrl).length}/{scenes.length} clips)</span>
                           <a href={videoJob.finalVideoUrl} download
                             className="flex items-center gap-1 text-primary underline">
                             <Download className="h-3 w-3" /> Download
@@ -926,12 +971,22 @@ function StoryboardBuilderTab({ characters, products, onError }: { characters: C
                       </details>
                     )}
 
-                    {/* Retry */}
+                    {/* Retry failed / start fresh */}
                     {videoJob.status === 'failed' && (
-                      <Button size="sm" variant="outline"
-                        onClick={() => { setVideoJob(null); setGeneratingVideos(false); }}>
-                        <RefreshCw className="h-3.5 w-3.5" /> Coba Lagi
-                      </Button>
+                      <div className="flex gap-2">
+                        {videoJob.clips.some(c => c.videoUrl) && (
+                          <Button size="sm" variant="outline" onClick={handleRetryVideo}
+                            disabled={generatingVideos} className="flex-1 border-amber-400 text-amber-700 hover:bg-amber-50">
+                            {generatingVideos
+                              ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Retrying…</>
+                              : <><RefreshCw className="h-3.5 w-3.5" /> Retry Failed Clips</>}
+                          </Button>
+                        )}
+                        <Button size="sm" variant="outline" className="flex-1"
+                          onClick={() => { setVideoJob(null); setGeneratingVideos(false); }}>
+                          <RefreshCw className="h-3.5 w-3.5" /> Mulai Ulang
+                        </Button>
+                      </div>
                     )}
                   </div>
                 )}

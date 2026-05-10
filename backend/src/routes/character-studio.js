@@ -248,12 +248,21 @@ router.post('/build-scene', requireAuth, async (req, res) => {
     }
   }
 
+  // Build a tight character lock string — used both in the GPT prompt AND as a hard inject
+  // into every scene's [CHARACTER] block after GPT returns.
+  const charLockParts = characterSheet ? [
+    characterSheet.promptPrefix,
+    characterSheet.appearanceSummary,
+    characterSheet.outfitSignature,
+    characterSheet.accessories,
+    ...(characterSheet.constraints || []),
+    characterSheet.negativePrompt,
+  ].filter(Boolean) : [];
+  const charLock = charLockParts.join('. ');
+
   const characterBlock = characterSheet
-    ? `CHARACTER: "${characterSheet.characterName}"
-Appearance: ${characterSheet.appearanceSummary || ''}
-Prompt prefix: ${characterSheet.promptPrefix || ''}
-Constraints: ${(characterSheet.constraints || []).join(' | ')}
-Voice: ${characterSheet.voiceDirection || ''}`
+    ? `CHARACTER LOCK — copy [CHARACTER] block EXACTLY as follows, do NOT paraphrase:
+"${characterSheet.characterName}": ${charLock}`
     : '';
 
   try {
@@ -262,7 +271,7 @@ Voice: ${characterSheet.voiceDirection || ''}`
       messages: [
         {
           role: 'system',
-          content: 'You are a senior video ad director specializing in animated Indonesian skincare/FMCG ads. Generate complete, production-ready scene configurations for GeminiGen grok-3 video generation. Return only valid JSON, no markdown.',
+          content: 'You are a senior video ad director specializing in animated Indonesian skincare/FMCG ads. Generate complete, production-ready scene configurations for GeminiGen grok-3 video generation. Return only valid JSON, no markdown. CRITICAL: When a CHARACTER LOCK is provided, you MUST copy it verbatim into every [CHARACTER] block — never summarize, paraphrase, or alter it.',
         },
         {
           role: 'user',
@@ -279,7 +288,7 @@ ${templateContext}
 Generate exactly ${safeCount} scenes. Each scene = 1 standalone 10-second GeminiGen clip.
 Structure each scene like this (use these section headers inside imagePrompt):
 [STYLE] animation quality, aspect ratio
-[CHARACTER] appearance + constraints
+[CHARACTER] ${charLock ? `MUST start with: "${charLock.slice(0, 120)}..." then add pose/expression for this scene` : 'appearance + constraints'}
 [ENVIRONMENT] setting, atmosphere, particles, lighting
 [MOTION] specific character/object movements — very specific (entry, action, reaction)
 [CAMERA] shot type + movement direction
@@ -317,6 +326,25 @@ Return this JSON:
 
     const config2 = JSON.parse(m[0]);
     if (!Array.isArray(config2.scenes)) config2.scenes = [];
+
+    // ── Character lock: hard-inject character description into every scene's
+    // [CHARACTER] block so GPT-image-2 gets the exact visual spec, not GPT's
+    // paraphrase. This is the primary fix for character drift in preview images.
+    if (charLock && config2.scenes.length > 0) {
+      config2.scenes = config2.scenes.map((scene) => {
+        if (!scene.imagePrompt) return scene;
+        const imagePrompt = scene.imagePrompt.replace(
+          /\[CHARACTER\]\s*[^\[]+/i,
+          `[CHARACTER] ${charLock} `
+        );
+        // If [CHARACTER] tag not found at all, prepend it
+        const finalPrompt = imagePrompt.includes('[CHARACTER]')
+          ? imagePrompt
+          : `[CHARACTER] ${charLock} ${imagePrompt}`;
+        return { ...scene, imagePrompt: finalPrompt };
+      });
+    }
+
     res.json({ storyboard: config2 });
   } catch (e) {
     console.error('[character-studio/build-scene]', e.message);
@@ -354,6 +382,10 @@ router.post('/generate-video', requireAuth, async (req, res) => {
     finalVideoUrl: null,
     error: null,
     createdAt: Date.now(),
+    // Store for retry — allows re-running only failed clips later
+    _scenes: safeScenes,
+    _characterPhotosBase64: characterPhotosBase64,
+    _aspectRatio: aspectRatio,
   };
   STUDIO_VIDEO_JOBS.set(id, job);
   _gcJob(id);
@@ -375,7 +407,45 @@ router.post('/generate-video', requireAuth, async (req, res) => {
 router.get('/jobs/:id', requireAuth, (req, res) => {
   const job = STUDIO_VIDEO_JOBS.get(req.params.id);
   if (!job) return res.status(404).json({ error: 'Job not found or expired (max 2h)' });
-  res.json(job);
+  // Strip private fields from response
+  const { _scenes, _characterPhotosBase64, _aspectRatio, ...pub } = job;
+  res.json(pub);
+});
+
+/**
+ * POST /api/character-studio/jobs/:id/retry
+ * Retry only the failed clips from a completed/failed job, then re-merge.
+ */
+router.post('/jobs/:id/retry', requireAuth, async (req, res) => {
+  const job = STUDIO_VIDEO_JOBS.get(req.params.id);
+  if (!job) return res.status(404).json({ error: 'Job not found or expired' });
+  if (!['done', 'failed'].includes(job.status)) {
+    return res.status(400).json({ error: 'Job is still running' });
+  }
+  if (!job._scenes) return res.status(400).json({ error: 'Scene data unavailable for retry' });
+
+  const failedScenes = job._scenes.filter((s) => {
+    const clip = job.clips.find((c) => c.scene === s.scene);
+    return !clip?.videoUrl;
+  });
+  if (failedScenes.length === 0) {
+    return res.status(400).json({ error: 'No failed clips to retry' });
+  }
+
+  // Reset job state (keep successful clips intact)
+  job.status = 'generating';
+  job.error = null;
+  job.finalVideoUrl = null;
+  job.progress = 0;
+  job.log.push(`--- Retrying ${failedScenes.length} failed clip(s) ---`);
+
+  res.json({ jobId: job.id });
+
+  _retryFailedClips(job, failedScenes).catch((e) => {
+    job.status = 'failed';
+    job.error = e.message;
+    console.error(`[studio-job:${job.id}] retry unhandled error:`, e.message);
+  });
 });
 
 /**
@@ -507,6 +577,123 @@ async function _runStudioVideoJob(job, scenes, characterPhotosBase64, aspectRati
     }
   } catch (err) {
     addLog(`Fatal error: ${err.message}`);
+    job.status = 'failed';
+    job.error = err.message;
+    throw err;
+  }
+}
+
+/**
+ * Retry only the failed clips, then re-merge with the existing successful ones.
+ */
+async function _retryFailedClips(job, failedScenes) {
+  const addLog = (msg) => {
+    job.log.push(msg);
+    console.log(`[studio-job:${job.id}] ${msg}`);
+  };
+
+  try {
+    addLog(`Regenerating ${failedScenes.length} failed clip(s)...`);
+
+    const sceneVariations = failedScenes.map((s) => {
+      const safeVO = (s.voiceover || '').replace(/[\r\n]+/g, ' ').replace(/"/g, "'").trim();
+      const textOverlayBlock = s.textOverlay
+        ? `\n\n[TEXT OVERLAY IN VIDEO]: "${s.textOverlay.replace(/"/g, "'")}"`
+        : '';
+      const voiceBlock = s.voiceDirection ? `\n[VO VOICE CHARACTER]: ${s.voiceDirection}` : '';
+      const fullPrompt = `${s.imagePrompt}${textOverlayBlock}\n\nNARRATION (Bahasa Indonesia):${voiceBlock}\n${safeVO || '(no voiceover)'}`;
+      const sceneImageUrl =
+        s.imageUrl && typeof s.imageUrl === 'string' && s.imageUrl.startsWith('http')
+          ? s.imageUrl
+          : null;
+      if (sceneImageUrl) addLog(`Scene ${s.scene}: storyboard image → GeminiGen reference ✓`);
+      return { imagePrompt: fullPrompt, angle: `scene_${s.scene}`, headline: '', sceneImageUrl };
+    });
+
+    // Upload fallback ref if needed
+    let refImageUrl = null;
+    const allPhotos = Array.isArray(job._characterPhotosBase64) ? job._characterPhotosBase64 : [];
+    if (allPhotos.length > 0 && sceneVariations.some((v) => !v.sceneImageUrl)) {
+      try {
+        const raw = allPhotos[0].replace(/^data:[^;]+;base64,/, '');
+        refImageUrl = await uploadImageToApimart(raw, 'image/jpeg');
+        addLog('Character ref re-uploaded ✓');
+      } catch (e) {
+        addLog(`Char ref upload failed (non-fatal): ${e.message}`);
+      }
+    }
+
+    const results = await batchGenerateVideos(sceneVariations, job._aspectRatio || '9:16', refImageUrl);
+
+    // Merge retry results back into job.clips
+    results.forEach((r, i) => {
+      const scene = failedScenes[i].scene;
+      const idx = job.clips.findIndex((c) => c.scene === scene);
+      const newClip = {
+        scene,
+        duration: failedScenes[i].duration,
+        videoUrl: r.videoUrl || null,
+        videoError: r.videoError || null,
+      };
+      if (idx >= 0) job.clips[idx] = newClip;
+      else job.clips.push(newClip);
+    });
+
+    const successClips = job.clips.filter((c) => c.videoUrl);
+    addLog(`${successClips.length}/${job._scenes.length} clip(s) successful after retry`);
+
+    if (successClips.length === 0) {
+      job.status = 'failed';
+      job.error = 'All clips failed even after retry';
+      return;
+    }
+
+    if (successClips.length === 1) {
+      job.finalVideoUrl = successClips[0].videoUrl;
+      job.status = 'done';
+      job.progress = 100;
+      addLog('Single clip — done!');
+      return;
+    }
+
+    // Re-merge all successful clips
+    job.status = 'merging';
+    job.progress = 75;
+    addLog(`Re-downloading ${successClips.length} clips for FFmpeg merge...`);
+
+    const sessionId = `studio_${job.id}_r`;
+    try {
+      await downloadClips(sessionId, successClips, ({ clipIndex, total }) => {
+        addLog(`Downloaded ${clipIndex + 1}/${total}`);
+        job.progress = 75 + Math.round(((clipIndex + 1) / total) * 10);
+      });
+
+      addLog('Re-merging with FFmpeg...');
+      job.progress = 87;
+
+      await mergeClips(
+        sessionId,
+        successClips.length,
+        ({ progress }) => { job.progress = 87 + Math.round((progress || 0) * 0.1); },
+        { exportResolution: '720p' }
+      );
+
+      const mergedLocalPath = getMergedPath(sessionId);
+      const uploadDir = path.resolve(config.upload.uploadDir);
+      const studioDir = path.join(uploadDir, 'studio_finals');
+      fs.mkdirSync(studioDir, { recursive: true });
+      const finalFileName = `studio_${job.id}.mp4`; // overwrite previous merge
+      fs.copyFileSync(mergedLocalPath, path.join(studioDir, finalFileName));
+
+      job.finalVideoUrl = `${config.backendPublicUrl}/uploads/studio_finals/${finalFileName}`;
+      job.status = 'done';
+      job.progress = 100;
+      addLog(`Retry selesai! ${successClips.length}/${job._scenes.length} clips merged.`);
+    } finally {
+      try { cleanupAll(sessionId); } catch {}
+    }
+  } catch (err) {
+    addLog(`Retry error: ${err.message}`);
     job.status = 'failed';
     job.error = err.message;
     throw err;

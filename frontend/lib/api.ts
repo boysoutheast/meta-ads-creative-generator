@@ -1069,3 +1069,9 @@ export async function getStudioJobStatus(jobId: string): Promise<StudioJobStatus
   const res = await api.get<StudioJobStatus>(`/character-studio/jobs/${jobId}`)
   return res.data
 }
+
+/** Retry only the failed clips from a done/failed job */
+export async function retryStudioVideoJob(jobId: string): Promise<{ jobId: string }> {
+  const res = await api.post(`/character-studio/jobs/${jobId}/retry`, {}, { timeout: 30000 })
+  return res.data
+}
