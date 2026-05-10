@@ -1,6 +1,6 @@
 'use client'
 import { useState, useEffect, useRef } from 'react'
-import { Loader2, Plus, Trash2, Copy, ChevronDown, ChevronUp, Sparkles, Drama, FileText, Clapperboard, Check, AlertCircle, Download, RefreshCw, Image as ImageIcon } from 'lucide-react'
+import { Loader2, Plus, Trash2, Copy, ChevronDown, ChevronUp, Sparkles, Drama, FileText, Clapperboard, Check, AlertCircle, Download, RefreshCw, Image as ImageIcon, Video, Play } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -13,8 +13,9 @@ import {
 import {
   getCharacters, getProducts,
   buildCharacterSheet, getPromptTemplates, createPromptTemplate, updatePromptTemplate, deletePromptTemplate, buildSceneConfig,
-  generateScaleVideoSceneImages,
+  generateScaleVideoSceneImages, generateStudioVideo, getStudioJobStatus,
   type Character, type Product, type CharacterSheet, type PromptTemplate, type Storyboard, type StoryboardScene,
+  type StudioJobStatus,
 } from '@/lib/api'
 
 // Extended scene type with image preview state
@@ -450,6 +451,11 @@ function StoryboardBuilderTab({ characters, products, onError }: { characters: C
   const [copied, setCopied] = useState<number | null>(null)
   const abortRef = useRef<{ current: boolean }>({ current: false })
 
+  // Phase 3: Video generation job
+  const [videoJob, setVideoJob] = useState<StudioJobStatus | null>(null)
+  const [generatingVideos, setGeneratingVideos] = useState(false)
+  const videoPollRef = useRef<{ current: boolean }>({ current: false })
+
   const selectedChar = characters.find(c => c.id === selectedCharId)
 
   // Auto-build char sheet when character changes
@@ -531,6 +537,7 @@ function StoryboardBuilderTab({ characters, products, onError }: { characters: C
       setStoryboardMeta(meta)
 
       // Normalise scene fields — GPT may return wrong types (object instead of string, etc.)
+      // All scenes start 'idle'; the sequential loop will flip each to 'generating' one at a time
       const initialScenes: SceneWithImage[] = rawScenes.map((s: any, i: number) => ({
         scene: typeof s.scene === 'number' ? s.scene : i + 1,
         duration: String(s.duration ?? `${i * 10}-${(i + 1) * 10}s`),
@@ -542,11 +549,14 @@ function StoryboardBuilderTab({ characters, products, onError }: { characters: C
         cameraMovement: String(s.cameraMovement ?? ''),
         mood: String(s.mood ?? ''),
         notes: String(s.notes ?? ''),
-        imgStatus: 'generating' as const,
+        imgStatus: 'idle' as const,
         imgError: null,
       }))
       setScenes(initialScenes)
       setExpandedScene(0)
+      // Reset video phase whenever storyboard is rebuilt
+      setVideoJob(null)
+      videoPollRef.current.current = true // abort any lingering poll
 
       // Auto-generate preview images sequentially
       abortRef.current.current = true
@@ -568,6 +578,48 @@ function StoryboardBuilderTab({ characters, products, onError }: { characters: C
     navigator.clipboard.writeText(s.imagePrompt)
     setCopied(idx)
     setTimeout(() => setCopied(null), 2000)
+  }
+
+  // Phase 3: Generate GeminiGen video clips → FFmpeg merge → final video
+  const handleGenerateVideo = async () => {
+    if (!scenes.length) return
+    setGeneratingVideos(true)
+    setVideoJob(null)
+    onError('')
+
+    // Cancel any lingering poll
+    videoPollRef.current.current = true
+    const newPoll = { current: false }
+    videoPollRef.current = newPoll
+
+    try {
+      const { jobId } = await generateStudioVideo({
+        scenes: scenes.map(s => ({
+          scene: s.scene,
+          duration: s.duration,
+          imagePrompt: s.imagePrompt,
+          voiceover: s.voiceover,
+          imageUrl: s.imageUrl ?? null,
+          textOverlay: s.textOverlay ?? null,
+          voiceDirection: s.voiceDirection ?? null,
+        })),
+        characterPhotosBase64: selectedChar?.photos?.slice(0, 10),
+        aspectRatio: '9:16',
+      })
+
+      // Poll every 4s until done or failed
+      while (!newPoll.current) {
+        await new Promise(r => setTimeout(r, 4000))
+        if (newPoll.current) break
+        const job = await getStudioJobStatus(jobId)
+        setVideoJob(job)
+        if (job.status === 'done' || job.status === 'failed') break
+      }
+    } catch (e: any) {
+      onError(e?.response?.data?.error || e.message || 'Gagal start video generation')
+    } finally {
+      setGeneratingVideos(false)
+    }
   }
 
   const exportJson = () => {
@@ -723,14 +775,24 @@ function StoryboardBuilderTab({ characters, products, onError }: { characters: C
 
               {expandedScene === i && (
                 <div className="border-t px-4 py-3 space-y-3 bg-muted/10 text-xs">
-                  {/* Preview image full size */}
-                  {s.imageUrl && (
-                    <div className="flex justify-center">
-                      <img src={s.imageUrl} alt={`Scene ${s.scene}`} // eslint-disable-line @next/next/no-img-element
-                        className="max-h-64 rounded-lg border object-contain" />
+                  {/* Preview image + per-clip video side by side if both available */}
+                  {(s.imageUrl || videoJob?.clips?.find(c => c.scene === s.scene)?.videoUrl) && (
+                    <div className="flex gap-3 justify-center flex-wrap">
+                      {s.imageUrl && (
+                        <img src={s.imageUrl} alt={`Scene ${s.scene}`} // eslint-disable-line @next/next/no-img-element
+                          className="max-h-56 rounded-lg border object-contain" />
+                      )}
+                      {(() => {
+                        const clip = videoJob?.clips?.find(c => c.scene === s.scene)
+                        if (!clip?.videoUrl) return null
+                        return (
+                          <video src={clip.videoUrl} controls
+                            className="max-h-56 rounded-lg border" />
+                        )
+                      })()}
                     </div>
                   )}
-                  {s.imgStatus === 'generating' && (
+                  {s.imgStatus === 'generating' && !s.imageUrl && (
                     <div className="flex items-center justify-center gap-2 py-4 text-muted-foreground">
                       <Loader2 className="h-4 w-4 animate-spin" /><span>Generating preview image via GPT-image-2…</span>
                     </div>
@@ -769,6 +831,113 @@ function StoryboardBuilderTab({ characters, products, onError }: { characters: C
               )}
             </Card>
           ))}
+
+          {/* ─── Phase 3: Video Generation ────────────────────────────── */}
+          {!generatingImages && (
+            <Card className="border-primary/20">
+              <CardHeader className="pb-3">
+                <CardTitle className="text-sm flex items-center gap-2">
+                  <Video className="h-4 w-4 text-primary" /> Generate Video
+                </CardTitle>
+                <CardDescription className="text-xs">
+                  Setiap scene → GeminiGen 10s clip (preview image as reference) → FFmpeg merge → 1 final video.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {/* Launch button */}
+                {(!videoJob || videoJob.status === 'failed') && (
+                  <Button onClick={handleGenerateVideo} disabled={generatingVideos} className="w-full">
+                    {generatingVideos
+                      ? <><Loader2 className="h-4 w-4 animate-spin" /> Starting job…</>
+                      : <><Video className="h-4 w-4" /> Generate {scenes.length} Clip{scenes.length > 1 ? 's' : ''} → Final Video ({scenes.length * 10}s)</>}
+                  </Button>
+                )}
+
+                {/* Active / done job status */}
+                {videoJob && (
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="font-medium">
+                        {videoJob.status === 'generating' && '🎬 Generating clips…'}
+                        {videoJob.status === 'merging' && '🔗 Merging clips…'}
+                        {videoJob.status === 'done' && '✅ Done!'}
+                        {videoJob.status === 'failed' && '❌ Failed'}
+                      </span>
+                      <span className="text-xs text-muted-foreground tabular-nums">{videoJob.progress}%</span>
+                    </div>
+
+                    {/* Progress bar */}
+                    <div className="w-full bg-muted rounded-full h-1.5">
+                      <div className="bg-primary h-1.5 rounded-full transition-all duration-500"
+                        style={{ width: `${videoJob.progress}%` }} />
+                    </div>
+
+                    {/* Per-clip status */}
+                    {videoJob.clips.length > 0 && (
+                      <div className="space-y-1.5 text-xs">
+                        {videoJob.clips.map(clip => (
+                          <div key={clip.scene} className="flex items-center gap-2">
+                            <span className="w-14 text-muted-foreground shrink-0">{clip.duration}</span>
+                            {clip.videoUrl ? (
+                              <a href={clip.videoUrl} target="_blank" rel="noopener noreferrer"
+                                className="text-primary underline truncate max-w-[200px]">
+                                <Play className="h-3 w-3 inline mr-0.5" />Clip {clip.scene} ✓
+                              </a>
+                            ) : clip.videoError ? (
+                              <span className="text-red-500 truncate">{clip.videoError}</span>
+                            ) : (
+                              <span className="text-muted-foreground animate-pulse">generating…</span>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Final merged video */}
+                    {videoJob.finalVideoUrl && (
+                      <div className="rounded-lg border overflow-hidden">
+                        <video src={videoJob.finalVideoUrl} controls className="w-full" style={{ maxHeight: 480 }} />
+                        <div className="px-3 py-2 flex items-center justify-between bg-muted/30 text-xs">
+                          <span className="font-semibold">Final Video — {scenes.length * 10}s</span>
+                          <a href={videoJob.finalVideoUrl} download
+                            className="flex items-center gap-1 text-primary underline">
+                            <Download className="h-3 w-3" /> Download
+                          </a>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Error detail */}
+                    {videoJob.status === 'failed' && videoJob.error && (
+                      <div className="rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 px-3 py-2 text-xs text-red-600">
+                        {videoJob.error}
+                      </div>
+                    )}
+
+                    {/* Generation log */}
+                    {videoJob.log.length > 0 && (
+                      <details className="text-xs">
+                        <summary className="cursor-pointer text-muted-foreground hover:text-foreground select-none">
+                          Log ({videoJob.log.length} entries)
+                        </summary>
+                        <pre className="mt-1 font-mono text-[10px] bg-muted rounded-md p-2 overflow-auto max-h-28 whitespace-pre-wrap">
+                          {videoJob.log.join('\n')}
+                        </pre>
+                      </details>
+                    )}
+
+                    {/* Retry */}
+                    {videoJob.status === 'failed' && (
+                      <Button size="sm" variant="outline"
+                        onClick={() => { setVideoJob(null); setGeneratingVideos(false); }}>
+                        <RefreshCw className="h-3.5 w-3.5" /> Coba Lagi
+                      </Button>
+                    )}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          )}
         </div>
       )}
     </div>

@@ -1026,3 +1026,46 @@ export async function buildSceneConfig(data: {
   const res = await api.post('/character-studio/build-scene', data, { timeout: 120000 })
   return res.data
 }
+
+// ─── Character Studio — Video Generation ─────────────────────────────────────
+
+export interface StudioVideoClip {
+  scene: number
+  duration: string
+  videoUrl: string | null
+  videoError: string | null
+}
+
+export interface StudioJobStatus {
+  id: string
+  status: 'generating' | 'merging' | 'done' | 'failed'
+  progress: number
+  log: string[]
+  clips: StudioVideoClip[]
+  finalVideoUrl: string | null
+  error: string | null
+}
+
+/** Start async video generation job — returns jobId immediately */
+export async function generateStudioVideo(data: {
+  scenes: Array<{
+    scene: number
+    duration: string
+    imagePrompt: string
+    voiceover: string
+    imageUrl?: string | null
+    textOverlay?: string | null
+    voiceDirection?: string | null
+  }>
+  characterPhotosBase64?: string[]
+  aspectRatio?: string
+}): Promise<{ jobId: string }> {
+  const res = await api.post('/character-studio/generate-video', data, { timeout: 30000 })
+  return res.data
+}
+
+/** Poll job status */
+export async function getStudioJobStatus(jobId: string): Promise<StudioJobStatus> {
+  const res = await api.get<StudioJobStatus>(`/character-studio/jobs/${jobId}`)
+  return res.data
+}

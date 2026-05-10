@@ -9,11 +9,21 @@
 
 const express = require('express');
 const router = express.Router();
+const fs = require('fs');
+const path = require('path');
+const { v4: uuidv4 } = require('uuid');
 const prisma = require('../db/prisma');
 const { requireAuth } = require('../middleware/auth');
-const { chatCompletion } = require('../services/apimart');
+const { chatCompletion, uploadImageToApimart } = require('../services/apimart');
 const { buildCharacterSheet } = require('../services/translatePromptService');
+const { batchGenerateVideos } = require('../services/scalingService');
+const { downloadClips, mergeClips, getMergedPath, cleanupAll } = require('../services/reelsMerger');
 const config = require('../config');
+
+// ─── In-memory job store for async video generation ───────────────────────────
+// TTL: 2h — GC'd automatically.
+const STUDIO_VIDEO_JOBS = new Map();
+function _gcJob(id) { setTimeout(() => STUDIO_VIDEO_JOBS.delete(id), 2 * 60 * 60 * 1000); }
 
 // ─── 1. CHARACTER SHEET BUILDER ───────────────────────────────────────────────
 
@@ -313,5 +323,194 @@ Return this JSON:
     res.status(500).json({ error: e.message || 'Failed to build scene config' });
   }
 });
+
+// ─── 4. VIDEO GENERATION ─────────────────────────────────────────────────────
+
+/**
+ * POST /api/character-studio/generate-video
+ * Async job: GeminiGen clips per scene → FFmpeg merge → final video URL.
+ * Returns { jobId } immediately — poll GET /jobs/:id for status.
+ *
+ * Body: {
+ *   scenes: [{ scene, duration, imagePrompt, voiceover, imageUrl?, textOverlay?, voiceDirection? }],
+ *   characterPhotosBase64?: string[]   — base64 data URLs of character ref photos (fallback ref)
+ *   aspectRatio?: '9:16' | '16:9' | '1:1'
+ * }
+ */
+router.post('/generate-video', requireAuth, async (req, res) => {
+  const { scenes, characterPhotosBase64 = [], aspectRatio = '9:16' } = req.body || {};
+  if (!Array.isArray(scenes) || scenes.length === 0) {
+    return res.status(400).json({ error: 'scenes array is required' });
+  }
+
+  const safeScenes = scenes.slice(0, 12); // max 12 = 120s
+  const id = uuidv4();
+  const job = {
+    id,
+    status: 'generating',
+    progress: 0,
+    log: [],
+    clips: [],
+    finalVideoUrl: null,
+    error: null,
+    createdAt: Date.now(),
+  };
+  STUDIO_VIDEO_JOBS.set(id, job);
+  _gcJob(id);
+
+  // Return jobId immediately — generation runs in background
+  res.json({ jobId: id });
+
+  _runStudioVideoJob(job, safeScenes, characterPhotosBase64, aspectRatio).catch((e) => {
+    job.status = 'failed';
+    job.error = e.message;
+    console.error(`[studio-job:${id}] unhandled error:`, e.message);
+  });
+});
+
+/**
+ * GET /api/character-studio/jobs/:id
+ * Poll async video generation job status.
+ */
+router.get('/jobs/:id', requireAuth, (req, res) => {
+  const job = STUDIO_VIDEO_JOBS.get(req.params.id);
+  if (!job) return res.status(404).json({ error: 'Job not found or expired (max 2h)' });
+  res.json(job);
+});
+
+/**
+ * Internal async runner for video generation + merge.
+ */
+async function _runStudioVideoJob(job, scenes, characterPhotosBase64, aspectRatio) {
+  const addLog = (msg) => {
+    job.log.push(msg);
+    console.log(`[studio-job:${job.id}] ${msg}`);
+  };
+
+  try {
+    // ── Phase 1: Build scene variations for batchGenerateVideos ──────────────
+    addLog(`Building ${scenes.length} scene variation(s) for GeminiGen...`);
+
+    const sceneVariations = scenes.map((s) => {
+      const safeVO = (s.voiceover || '').replace(/[\r\n]+/g, ' ').replace(/"/g, "'").trim();
+      const textOverlayBlock = s.textOverlay
+        ? `\n\n[TEXT OVERLAY IN VIDEO]: "${s.textOverlay.replace(/"/g, "'")}"`
+        : '';
+      const voiceBlock = s.voiceDirection
+        ? `\n[VO VOICE CHARACTER]: ${s.voiceDirection}`
+        : '';
+      const fullPrompt = `${s.imagePrompt}${textOverlayBlock}\n\nNARRATION (Bahasa Indonesia):${voiceBlock}\n${safeVO || '(no voiceover)'}`;
+      // GPT-image-2 storyboard URL used as GeminiGen reference (must be public http URL)
+      const sceneImageUrl =
+        s.imageUrl && typeof s.imageUrl === 'string' && s.imageUrl.startsWith('http')
+          ? s.imageUrl
+          : null;
+      if (sceneImageUrl) addLog(`Scene ${s.scene}: storyboard image → GeminiGen reference ✓`);
+      return {
+        imagePrompt: fullPrompt,
+        angle: `scene_${s.scene}`,
+        headline: '',
+        sceneImageUrl,
+      };
+    });
+
+    // ── Phase 2: Upload fallback character reference (used when scene has no imageUrl) ──
+    let refImageUrl = null;
+    const allPhotos = Array.isArray(characterPhotosBase64) ? characterPhotosBase64 : [];
+    if (allPhotos.length > 0 && sceneVariations.some((v) => !v.sceneImageUrl)) {
+      const raw = allPhotos[0].replace(/^data:[^;]+;base64,/, '');
+      try {
+        refImageUrl = await uploadImageToApimart(raw, 'image/jpeg');
+        addLog(`Character reference uploaded for scenes without storyboard image ✓`);
+      } catch (e) {
+        addLog(`Character ref upload failed (non-fatal): ${e.message}`);
+      }
+    }
+
+    // ── Phase 3: Generate GeminiGen video clips (batched 3 at a time) ─────────
+    addLog(`Generating ${scenes.length} GeminiGen clip(s) — this takes ~2 min per clip...`);
+    job.progress = 10;
+
+    const results = await batchGenerateVideos(sceneVariations, aspectRatio, refImageUrl);
+
+    // Map results back to per-scene structure
+    job.clips = results.map((r, i) => ({
+      scene: scenes[i]?.scene ?? i + 1,
+      duration: scenes[i]?.duration ?? `${i * 10}-${(i + 1) * 10}s`,
+      videoUrl: r.videoUrl || null,
+      videoError: r.videoError || null,
+    }));
+
+    const successClips = results.filter((r) => r.videoUrl);
+    addLog(`${successClips.length}/${scenes.length} clip(s) generated successfully`);
+    job.progress = 70;
+
+    if (successClips.length === 0) {
+      job.status = 'failed';
+      job.error = 'All video clips failed to generate. Check imagePrompts.';
+      return;
+    }
+
+    // ── Phase 4: Single clip → no merge needed ─────────────────────────────────
+    if (successClips.length === 1) {
+      job.finalVideoUrl = successClips[0].videoUrl;
+      job.status = 'done';
+      job.progress = 100;
+      addLog('Single clip — no merge needed. Done!');
+      return;
+    }
+
+    // ── Phase 5: Multiple clips → download + FFmpeg concat ────────────────────
+    job.status = 'merging';
+    addLog(`Downloading ${successClips.length} clips for FFmpeg merge...`);
+    job.progress = 75;
+
+    // reelsMerger uses /tmp/reels/{sessionId}/clip-{i}.mp4 convention
+    const sessionId = `studio_${job.id}`;
+
+    try {
+      // downloadClips expects { videoUrl } objects
+      await downloadClips(sessionId, successClips, ({ clipIndex, total }) => {
+        addLog(`Downloaded ${clipIndex + 1}/${total}`);
+        job.progress = 75 + Math.round(((clipIndex + 1) / total) * 8);
+      });
+
+      addLog('Merging with FFmpeg...');
+      job.progress = 85;
+
+      await mergeClips(
+        sessionId,
+        successClips.length,
+        ({ phase, progress }) => {
+          job.progress = 85 + Math.round((progress || 0) * 0.08);
+        },
+        { exportResolution: '720p' }
+      );
+
+      const mergedLocalPath = getMergedPath(sessionId);
+
+      // Copy to uploads dir for static serving
+      const uploadDir = path.resolve(config.upload.uploadDir);
+      const studioDir = path.join(uploadDir, 'studio_finals');
+      fs.mkdirSync(studioDir, { recursive: true });
+      const finalFileName = `studio_${job.id}.mp4`;
+      const finalPath = path.join(studioDir, finalFileName);
+      fs.copyFileSync(mergedLocalPath, finalPath);
+
+      job.finalVideoUrl = `${config.backendPublicUrl}/uploads/studio_finals/${finalFileName}`;
+      job.status = 'done';
+      job.progress = 100;
+      addLog(`Selesai! Final video (${scenes.length * 10}s): ${job.finalVideoUrl.slice(0, 60)}...`);
+    } finally {
+      // Always clean tmp session dir
+      try { cleanupAll(sessionId); } catch {}
+    }
+  } catch (err) {
+    addLog(`Fatal error: ${err.message}`);
+    job.status = 'failed';
+    job.error = err.message;
+    throw err;
+  }
+}
 
 module.exports = router;
