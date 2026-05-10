@@ -136,6 +136,8 @@ export default function ScaleVideoPage() {
     imageUrl?: string | null
     imgStatus?: 'idle' | 'generating' | 'done' | 'error'
     imgError?: string | null
+    textOverlay?: string | null
+    voiceDirection?: string | null
   }>>([])
   const [generatingSceneImages, setGeneratingSceneImages] = useState(false)
   const sceneImgAbortRef = useRef<{ current: boolean }>({ current: false })
