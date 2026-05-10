@@ -321,10 +321,13 @@ function TemplateManagerTab({ characters, onError }: { characters: Character[]; 
             </div>
             <div className="space-y-1">
               <Label className="text-xs">Link ke Karakter (opsional)</Label>
-              <Select value={form.characterId} onValueChange={v => setForm(f => ({ ...f, characterId: v }))}>
+              <Select
+                value={form.characterId || '__none__'}
+                onValueChange={v => setForm(f => ({ ...f, characterId: v === '__none__' ? '' : v }))}
+              >
                 <SelectTrigger><SelectValue placeholder="Pilih karakter..." /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">Tidak ada</SelectItem>
+                  <SelectItem value="__none__">Tidak ada</SelectItem>
                   {characters.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
                 </SelectContent>
               </Select>
@@ -517,10 +520,31 @@ function StoryboardBuilderTab({ characters, products, onError }: { characters: C
         productDesc: productDesc || undefined,
         sceneCount, style, mood: mood || undefined,
       })
-      const { scenes: rawScenes, ...meta } = res.storyboard
+
+      // Defensive: guard against unexpected server response shape
+      const storyboard = res?.storyboard
+      if (!storyboard || typeof storyboard !== 'object') {
+        throw new Error('Server returned invalid storyboard response')
+      }
+      const rawScenes = Array.isArray(storyboard.scenes) ? storyboard.scenes : []
+      const { scenes: _ignored, ...meta } = storyboard as any
       setStoryboardMeta(meta)
-      // Init scenes with generating status for images
-      const initialScenes: SceneWithImage[] = rawScenes.map(s => ({ ...s, imgStatus: 'generating' as const, imgError: null }))
+
+      // Normalise scene fields — GPT may return wrong types (object instead of string, etc.)
+      const initialScenes: SceneWithImage[] = rawScenes.map((s: any, i: number) => ({
+        scene: typeof s.scene === 'number' ? s.scene : i + 1,
+        duration: String(s.duration ?? `${i * 10}-${(i + 1) * 10}s`),
+        sceneType: String(s.sceneType ?? 'custom'),
+        imagePrompt: String(s.imagePrompt ?? ''),
+        voiceover: String(s.voiceover ?? ''),
+        voiceDirection: String(s.voiceDirection ?? ''),
+        textOverlay: String(s.textOverlay ?? ''),
+        cameraMovement: String(s.cameraMovement ?? ''),
+        mood: String(s.mood ?? ''),
+        notes: String(s.notes ?? ''),
+        imgStatus: 'generating' as const,
+        imgError: null,
+      }))
       setScenes(initialScenes)
       setExpandedScene(0)
 
@@ -531,6 +555,7 @@ function StoryboardBuilderTab({ characters, products, onError }: { characters: C
       const assetPhotos = selectedChar?.photos?.slice(0, 10)
       setGeneratingImages(true)
       generateImagesSequential(initialScenes, assetPhotos, newAbort)
+        .catch(e => console.error('[storyboard] image generation error:', e))
         .finally(() => setGeneratingImages(false))
     } catch (e: any) {
       onError(e?.response?.data?.error || e.message || 'Gagal build storyboard')
@@ -574,10 +599,13 @@ function StoryboardBuilderTab({ characters, products, onError }: { characters: C
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
               <Label>Karakter (opsional)</Label>
-              <Select value={selectedCharId} onValueChange={setSelectedCharId}>
+              <Select
+                value={selectedCharId || '__none__'}
+                onValueChange={v => setSelectedCharId(v === '__none__' ? '' : v)}
+              >
                 <SelectTrigger><SelectValue placeholder="Pilih karakter..." /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">Tidak ada</SelectItem>
+                  <SelectItem value="__none__">Tidak ada</SelectItem>
                   {characters.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
                 </SelectContent>
               </Select>
