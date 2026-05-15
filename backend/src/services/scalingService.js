@@ -306,7 +306,7 @@ Return only valid JSON, no markdown, no explanation.`;
 // Splitting into batches of 5 keeps each response under ~3k tokens.
 // Batches run in parallel so total latency ~= one single batch call.
 
-const ANGLE_BATCH_SIZE = 5;
+const ANGLE_BATCH_SIZE = 3;
 
 async function _callAnglesForBatch(
   batchAngles,
@@ -501,13 +501,38 @@ async function generateScalingAngles(
     })
   );
 
-  const angles = batchResults.flatMap((r, idx) => {
+  // First pass — collect successes and identify failed batches for retry
+  const angles = [];
+  const failedBatches = [];
+
+  batchResults.forEach((r, idx) => {
     if (r.status === 'rejected') {
-      console.warn(`[generateScalingAngles] batch ${idx} failed:`, r.reason?.message);
-      return [];
+      console.warn(`[generateScalingAngles] batch ${idx} failed: ${r.reason?.message} — will retry individually`);
+      failedBatches.push(batches[idx]);
+    } else {
+      angles.push(...(r.value || []));
     }
-    return r.value || [];
   });
+
+  // Retry failed batches one angle at a time — reduces payload size to avoid 500s
+  if (failedBatches.length > 0) {
+    const individualAngles = failedBatches.flat();
+    console.log(`[generateScalingAngles] retrying ${individualAngles.length} angle(s) individually…`);
+
+    const retryResults = await Promise.allSettled(
+      individualAngles.map((angle) =>
+        _callAnglesForBatch([angle], winningAnalysis, productName, productVisualDescription, productDescription, masterImagePrompt)
+      )
+    );
+
+    retryResults.forEach((r, i) => {
+      if (r.status === 'rejected') {
+        console.warn(`[generateScalingAngles] individual retry for "${individualAngles[i]}" failed:`, r.reason?.message);
+      } else {
+        angles.push(...(r.value || []));
+      }
+    });
+  }
 
   console.log(`[generateScalingAngles] got ${angles.length} / ${anglesToGenerate.length} angles`);
   return angles;
